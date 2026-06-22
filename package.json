@@ -1,0 +1,13 @@
+{
+  "name": "franken-draft-tool",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Frontend and backend services for FrankenDraftTool.",
+  "scripts": {
+    "dev:backend": "node services/backend/server.js",
+    "start:backend": "node services/backend/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
