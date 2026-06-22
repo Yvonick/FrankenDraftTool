@@ -18,17 +18,43 @@
         place-items: center;
       }
 
+      main {
+        display: grid;
+        gap: 1rem;
+        justify-items: center;
+      }
+
       h1 {
         margin: 0;
         font-size: clamp(2.5rem, 8vw, 6rem);
         font-weight: 700;
         letter-spacing: 0;
       }
+
+      p {
+        margin: 0;
+        color: #d8cfbd;
+        font-size: clamp(1rem, 2.5vw, 1.35rem);
+      }
     </style>
   </head>
   <body>
     <main>
       <h1>FrankenDraftTool</h1>
+      <p><span id="open-pages">0</span> open right now</p>
     </main>
+    <script>
+      const openPages = document.querySelector("#open-pages");
+      const presence = new EventSource("/api/presence");
+
+      presence.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        openPages.textContent = String(data.openPages);
+      };
+
+      presence.onerror = () => {
+        openPages.textContent = "?";
+      };
+    </script>
   </body>
 </html>

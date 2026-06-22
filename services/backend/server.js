@@ -3,6 +3,7 @@ const http = require("node:http");
 const port = Number(process.env.PORT || 3000);
 const serviceName = "franken-draft-tool-backend";
 const frontendOrigin = process.env.FRONTEND_ORIGIN || "*";
+const presenceClients = new Set();
 
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, {
@@ -11,6 +12,34 @@ function sendJson(response, statusCode, body) {
     "Access-Control-Allow-Origin": frontendOrigin
   });
   response.end(JSON.stringify(body));
+}
+
+function sendPresenceEvent(response) {
+  response.write(`data: ${JSON.stringify({ openPages: presenceClients.size })}\n\n`);
+}
+
+function broadcastPresence() {
+  for (const client of presenceClients) {
+    sendPresenceEvent(client);
+  }
+}
+
+function handlePresenceStream(request, response) {
+  response.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-store, no-transform",
+    "Connection": "keep-alive",
+    "Access-Control-Allow-Origin": frontendOrigin
+  });
+
+  presenceClients.add(response);
+  sendPresenceEvent(response);
+  broadcastPresence();
+
+  request.on("close", () => {
+    presenceClients.delete(response);
+    broadcastPresence();
+  });
 }
 
 const server = http.createServer((request, response) => {
@@ -32,10 +61,16 @@ const server = http.createServer((request, response) => {
     return;
   }
 
+  if (url.pathname === "/api/presence") {
+    handlePresenceStream(request, response);
+    return;
+  }
+
   if (url.pathname === "/" || url.pathname === "/api/health") {
     const body = {
       status: "ok",
-      service: serviceName
+      service: serviceName,
+      openPages: presenceClients.size
     };
 
     if (request.method === "HEAD") {
