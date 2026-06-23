@@ -61,3 +61,5 @@ The frontend also opens a live presence stream at `/api/presence` locally, or di
 Rooms are also stored in memory for now. The home page can create a numbered room at `/rooms/{roomNumber}`. Anyone with that URL can join, choose to sit down with a display name, or spectate. Rooms start with 6 seats, the creator can change that limit, and spectators can sit down later if a seat is available.
 
 The room creator can configure and launch a draft once the room is full. The current prototype includes one generated Testing Pool with 10 item types and 50 items per type. Drafts randomly seat players around the table, deal starting bags from the pool, let players lock legal picks from their current bag, pass remaining bag contents clockwise, and reveal all drafted items when every bag is empty.
+
+The host can restart an active or completed draft back to setup. Draft views can be grouped by item type or pick order. Named spectators can be promoted to super spectators, which lets them see player draft areas and current bags while a draft is active.

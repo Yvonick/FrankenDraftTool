@@ -142,7 +142,8 @@
 
       .settings-grid,
       .item-grid,
-      .reveal-grid {
+      .reveal-grid,
+      .spectator-grid {
         width: 100%;
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
@@ -192,19 +193,63 @@
       .round-table {
         width: min(100%, 32rem);
         aspect-ratio: 1;
-        display: grid;
-        place-items: center;
+        position: relative;
         border: 2px solid #6a6d72;
         border-radius: 50%;
-        padding: 2rem;
+        background: #202327;
       }
 
-      .round-table ol {
-        margin: 0;
-        padding-left: 1.5rem;
+      .table-center {
+        position: absolute;
+        inset: 34%;
         display: grid;
-        gap: 0.4rem;
-        text-align: left;
+        place-items: center;
+        border: 1px solid #4a4d52;
+        border-radius: 50%;
+        color: #d8cfbd;
+        font-weight: 700;
+      }
+
+      .table-player {
+        width: 8.5rem;
+        min-height: 4rem;
+        position: absolute;
+        left: var(--x);
+        top: var(--y);
+        transform: translate(-50%, -50%);
+        display: grid;
+        gap: 0.2rem;
+        place-items: center;
+        padding: 0.5rem;
+        border: 1px solid #6a6d72;
+        border-radius: 0.5rem;
+        background: #17191c;
+        font-size: 0.9rem;
+      }
+
+      .table-player strong,
+      .table-player span {
+        max-width: 100%;
+        overflow-wrap: anywhere;
+      }
+
+      .group-section {
+        display: grid;
+        gap: 0.5rem;
+        align-content: start;
+      }
+
+      .group-section h4 {
+        color: #b7d7c0;
+      }
+
+      .spectator-card {
+        display: grid;
+        gap: 0.5rem;
+        padding: 0.75rem;
+        border: 1px solid #4a4d52;
+        border-radius: 0.5rem;
+        background: #202327;
       }
 
       .modal-backdrop {
@@ -245,6 +290,7 @@
       <div class="actions">
         <button id="share-room" type="button">Share Room</button>
         <button id="sit-down" class="secondary" type="button" hidden>Sit Down</button>
+        <button id="restart-draft" class="secondary" type="button" hidden>Restart Draft</button>
       </div>
       <p id="room-status"></p>
 
@@ -271,7 +317,7 @@
         </div>
       </section>
 
-      <section class="panel">
+      <section class="panel" id="seating-panel">
         <h3>Seated</h3>
         <ul id="seated-people"></ul>
         <p id="spectator-count"></p>
@@ -279,9 +325,24 @@
 
       <section class="panel" id="table-panel" hidden>
         <h3>Round Table</h3>
-        <div class="round-table">
-          <ol id="table-order"></ol>
-        </div>
+        <div class="round-table" id="round-table"></div>
+      </section>
+
+      <section class="panel" id="spectator-panel">
+        <h3>Spectators</h3>
+        <p id="spectator-summary"></p>
+        <div class="spectator-grid" id="named-spectators"></div>
+      </section>
+
+      <section class="panel" id="draft-display-panel" hidden>
+        <h3>Draft Display</h3>
+        <label>
+          Organize drafted items by
+          <select id="draft-grouping">
+            <option value="type">Item type</option>
+            <option value="pick">Pick order</option>
+          </select>
+        </label>
       </section>
 
       <section class="panel" id="player-draft-panel" hidden>
@@ -291,6 +352,11 @@
         <button id="lock-choice" type="button">Lock Choices</button>
         <h4>Drafted Items</h4>
         <div class="item-grid" id="private-drafted-items"></div>
+      </section>
+
+      <section class="panel" id="super-draft-panel" hidden>
+        <h3>Super Spectator View</h3>
+        <div class="reveal-grid" id="super-draft-areas"></div>
       </section>
 
       <section class="panel" id="reveal-panel" hidden>
@@ -343,9 +409,14 @@
       const roomNumber = document.querySelector("#room-number");
       const shareRoom = document.querySelector("#share-room");
       const sitDown = document.querySelector("#sit-down");
+      const restartDraft = document.querySelector("#restart-draft");
       const roomStatus = document.querySelector("#room-status");
+      const seatingPanel = document.querySelector("#seating-panel");
       const seatedPeople = document.querySelector("#seated-people");
       const spectatorCount = document.querySelector("#spectator-count");
+      const spectatorPanel = document.querySelector("#spectator-panel");
+      const spectatorSummary = document.querySelector("#spectator-summary");
+      const namedSpectators = document.querySelector("#named-spectators");
       const roomMessage = document.querySelector("#room-message");
       const creatorPanel = document.querySelector("#creator-panel");
       const seatLimitInput = document.querySelector("#seat-limit-input");
@@ -355,12 +426,16 @@
       const saveRoomSettings = document.querySelector("#save-room-settings");
       const startDraft = document.querySelector("#start-draft");
       const tablePanel = document.querySelector("#table-panel");
-      const tableOrder = document.querySelector("#table-order");
+      const roundTable = document.querySelector("#round-table");
+      const draftDisplayPanel = document.querySelector("#draft-display-panel");
       const playerDraftPanel = document.querySelector("#player-draft-panel");
+      const draftGrouping = document.querySelector("#draft-grouping");
       const draftInstruction = document.querySelector("#draft-instruction");
       const currentBag = document.querySelector("#current-bag");
       const lockChoice = document.querySelector("#lock-choice");
       const privateDraftedItems = document.querySelector("#private-drafted-items");
+      const superDraftPanel = document.querySelector("#super-draft-panel");
+      const superDraftAreas = document.querySelector("#super-draft-areas");
       const revealPanel = document.querySelector("#reveal-panel");
       const revealedDrafts = document.querySelector("#revealed-drafts");
       const joinModal = document.querySelector("#join-modal");
@@ -487,6 +562,58 @@
         }
       }
 
+      function groupItemsByType(items) {
+        const grouped = new Map();
+
+        for (const item of items) {
+          if (!grouped.has(item.type)) {
+            grouped.set(item.type, []);
+          }
+
+          grouped.get(item.type).push(item);
+        }
+
+        return [...grouped.entries()].map(([label, groupItems]) => ({ label, items: groupItems }));
+      }
+
+      function groupItemsByPick(groups = [], fallbackItems = []) {
+        if (groups.length === 0 && fallbackItems.length > 0) {
+          return [{ label: "Pick 1", items: fallbackItems }];
+        }
+
+        return groups.map((group) => ({
+          label: `Pick ${group.pickNumber}`,
+          items: group.items
+        }));
+      }
+
+      function renderGroupedItems(container, items, groups = []) {
+        container.replaceChildren();
+
+        if (items.length === 0) {
+          const empty = document.createElement("p");
+          empty.textContent = "None yet";
+          container.append(empty);
+          return;
+        }
+
+        const sections = draftGrouping.value === "pick"
+          ? groupItemsByPick(groups, items)
+          : groupItemsByType(items);
+
+        for (const section of sections) {
+          const wrapper = document.createElement("section");
+          wrapper.className = "group-section";
+          const title = document.createElement("h4");
+          title.textContent = section.label;
+          const grid = document.createElement("div");
+          grid.className = "item-grid";
+          wrapper.append(title, grid);
+          renderItems(grid, section.items);
+          container.append(wrapper);
+        }
+      }
+
       function poolById(poolId) {
         return pools.find((pool) => pool.id === poolId);
       }
@@ -548,18 +675,72 @@
         return Boolean(sessionStorage.getItem(storageKey(currentRoomNumber, "creatorToken")));
       }
 
+      function renderSpectators(room) {
+        spectatorSummary.textContent = `${room.spectators} spectator${room.spectators === 1 ? "" : "s"}`;
+        spectatorCount.textContent = spectatorSummary.textContent;
+        namedSpectators.replaceChildren();
+
+        if (room.namedSpectators.length === 0) {
+          const empty = document.createElement("p");
+          empty.textContent = "No named spectators";
+          namedSpectators.append(empty);
+          return;
+        }
+
+        for (const spectator of room.namedSpectators) {
+          const card = document.createElement("section");
+          card.className = "spectator-card";
+          const name = document.createElement("strong");
+          name.textContent = spectator.name;
+          const status = document.createElement("span");
+          status.textContent = spectator.superSpectator ? "Super spectator" : "Spectator";
+          card.append(name, status);
+
+          if (isCreator()) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "secondary";
+            button.dataset.participantId = spectator.id;
+            button.dataset.superSpectator = spectator.superSpectator ? "false" : "true";
+            button.textContent = spectator.superSpectator ? "Remove Super" : "Make Super";
+            card.append(button);
+          }
+
+          namedSpectators.append(card);
+        }
+      }
+
       function renderTable(draft) {
         tablePanel.hidden = draft.status === "not_started";
-        tableOrder.replaceChildren();
+        roundTable.replaceChildren();
 
         if (draft.status === "not_started") {
           return;
         }
 
+        const center = document.createElement("div");
+        center.className = "table-center";
+        center.textContent = `${latestRoom.spectators} watching`;
+        roundTable.append(center);
+
+        const total = draft.table.length;
+
         for (const player of draft.table) {
-          const item = document.createElement("li");
-          item.textContent = `${player.seat}. ${player.name}`;
-          tableOrder.append(item);
+          const angle = (Math.PI * 2 * (player.seat - 1)) / total - Math.PI / 2;
+          const card = document.createElement("div");
+          card.className = "table-player";
+          card.style.setProperty("--x", `${50 + Math.cos(angle) * 42}%`);
+          card.style.setProperty("--y", `${50 + Math.sin(angle) * 42}%`);
+          const name = document.createElement("strong");
+          name.textContent = player.name;
+          const seat = document.createElement("span");
+          seat.textContent = `Seat ${player.seat}`;
+          const queue = document.createElement("span");
+          queue.textContent = `${player.queueLength} bag${player.queueLength === 1 ? "" : "s"} queued`;
+          const looking = document.createElement("span");
+          looking.textContent = player.lookingAtBag ? "Looking at a bag" : "No current bag";
+          card.append(name, seat, queue, looking);
+          roundTable.append(card);
         }
       }
 
@@ -575,7 +756,7 @@
         if (!currentPlayer.currentBag) {
           draftInstruction.textContent = currentPlayer.queueLength === 0
             ? "No bags in your queue."
-            : "Waiting for your next bag.";
+            : `${currentPlayer.queueLength} bag${currentPlayer.queueLength === 1 ? "" : "s"} in your queue. Waiting for your next bag.`;
           lockChoice.hidden = true;
           return;
         }
@@ -588,7 +769,7 @@
         }
 
         const eligible = new Set(bag.eligibleItemIds);
-        draftInstruction.textContent = `Select ${bag.requiredPickCount} item${bag.requiredPickCount === 1 ? "" : "s"} from this bag.`;
+        draftInstruction.textContent = `${currentPlayer.queueLength} bag${currentPlayer.queueLength === 1 ? "" : "s"} in your queue. Select ${bag.requiredPickCount} item${bag.requiredPickCount === 1 ? "" : "s"} from this bag.`;
 
         for (const item of bag.items) {
           currentBag.append(renderItemCard(item, {
@@ -610,7 +791,35 @@
         }
 
         renderCurrentBag(currentPlayer);
-        renderItems(privateDraftedItems, currentPlayer.draftedItems);
+        renderGroupedItems(privateDraftedItems, currentPlayer.draftedItems, currentPlayer.draftedGroups);
+      }
+
+      function renderSuperSpectatorDraft(draft) {
+        superDraftPanel.hidden = draft.status !== "active" || !draft.superSpectator;
+        superDraftAreas.replaceChildren();
+
+        if (superDraftPanel.hidden) {
+          return;
+        }
+
+        for (const player of draft.superSpectator.players) {
+          const section = document.createElement("section");
+          section.className = "item-card";
+          const title = document.createElement("h4");
+          title.textContent = `${player.name} (${player.queueLength} bag${player.queueLength === 1 ? "" : "s"})`;
+          const bagTitle = document.createElement("p");
+          bagTitle.textContent = player.currentBag ? "Current bag" : "No current bag";
+          const bagGrid = document.createElement("div");
+          bagGrid.className = "item-grid";
+          const draftedTitle = document.createElement("p");
+          draftedTitle.textContent = "Drafted";
+          const draftedGrid = document.createElement("div");
+          draftedGrid.className = "item-grid";
+          section.append(title, bagTitle, bagGrid, draftedTitle, draftedGrid);
+          renderItems(bagGrid, player.currentBag?.items || []);
+          renderGroupedItems(draftedGrid, player.draftedItems, player.draftedGroups);
+          superDraftAreas.append(section);
+        }
       }
 
       function renderReveal(draft) {
@@ -629,14 +838,16 @@
           const items = document.createElement("div");
           items.className = "item-grid";
           section.append(title, items);
-          renderItems(items, player.items);
+          renderGroupedItems(items, player.items, player.groups);
           revealedDrafts.append(section);
         }
       }
 
       function renderDraft(draft) {
+        draftDisplayPanel.hidden = draft.status === "not_started";
         renderTable(draft);
         renderPlayerDraft(draft);
+        renderSuperSpectatorDraft(draft);
         renderReveal(draft);
 
         if (draft.status === "active" && !draft.currentPlayer) {
@@ -652,7 +863,7 @@
         latestRoom = data;
         renderSeated(data.seated);
         roomStatus.textContent = `${data.seated.length} of ${data.maxSeats} seats filled`;
-        spectatorCount.textContent = `${data.spectators} spectator${data.spectators === 1 ? "" : "s"}`;
+        renderSpectators(data);
         seatLimitInput.value = data.maxSeats;
 
         if (data.draft.status === "not_started") {
@@ -662,6 +873,8 @@
         const roomIsFull = data.seated.length === data.maxSeats;
         const draftNotStarted = data.draft.status === "not_started";
         creatorPanel.hidden = !isCreator() || !draftNotStarted;
+        restartDraft.hidden = !isCreator() || draftNotStarted;
+        seatingPanel.hidden = !draftNotStarted;
         startDraft.disabled = !roomIsFull;
         sitDown.hidden = currentRole !== "spectator" || !draftNotStarted;
         renderDraft(data.draft);
@@ -871,6 +1084,60 @@
         roomMessage.textContent = "Draft started.";
       }
 
+      async function handleRestartDraft() {
+        restartDraft.disabled = true;
+        const creatorToken = sessionStorage.getItem(storageKey(currentRoomNumber, "creatorToken"));
+        const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/restart`), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            creatorToken,
+            participantId: currentViewerId
+          })
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          roomMessage.textContent = "Could not restart the draft.";
+          restartDraft.disabled = false;
+          return;
+        }
+
+        settingsInitialized = false;
+        selectedItemIds = new Set();
+        currentBagId = null;
+        renderRoom(data);
+        roomMessage.textContent = "Draft reset.";
+        restartDraft.disabled = false;
+      }
+
+      async function setSuperSpectator(participantId, superSpectator) {
+        const creatorToken = sessionStorage.getItem(storageKey(currentRoomNumber, "creatorToken"));
+        const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/spectators/promote`), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            creatorToken,
+            participantId,
+            viewerId: currentViewerId,
+            superSpectator
+          })
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          roomMessage.textContent = "Could not update spectator permissions.";
+          return;
+        }
+
+        renderRoom(data);
+        roomMessage.textContent = "Spectator permissions updated.";
+      }
+
       async function lockCurrentChoice() {
         if (!latestRoom?.draft.currentPlayer?.currentBag) {
           return;
@@ -917,8 +1184,9 @@
       });
 
       joinSpectate.addEventListener("click", () => {
+        const name = joinName.value.trim();
         closeJoinModal();
-        connectToRoom("spectator");
+        connectToRoom("spectator", name);
       });
 
       sitDown.addEventListener("click", openSitModal);
@@ -969,9 +1237,26 @@
         renderTypeInputs(pool, pool.defaultParameters.itemsPerType);
       });
 
+      namedSpectators.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-participant-id]");
+
+        if (!button) {
+          return;
+        }
+
+        setSuperSpectator(button.dataset.participantId, button.dataset.superSpectator === "true");
+      });
+
+      draftGrouping.addEventListener("change", () => {
+        if (latestRoom) {
+          renderRoom(latestRoom);
+        }
+      });
+
       shareRoom.addEventListener("click", copyShareUrl);
       saveRoomSettings.addEventListener("click", () => saveSettings());
       startDraft.addEventListener("click", handleStartDraft);
+      restartDraft.addEventListener("click", handleRestartDraft);
       lockChoice.addEventListener("click", lockCurrentChoice);
 
       const roomMatch = window.location.pathname.match(/^\/rooms\/(\d{6})$/);

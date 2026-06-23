@@ -137,6 +137,13 @@ function getRoomSnapshot(roomNumber, viewerId = null) {
     spectators: [...room.participants.values()]
       .filter((participant) => participant.role === "spectator")
       .length,
+    namedSpectators: [...room.participants.values()]
+      .filter((participant) => participant.role === "spectator" && participant.name)
+      .map((participant) => ({
+        id: participant.id,
+        name: participant.name,
+        superSpectator: Boolean(participant.superSpectator)
+      })),
     draft: getDraftSnapshot(room, viewerId)
   };
 }
@@ -162,6 +169,11 @@ function cleanName(name) {
 
   const cleaned = String(name).trim().replace(/\s+/g, " ").slice(0, 40);
   return cleaned || fallback;
+}
+
+function cleanOptionalName(name) {
+  const cleaned = String(name || "").trim().replace(/\s+/g, " ").slice(0, 40);
+  return cleaned || null;
 }
 
 function cleanSeatLimit(maxSeats) {
@@ -347,9 +359,10 @@ function handleRoomStream(roomNumber, url, request, response) {
 
   const participantId = getParticipantId(url.searchParams.get("participantId"));
   const connectionToken = crypto.randomUUID();
+  const existingParticipant = room.participants.get(participantId);
   const requestedRole = url.searchParams.get("role") === "seated" ? "seated" : "spectator";
   const draftPlayer = room.draft?.players.find((player) => player.id === participantId);
-  const currentlySeated = room.participants.get(participantId)?.role === "seated";
+  const currentlySeated = existingParticipant?.role === "seated";
   const seatedCount = getSeatedParticipants(room).length;
   const canSit = requestedRole === "seated"
     && (!room.draft || draftPlayer)
@@ -357,7 +370,7 @@ function handleRoomStream(roomNumber, url, request, response) {
   const role = canSit ? "seated" : "spectator";
   const name = role === "seated"
     ? (draftPlayer?.name || cleanName(url.searchParams.get("name")))
-    : null;
+    : cleanOptionalName(url.searchParams.get("name")) || existingParticipant?.name || null;
   const seatDenied = requestedRole === "seated" && role !== "seated";
 
   response.writeHead(200, {
@@ -371,11 +384,18 @@ function handleRoomStream(roomNumber, url, request, response) {
     id: participantId,
     role,
     name,
+    superSpectator: role === "spectator" && Boolean(existingParticipant?.superSpectator),
     connectionToken
   });
   room.clients.set(response, { participantId });
   response.write("event: viewer\n");
-  response.write(`data: ${JSON.stringify({ id: participantId, role, name, seatDenied })}\n\n`);
+  response.write(`data: ${JSON.stringify({
+    id: participantId,
+    role,
+    name,
+    seatDenied,
+    superSpectator: role === "spectator" && Boolean(existingParticipant?.superSpectator)
+  })}\n\n`);
   broadcastRoom(roomNumber);
 
   request.on("close", () => {
@@ -406,6 +426,36 @@ function getRequiredPickCount(player, bag, draft) {
   return Math.min(draft.picksPerBag, eligibleCount);
 }
 
+function getTablePlayerSnapshot(player) {
+  return {
+    id: player.id,
+    name: player.name,
+    seat: player.seat,
+    queueLength: player.queue.length,
+    lookingAtBag: Boolean(player.queue[0])
+  };
+}
+
+function getPlayerDraftView(player, draft, includeCurrentBag) {
+  const bag = player.queue[0] || null;
+
+  return {
+    playerId: player.id,
+    name: player.name,
+    queueLength: player.queue.length,
+    draftedItems: player.draftedItems,
+    draftedGroups: player.draftedGroups,
+    currentBag: includeCurrentBag && bag ? {
+      id: bag.id,
+      items: bag.items,
+      eligibleItemIds: bag.items
+        .filter((item) => canPlayerDraftItem(player, item, draft))
+        .map((item) => item.id),
+      requiredPickCount: getRequiredPickCount(player, bag, draft)
+    } : null
+  };
+}
+
 function getDraftSnapshot(room, viewerId) {
   if (!room.draft) {
     return {
@@ -415,11 +465,9 @@ function getDraftSnapshot(room, viewerId) {
   }
 
   const draft = room.draft;
-  const table = draft.players.map((player) => ({
-    id: player.id,
-    name: player.name,
-    seat: player.seat
-  }));
+  const viewer = room.participants.get(viewerId);
+  const isSuperSpectator = viewer?.role === "spectator" && viewer.superSpectator;
+  const table = draft.players.map(getTablePlayerSnapshot);
 
   if (draft.status === "complete") {
     return {
@@ -431,13 +479,13 @@ function getDraftSnapshot(room, viewerId) {
       revealedDrafts: draft.players.map((player) => ({
         playerId: player.id,
         name: player.name,
-        items: player.draftedItems
+        items: player.draftedItems,
+        groups: player.draftedGroups
       }))
     };
   }
 
   const player = draft.players.find((candidate) => candidate.id === viewerId);
-  const bag = player?.queue[0] || null;
 
   return {
     status: "active",
@@ -445,19 +493,9 @@ function getDraftSnapshot(room, viewerId) {
     picksPerBag: draft.picksPerBag,
     itemsPerType: draft.itemsPerType,
     table,
-    currentPlayer: player ? {
-      playerId: player.id,
-      name: player.name,
-      queueLength: player.queue.length,
-      draftedItems: player.draftedItems,
-      currentBag: bag ? {
-        id: bag.id,
-        items: bag.items,
-        eligibleItemIds: bag.items
-          .filter((item) => canPlayerDraftItem(player, item, draft))
-          .map((item) => item.id),
-        requiredPickCount: getRequiredPickCount(player, bag, draft)
-      } : null
+    currentPlayer: player ? getPlayerDraftView(player, draft, true) : null,
+    superSpectator: isSuperSpectator ? {
+      players: draft.players.map((candidate) => getPlayerDraftView(candidate, draft, true))
     } : null
   };
 }
@@ -529,7 +567,8 @@ function startDraft(room) {
     name: participant.name,
     seat: index + 1,
     queue: [],
-    draftedItems: []
+    draftedItems: [],
+    draftedGroups: []
   }));
   const bags = createStartingBags(pool, players, room.draftSettings);
 
@@ -579,6 +618,67 @@ async function handleStartDraft(roomNumber, request, response) {
   startDraft(room);
   broadcastRoom(roomNumber);
   sendJson(response, 200, getRoomSnapshot(roomNumber, body.participantId));
+}
+
+async function handleRestartDraft(roomNumber, request, response) {
+  const room = rooms.get(roomNumber);
+
+  if (!room) {
+    sendJson(response, 404, { error: "room_not_found" });
+    return;
+  }
+
+  let body;
+
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return;
+  }
+
+  if (body.creatorToken !== room.creatorToken) {
+    sendJson(response, 403, { error: "creator_token_required" });
+    return;
+  }
+
+  room.draft = null;
+  broadcastRoom(roomNumber);
+  sendJson(response, 200, getRoomSnapshot(roomNumber, body.participantId));
+}
+
+async function handlePromoteSpectator(roomNumber, request, response) {
+  const room = rooms.get(roomNumber);
+
+  if (!room) {
+    sendJson(response, 404, { error: "room_not_found" });
+    return;
+  }
+
+  let body;
+
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return;
+  }
+
+  if (body.creatorToken !== room.creatorToken) {
+    sendJson(response, 403, { error: "creator_token_required" });
+    return;
+  }
+
+  const spectator = room.participants.get(String(body.participantId || ""));
+
+  if (!spectator || spectator.role !== "spectator" || !spectator.name) {
+    sendJson(response, 404, { error: "named_spectator_not_found" });
+    return;
+  }
+
+  spectator.superSpectator = Boolean(body.superSpectator);
+  broadcastRoom(roomNumber);
+  sendJson(response, 200, getRoomSnapshot(roomNumber, body.viewerId));
 }
 
 function completeDraftIfDone(draft) {
@@ -652,7 +752,16 @@ async function handleDraftPick(roomNumber, request, response) {
   }
 
   player.queue.shift();
-  player.draftedItems.push(...selectedItems);
+
+  if (selectedItems.length > 0) {
+    player.draftedGroups.push({
+      bagId: bag.id,
+      pickNumber: player.draftedGroups.length + 1,
+      items: selectedItems
+    });
+    player.draftedItems.push(...selectedItems);
+  }
+
   bag.items = bag.items.filter((item) => !selectedIds.includes(item.id));
 
   if (bag.items.length > 0) {
@@ -721,10 +830,24 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
+  const restartDraftMatch = url.pathname.match(/^\/api\/rooms\/(\d{6})\/draft\/restart$/);
+
+  if (restartDraftMatch && request.method === "POST") {
+    await handleRestartDraft(restartDraftMatch[1], request, response);
+    return;
+  }
+
   const pickMatch = url.pathname.match(/^\/api\/rooms\/(\d{6})\/draft\/pick$/);
 
   if (pickMatch && request.method === "POST") {
     await handleDraftPick(pickMatch[1], request, response);
+    return;
+  }
+
+  const promoteSpectatorMatch = url.pathname.match(/^\/api\/rooms\/(\d{6})\/spectators\/promote$/);
+
+  if (promoteSpectatorMatch && request.method === "POST") {
+    await handlePromoteSpectator(promoteSpectatorMatch[1], request, response);
     return;
   }
 
