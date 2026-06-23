@@ -1,6 +1,15 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
-const { draftPools, getPoolSummary, registerUploadedTtsPool } = require("./draftPools");
+const {
+  getDefaultPublicPool,
+  getPool,
+  getPoolSummary,
+  listPublicPools,
+  registerUploadedTtsPool,
+  removePublicPool,
+  savePool,
+  updatePublicPool
+} = require("./draftPools");
 
 const port = Number(process.env.PORT || 3000);
 const serviceName = "franken-draft-tool-backend";
@@ -89,12 +98,20 @@ function handlePresenceStream(request, response) {
 }
 
 function defaultDraftSettings() {
-  const pool = draftPools.get("testing");
+  const pool = getDefaultPublicPool();
+
+  if (!pool) {
+    return {
+      poolId: null,
+      picksPerBag: 2,
+      itemsPerType: {}
+    };
+  }
 
   return {
     poolId: pool.id,
-    picksPerBag: 2,
-    itemsPerType: Object.fromEntries(pool.types.map((type) => [type, 1]))
+    picksPerBag: pool.defaultParameters.picksPerBag,
+    itemsPerType: pool.defaultParameters.itemsPerType
   };
 }
 
@@ -300,6 +317,66 @@ async function handlePoolUpload(request, response) {
   });
 }
 
+async function handleUpdatePublicPool(poolId, request, response) {
+  const pool = getPool(poolId);
+
+  if (!pool || !pool.public) {
+    sendJson(response, 404, { error: "pool_not_found" });
+    return;
+  }
+
+  let body;
+
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return;
+  }
+
+  const defaultParameters = body.defaultParameters || {};
+  const picksPerBag = defaultParameters.picksPerBag === undefined
+    ? pool.defaultParameters.picksPerBag
+    : cleanPicksPerBag(defaultParameters.picksPerBag);
+  const itemsPerType = defaultParameters.itemsPerType === undefined
+    ? pool.defaultParameters.itemsPerType
+    : cleanItemsPerType(pool, defaultParameters.itemsPerType);
+
+  if (!picksPerBag) {
+    sendJson(response, 400, { error: "invalid_picks_per_bag" });
+    return;
+  }
+
+  if (!itemsPerType) {
+    sendJson(response, 400, { error: "invalid_items_per_type" });
+    return;
+  }
+
+  const updatedPool = updatePublicPool(pool.id, {
+    name: body.name === undefined ? pool.name : cleanOptionalName(body.name),
+    defaultParameters: {
+      picksPerBag,
+      itemsPerType
+    }
+  });
+
+  sendJson(response, 200, {
+    pool: getPoolSummary(updatedPool),
+    pools: listPublicPools().map(getPoolSummary)
+  });
+}
+
+function handleRemovePublicPool(poolId, response) {
+  if (!removePublicPool(poolId)) {
+    sendJson(response, 404, { error: "pool_not_found" });
+    return;
+  }
+
+  sendJson(response, 200, {
+    pools: listPublicPools().map(getPoolSummary)
+  });
+}
+
 async function handleRoomSettings(roomNumber, request, response) {
   const room = rooms.get(roomNumber);
 
@@ -344,7 +421,7 @@ async function handleRoomSettings(roomNumber, request, response) {
     return;
   }
 
-  const pool = draftPools.get(body.poolId || room.draftSettings.poolId);
+  const pool = getPool(body.poolId || room.draftSettings.poolId);
 
   if (!pool) {
     sendJson(response, 400, { error: "invalid_pool" });
@@ -504,9 +581,14 @@ function getPlayerDraftView(player, draft, includeCurrentBag) {
 
 function getDraftSnapshot(room, viewerId) {
   if (!room.draft) {
+    const pool = getPool(room.draftSettings.poolId);
+
     return {
       status: "not_started",
-      settings: room.draftSettings
+      settings: {
+        ...room.draftSettings,
+        pool: pool ? getPoolSummary(pool) : null
+      }
     };
   }
 
@@ -561,7 +643,7 @@ function validateDraftCanStart(room) {
     return "no_players";
   }
 
-  const pool = draftPools.get(room.draftSettings.poolId);
+  const pool = getPool(room.draftSettings.poolId);
 
   if (!pool) {
     return "invalid_pool";
@@ -607,7 +689,7 @@ function createStartingBags(pool, players, settings) {
 }
 
 function startDraft(room) {
-  const pool = draftPools.get(room.draftSettings.poolId);
+  const pool = getPool(room.draftSettings.poolId);
   const players = shuffle(getSeatedParticipants(room)).map((participant, index) => ({
     id: participant.id,
     name: participant.name,
@@ -659,6 +741,23 @@ async function handleStartDraft(roomNumber, request, response) {
   if (validationError) {
     sendJson(response, 409, { error: validationError });
     return;
+  }
+
+  if (body.savePool) {
+    const savedPool = savePool(room.draftSettings.poolId, {
+      name: cleanOptionalName(body.poolName),
+      defaultParameters: room.draftSettings
+    });
+
+    if (!savedPool) {
+      sendJson(response, 400, { error: "invalid_pool" });
+      return;
+    }
+
+    room.draftSettings = {
+      ...room.draftSettings,
+      poolId: savedPool.id
+    };
   }
 
   startDraft(room);
@@ -852,13 +951,27 @@ const server = http.createServer(async (request, response) => {
 
   if (url.pathname === "/api/pools" && request.method === "GET") {
     sendJson(response, 200, {
-      pools: [...draftPools.values()].map(getPoolSummary)
+      pools: listPublicPools().map(getPoolSummary)
     });
     return;
   }
 
   if (url.pathname === "/api/pools/upload" && request.method === "POST") {
     await handlePoolUpload(request, response);
+    return;
+  }
+
+  const poolUpdateMatch = url.pathname.match(/^\/api\/pools\/([^/]+)$/);
+
+  if (poolUpdateMatch && request.method === "POST") {
+    await handleUpdatePublicPool(decodeURIComponent(poolUpdateMatch[1]), request, response);
+    return;
+  }
+
+  const poolDeleteMatch = url.pathname.match(/^\/api\/pools\/([^/]+)\/delete$/);
+
+  if (poolDeleteMatch && request.method === "POST") {
+    handleRemovePublicPool(decodeURIComponent(poolDeleteMatch[1]), response);
     return;
   }
 

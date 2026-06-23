@@ -64,12 +64,14 @@
       li,
       label,
       input,
-      select {
+      select,
+      a {
         color: #d8cfbd;
         font-size: clamp(1rem, 2.5vw, 1.05rem);
       }
 
-      button {
+      button,
+      .button-link {
         min-height: 2.75rem;
         border: 0;
         border-radius: 0.5rem;
@@ -81,7 +83,14 @@
         cursor: pointer;
       }
 
-      button.secondary {
+      .button-link {
+        display: inline-grid;
+        place-items: center;
+        text-decoration: none;
+      }
+
+      button.secondary,
+      .button-link.secondary {
         color: #f7f3ea;
         background: transparent;
         border: 1px solid #6a6d72;
@@ -160,6 +169,7 @@
       }
 
       .settings-grid label,
+      .pool-admin-card label,
       .modal label {
         display: grid;
         gap: 0.4rem;
@@ -445,6 +455,54 @@
         white-space: nowrap;
       }
 
+      .toggle-row {
+        width: 100%;
+        display: flex;
+        gap: 0.6rem;
+        align-items: center;
+        justify-content: flex-start;
+        text-align: left;
+      }
+
+      .settings-grid label.toggle-row {
+        display: flex;
+      }
+
+      .toggle-row input {
+        width: auto;
+        min-height: auto;
+      }
+
+      .pool-admin-list {
+        width: min(100%, 56rem);
+        display: grid;
+        gap: 1rem;
+      }
+
+      .pool-admin-card {
+        display: grid;
+        gap: 0.9rem;
+        justify-items: stretch;
+        padding: 1rem;
+        border: 1px solid #3f4248;
+        border-radius: 0.5rem;
+        background: #202327;
+      }
+
+      .pool-admin-card header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: baseline;
+        justify-content: space-between;
+        text-align: left;
+      }
+
+      .pool-admin-card header span {
+        color: #8fd4cf;
+        font-weight: 700;
+      }
+
       .modal-backdrop {
         position: fixed;
         inset: 0;
@@ -473,8 +531,21 @@
   <body>
     <main id="home-view" hidden>
       <h1>FrankenDraftTool</h1>
-      <button id="create-room" type="button">Create Room</button>
+      <div class="actions">
+        <button id="create-room" type="button">Create Room</button>
+        <a class="button-link secondary" href="/pools">Manage Pools</a>
+      </div>
       <p><span id="open-pages">0</span> open right now</p>
+    </main>
+
+    <main id="pools-view" hidden>
+      <h1>FrankenDraftTool</h1>
+      <h2>Pools</h2>
+      <div class="actions">
+        <a class="button-link secondary" href="/">Home</a>
+      </div>
+      <div class="pool-admin-list" id="public-pools-list"></div>
+      <p class="message" id="pools-message"></p>
     </main>
 
     <main id="room-view" hidden>
@@ -508,6 +579,16 @@
           <label class="pool-upload-drop" id="pool-upload-drop">
             <span id="pool-upload-label">Drop JSON or choose file</span>
             <input id="pool-upload-input" type="file" accept=".json,application/json">
+          </label>
+        </div>
+        <div class="settings-grid">
+          <label class="toggle-row">
+            <input id="pool-save-input" type="checkbox">
+            Save this pool
+          </label>
+          <label>
+            Pool name
+            <input id="pool-save-name-input" maxlength="80">
           </label>
         </div>
         <div class="settings-grid" id="item-type-settings"></div>
@@ -603,9 +684,12 @@
 
       const apiUrl = (path) => `${backendOrigin}${path}`;
       const homeView = document.querySelector("#home-view");
+      const poolsView = document.querySelector("#pools-view");
       const roomView = document.querySelector("#room-view");
       const openPages = document.querySelector("#open-pages");
       const createRoom = document.querySelector("#create-room");
+      const publicPoolsList = document.querySelector("#public-pools-list");
+      const poolsMessage = document.querySelector("#pools-message");
       const roomNumber = document.querySelector("#room-number");
       const shareRoom = document.querySelector("#share-room");
       const sitDown = document.querySelector("#sit-down");
@@ -625,6 +709,8 @@
       const poolUploadDrop = document.querySelector("#pool-upload-drop");
       const poolUploadInput = document.querySelector("#pool-upload-input");
       const poolUploadLabel = document.querySelector("#pool-upload-label");
+      const poolSaveInput = document.querySelector("#pool-save-input");
+      const poolSaveNameInput = document.querySelector("#pool-save-name-input");
       const picksPerBagInput = document.querySelector("#picks-per-bag-input");
       const itemTypeSettings = document.querySelector("#item-type-settings");
       const saveRoomSettings = document.querySelector("#save-room-settings");
@@ -661,8 +747,9 @@
       let currentBagId = null;
 
       function show(view) {
-        homeView.hidden = view !== homeView;
-        roomView.hidden = view !== roomView;
+        for (const candidate of [homeView, poolsView, roomView]) {
+          candidate.hidden = view !== candidate;
+        }
       }
 
       function storageKey(roomId, key) {
@@ -686,8 +773,8 @@
         return id;
       }
 
-      async function fetchPools() {
-        if (pools.length > 0) {
+      async function fetchPools(options = {}) {
+        if (pools.length > 0 && !options.force) {
           return;
         }
 
@@ -982,10 +1069,27 @@
           return;
         }
 
+        if (settings.pool) {
+          addOrReplacePool(settings.pool);
+        }
+
         const pool = poolById(settings.poolId) || pools[0];
+
+        if (!pool) {
+          renderPoolOptions(null);
+          picksPerBagInput.value = settings.picksPerBag;
+          itemTypeSettings.replaceChildren();
+          poolSaveInput.checked = false;
+          poolSaveNameInput.value = "";
+          settingsInitialized = true;
+          return;
+        }
+
         renderPoolOptions(pool.id);
         poolSelect.value = pool.id;
         picksPerBagInput.value = settings.picksPerBag;
+        poolSaveInput.checked = false;
+        poolSaveNameInput.value = pool.name;
         renderTypeInputs(pool, settings.itemsPerType);
         settingsInitialized = true;
       }
@@ -1055,6 +1159,8 @@
           addOrReplacePool(data.pool);
           renderPoolOptions(data.pool.id);
           picksPerBagInput.value = data.pool.defaultParameters.picksPerBag;
+          poolSaveInput.checked = false;
+          poolSaveNameInput.value = data.pool.name;
           renderTypeInputs(data.pool, data.pool.defaultParameters.itemsPerType);
           poolUploadLabel.textContent = `${data.pool.name} uploaded`;
           roomMessage.textContent = "Pool uploaded and selected. Save settings to use it for this room.";
@@ -1065,6 +1171,151 @@
           poolUploadInput.value = "";
           poolUploadInput.disabled = false;
         }
+      }
+
+      function renderPublicPools() {
+        publicPoolsList.replaceChildren();
+
+        if (pools.length === 0) {
+          const empty = document.createElement("p");
+          empty.textContent = "No public pools";
+          publicPoolsList.append(empty);
+          return;
+        }
+
+        for (const pool of pools) {
+          const card = document.createElement("section");
+          card.className = "pool-admin-card";
+          card.dataset.poolId = pool.id;
+          const header = document.createElement("header");
+          const title = document.createElement("h3");
+          title.textContent = pool.name;
+          const itemCount = document.createElement("span");
+          itemCount.textContent = `${pool.itemTypes.reduce((total, type) => total + type.itemCount, 0)} items`;
+          header.append(title, itemCount);
+
+          const nameLabel = document.createElement("label");
+          const nameInput = document.createElement("input");
+          nameInput.dataset.poolField = "name";
+          nameInput.maxLength = 80;
+          nameInput.value = pool.name;
+          nameLabel.append("Name", nameInput);
+
+          const picksLabel = document.createElement("label");
+          const picksInput = document.createElement("input");
+          picksInput.type = "number";
+          picksInput.min = "1";
+          picksInput.max = "8";
+          picksInput.step = "1";
+          picksInput.dataset.poolField = "picks";
+          picksInput.value = pool.defaultParameters.picksPerBag;
+          picksLabel.append("Picks per bag", picksInput);
+
+          const typeGrid = document.createElement("div");
+          typeGrid.className = "settings-grid";
+
+          for (const itemType of pool.itemTypes) {
+            const label = document.createElement("label");
+            const input = document.createElement("input");
+            input.type = "number";
+            input.min = "0";
+            input.max = "10";
+            input.step = "1";
+            input.dataset.itemType = itemType.type;
+            input.value = pool.defaultParameters.itemsPerType[itemType.type] ?? 0;
+            label.append(`${itemType.type} per bag`, input);
+            typeGrid.append(label);
+          }
+
+          const actions = document.createElement("div");
+          actions.className = "actions";
+          const saveButton = document.createElement("button");
+          saveButton.type = "button";
+          saveButton.dataset.poolAction = "save";
+          saveButton.textContent = "Save";
+          const removeButton = document.createElement("button");
+          removeButton.type = "button";
+          removeButton.className = "secondary";
+          removeButton.dataset.poolAction = "remove";
+          removeButton.textContent = "Remove";
+          actions.append(saveButton, removeButton);
+          card.append(header, nameLabel, picksLabel, typeGrid, actions);
+          publicPoolsList.append(card);
+        }
+      }
+
+      function collectManagedPoolSettings(card) {
+        const itemsPerType = {};
+
+        for (const input of card.querySelectorAll("input[data-item-type]")) {
+          itemsPerType[input.dataset.itemType] = Number(input.value);
+        }
+
+        return {
+          name: card.querySelector("input[data-pool-field='name']").value,
+          defaultParameters: {
+            picksPerBag: Number(card.querySelector("input[data-pool-field='picks']").value),
+            itemsPerType
+          }
+        };
+      }
+
+      async function saveManagedPool(card) {
+        const poolId = card.dataset.poolId;
+        const button = card.querySelector("button[data-pool-action='save']");
+        button.disabled = true;
+
+        try {
+          const response = await fetch(apiUrl(`/api/pools/${encodeURIComponent(poolId)}`), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(collectManagedPoolSettings(card))
+          });
+          const data = await response.json();
+
+          if (!response.ok) {
+            poolsMessage.textContent = "Could not save pool.";
+            return;
+          }
+
+          pools = data.pools;
+          renderPublicPools();
+          poolsMessage.textContent = "Pool saved.";
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      async function removeManagedPool(card) {
+        const poolId = card.dataset.poolId;
+        const button = card.querySelector("button[data-pool-action='remove']");
+        button.disabled = true;
+
+        try {
+          const response = await fetch(apiUrl(`/api/pools/${encodeURIComponent(poolId)}/delete`), {
+            method: "POST"
+          });
+          const data = await response.json();
+
+          if (!response.ok) {
+            poolsMessage.textContent = "Could not remove pool.";
+            return;
+          }
+
+          pools = data.pools;
+          renderPublicPools();
+          poolsMessage.textContent = "Pool removed.";
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      async function loadPoolsPage() {
+        await fetchPools({ force: true });
+        renderPublicPools();
+        show(poolsView);
       }
 
       function isCreator() {
@@ -1464,7 +1715,9 @@
           },
           body: JSON.stringify({
             creatorToken,
-            participantId: currentViewerId
+            participantId: currentViewerId,
+            savePool: poolSaveInput.checked,
+            poolName: poolSaveNameInput.value
           })
         });
         const data = await response.json();
@@ -1637,6 +1890,7 @@
         }
 
         picksPerBagInput.value = pool.defaultParameters.picksPerBag;
+        poolSaveNameInput.value = pool.name;
         renderTypeInputs(pool, pool.defaultParameters.itemsPerType);
       });
 
@@ -1657,6 +1911,22 @@
         event.preventDefault();
         poolUploadDrop.classList.remove("dragging");
         uploadPoolFile(event.dataTransfer.files?.[0]);
+      });
+
+      publicPoolsList.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-pool-action]");
+
+        if (!button) {
+          return;
+        }
+
+        const card = button.closest(".pool-admin-card");
+
+        if (button.dataset.poolAction === "save") {
+          saveManagedPool(card);
+        } else {
+          removeManagedPool(card);
+        }
       });
 
       namedSpectators.addEventListener("click", (event) => {
@@ -1685,6 +1955,8 @@
 
       if (roomMatch) {
         enterRoom(roomMatch[1]);
+      } else if (window.location.pathname === "/pools") {
+        loadPoolsPage();
       } else {
         show(homeView);
         startHomePresence();

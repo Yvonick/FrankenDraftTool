@@ -1,48 +1,12 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const testingTypes = [
-  "Faction",
-  "Technology",
-  "Unit",
-  "Leader",
-  "Planet",
-  "Promissory",
-  "Relic",
-  "Agenda",
-  "Objective",
-  "Action Card"
-];
-
 function slugify(value) {
   return String(value)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 }
-
-function createTestingItems(type) {
-  const slug = slugify(type);
-
-  return Array.from({ length: 50 }, (_, index) => {
-    const number = index + 1;
-
-    return {
-      id: `${slug}-${String(number).padStart(2, "0")}`,
-      name: `${type} Test Item ${number}`,
-      content: `Testing ${type.toLowerCase()} draft content ${number}.`,
-      type,
-      imageUrl: null
-    };
-  });
-}
-
-const testingPool = {
-  id: "testing",
-  name: "Testing Pool",
-  types: testingTypes,
-  items: testingTypes.flatMap(createTestingItems)
-};
 
 function loadAssetOverrides() {
   const overridesDir = path.join(__dirname, "pools", "asset-overrides");
@@ -243,6 +207,41 @@ function clonePoolWithId(pool, id) {
   };
 }
 
+function cleanPoolName(name, fallback) {
+  const cleaned = String(name || "").trim().replace(/\s+/g, " ").slice(0, 80);
+  return cleaned || fallback || "Untitled Pool";
+}
+
+function normalizeDefaultParameters(pool, parameters = {}) {
+  const parsedPicksPerBag = Number(parameters.picksPerBag);
+  const picksPerBag = Number.isInteger(parsedPicksPerBag)
+    ? Math.min(Math.max(parsedPicksPerBag, 1), 8)
+    : 2;
+  const sourceItemsPerType = parameters.itemsPerType || {};
+  const itemsPerType = Object.fromEntries(pool.types.map((type) => {
+    const parsed = Number(sourceItemsPerType[type]);
+    const value = Number.isInteger(parsed)
+      ? Math.min(Math.max(parsed, 0), 10)
+      : 1;
+
+    return [type, value];
+  }));
+
+  return {
+    picksPerBag,
+    itemsPerType
+  };
+}
+
+function withPoolMetadata(pool, options = {}) {
+  return {
+    ...pool,
+    name: cleanPoolName(options.name || pool.name, pool.name),
+    public: options.public ?? Boolean(pool.public),
+    defaultParameters: normalizeDefaultParameters(pool, options.defaultParameters || pool.defaultParameters)
+  };
+}
+
 function loadTtsPools() {
   const rawPoolsDir = path.join(__dirname, "pools", "raw");
 
@@ -260,12 +259,23 @@ function loadTtsPools() {
     .filter(Boolean);
 }
 
-const allPools = [
-  testingPool,
-  ...loadTtsPools()
-];
+const allPools = loadTtsPools().map((pool) => withPoolMetadata(pool, {
+  public: true
+}));
 
 const draftPools = new Map(allPools.map((pool) => [pool.id, pool]));
+
+function getPool(poolId) {
+  return draftPools.get(poolId) || null;
+}
+
+function listPublicPools() {
+  return [...draftPools.values()].filter((pool) => pool.public);
+}
+
+function getDefaultPublicPool() {
+  return listPublicPools()[0] || null;
+}
 
 function uniquePoolId(baseId) {
   const base = slugify(baseId) || "uploaded-pool";
@@ -291,33 +301,88 @@ function registerUploadedTtsPool(rawJson, fallbackName) {
   }
 
   const pool = {
-    ...clonePoolWithId(parsedPool, uniquePoolId(parsedPool.id)),
-    source: "tts-upload"
+    ...withPoolMetadata(clonePoolWithId(parsedPool, uniquePoolId(parsedPool.id)), {
+      public: false
+    }),
+    source: "tts-upload",
+    public: false
   };
 
   draftPools.set(pool.id, pool);
   return pool;
 }
 
+function savePool(poolId, options = {}) {
+  const pool = getPool(poolId);
+
+  if (!pool) {
+    return null;
+  }
+
+  const savedPool = {
+    ...withPoolMetadata(pool, {
+      name: cleanPoolName(options.name, pool.name),
+      defaultParameters: options.defaultParameters || pool.defaultParameters,
+      public: true
+    }),
+    source: pool.source === "tts-upload" ? "tts-saved" : pool.source,
+    public: true
+  };
+
+  draftPools.set(savedPool.id, savedPool);
+  return savedPool;
+}
+
+function updatePublicPool(poolId, options = {}) {
+  const pool = getPool(poolId);
+
+  if (!pool || !pool.public) {
+    return null;
+  }
+
+  return savePool(poolId, {
+    name: options.name === undefined ? pool.name : options.name,
+    defaultParameters: options.defaultParameters || pool.defaultParameters
+  });
+}
+
+function removePublicPool(poolId) {
+  const pool = getPool(poolId);
+
+  if (!pool || !pool.public) {
+    return false;
+  }
+
+  draftPools.delete(pool.id);
+  return true;
+}
+
 function getPoolSummary(pool) {
+  const defaultParameters = normalizeDefaultParameters(pool, pool.defaultParameters);
+
   return {
     id: pool.id,
     name: pool.name,
     source: pool.source || "generated",
+    public: Boolean(pool.public),
     itemTypes: pool.types.map((type) => ({
       type,
       itemCount: pool.items.filter((item) => item.type === type).length
     })),
-    defaultParameters: {
-      picksPerBag: 2,
-      itemsPerType: Object.fromEntries(pool.types.map((type) => [type, 1]))
-    }
+    defaultParameters
   };
 }
 
 module.exports = {
   draftPools,
+  getDefaultPublicPool,
+  getPool,
   getPoolSummary,
+  listPublicPools,
+  normalizeDefaultParameters,
   parseTtsPool,
-  registerUploadedTtsPool
+  registerUploadedTtsPool,
+  removePublicPool,
+  savePool,
+  updatePublicPool
 };
