@@ -1,5 +1,6 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
+const { draftPools, getPoolSummary } = require("./draftPools");
 
 const port = Number(process.env.PORT || 3000);
 const serviceName = "franken-draft-tool-backend";
@@ -84,6 +85,16 @@ function handlePresenceStream(request, response) {
   });
 }
 
+function defaultDraftSettings() {
+  const pool = draftPools.get("testing");
+
+  return {
+    poolId: pool.id,
+    picksPerBag: 2,
+    itemsPerType: Object.fromEntries(pool.types.map((type) => [type, 1]))
+  };
+}
+
 function createRoom() {
   let roomNumber;
 
@@ -94,14 +105,25 @@ function createRoom() {
   rooms.set(roomNumber, {
     creatorToken: crypto.randomUUID(),
     maxSeats: defaultSeatLimit,
+    draftSettings: defaultDraftSettings(),
+    draft: null,
     participants: new Map(),
-    clients: new Set()
+    clients: new Map()
   });
 
   return roomNumber;
 }
 
-function getRoomSnapshot(roomNumber) {
+function getSeatedParticipants(room) {
+  return [...room.participants.values()]
+    .filter((participant) => participant.role === "seated")
+    .map((participant) => ({
+      id: participant.id,
+      name: participant.name
+    }));
+}
+
+function getRoomSnapshot(roomNumber, viewerId = null) {
   const room = rooms.get(roomNumber);
 
   if (!room) {
@@ -111,12 +133,11 @@ function getRoomSnapshot(roomNumber) {
   return {
     roomNumber,
     maxSeats: room.maxSeats,
-    seated: [...room.participants.values()]
-      .filter((participant) => participant.role === "seated")
-      .map((participant) => participant.name),
+    seated: getSeatedParticipants(room),
     spectators: [...room.participants.values()]
       .filter((participant) => participant.role === "spectator")
-      .length
+      .length,
+    draft: getDraftSnapshot(room, viewerId)
   };
 }
 
@@ -127,10 +148,8 @@ function broadcastRoom(roomNumber) {
     return;
   }
 
-  const payload = JSON.stringify(getRoomSnapshot(roomNumber));
-
-  for (const client of room.clients) {
-    client.write(`data: ${payload}\n\n`);
+  for (const [client, metadata] of room.clients.entries()) {
+    client.write(`data: ${JSON.stringify(getRoomSnapshot(roomNumber, metadata.participantId))}\n\n`);
   }
 }
 
@@ -153,6 +172,62 @@ function cleanSeatLimit(maxSeats) {
   }
 
   return Math.min(Math.max(parsed, 1), 12);
+}
+
+function cleanPicksPerBag(picksPerBag) {
+  const parsed = Number(picksPerBag);
+
+  if (!Number.isInteger(parsed)) {
+    return null;
+  }
+
+  return Math.min(Math.max(parsed, 1), 8);
+}
+
+function cleanItemsPerType(pool, itemsPerType) {
+  const cleaned = {};
+
+  for (const type of pool.types) {
+    const parsed = Number(itemsPerType?.[type] ?? 0);
+
+    if (!Number.isInteger(parsed)) {
+      return null;
+    }
+
+    cleaned[type] = Math.min(Math.max(parsed, 0), 10);
+  }
+
+  return cleaned;
+}
+
+function getParticipantId(value) {
+  const id = String(value || "").trim();
+
+  if (/^[a-zA-Z0-9-]{8,80}$/.test(id)) {
+    return id;
+  }
+
+  return crypto.randomUUID();
+}
+
+function shuffle(values) {
+  const copy = [...values];
+
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+
+  return copy;
+}
+
+function cloneItem(item) {
+  return {
+    id: item.id,
+    name: item.name,
+    content: item.content,
+    type: item.type
+  };
 }
 
 function handleCreateRoom(response) {
@@ -189,16 +264,19 @@ async function handleRoomSettings(roomNumber, request, response) {
     return;
   }
 
-  const maxSeats = cleanSeatLimit(body.maxSeats);
+  if (room.draft) {
+    sendJson(response, 409, { error: "draft_already_started" });
+    return;
+  }
+
+  const maxSeats = body.maxSeats === undefined ? room.maxSeats : cleanSeatLimit(body.maxSeats);
 
   if (!maxSeats) {
     sendJson(response, 400, { error: "invalid_seat_limit" });
     return;
   }
 
-  const seatedCount = [...room.participants.values()]
-    .filter((participant) => participant.role === "seated")
-    .length;
+  const seatedCount = getSeatedParticipants(room).length;
 
   if (maxSeats < seatedCount) {
     sendJson(response, 409, {
@@ -208,7 +286,37 @@ async function handleRoomSettings(roomNumber, request, response) {
     return;
   }
 
+  const pool = draftPools.get(body.poolId || room.draftSettings.poolId);
+
+  if (!pool) {
+    sendJson(response, 400, { error: "invalid_pool" });
+    return;
+  }
+
+  const picksPerBag = body.picksPerBag === undefined
+    ? room.draftSettings.picksPerBag
+    : cleanPicksPerBag(body.picksPerBag);
+  const itemsPerType = body.itemsPerType === undefined
+    ? room.draftSettings.itemsPerType
+    : cleanItemsPerType(pool, body.itemsPerType);
+
+  if (!picksPerBag) {
+    sendJson(response, 400, { error: "invalid_picks_per_bag" });
+    return;
+  }
+
+  if (!itemsPerType) {
+    sendJson(response, 400, { error: "invalid_items_per_type" });
+    return;
+  }
+
   room.maxSeats = maxSeats;
+  room.draftSettings = {
+    poolId: pool.id,
+    picksPerBag,
+    itemsPerType
+  };
+
   broadcastRoom(roomNumber);
   sendJson(response, 200, getRoomSnapshot(roomNumber));
 }
@@ -237,14 +345,19 @@ function handleRoomStream(roomNumber, url, request, response) {
     return;
   }
 
-  const connectionId = crypto.randomUUID();
+  const participantId = getParticipantId(url.searchParams.get("participantId"));
+  const connectionToken = crypto.randomUUID();
   const requestedRole = url.searchParams.get("role") === "seated" ? "seated" : "spectator";
-  const seatedCount = [...room.participants.values()]
-    .filter((participant) => participant.role === "seated")
-    .length;
-  const canSit = requestedRole === "seated" && seatedCount < room.maxSeats;
+  const draftPlayer = room.draft?.players.find((player) => player.id === participantId);
+  const currentlySeated = room.participants.get(participantId)?.role === "seated";
+  const seatedCount = getSeatedParticipants(room).length;
+  const canSit = requestedRole === "seated"
+    && (!room.draft || draftPlayer)
+    && (currentlySeated || seatedCount < room.maxSeats || Boolean(draftPlayer));
   const role = canSit ? "seated" : "spectator";
-  const name = role === "seated" ? cleanName(url.searchParams.get("name")) : null;
+  const name = role === "seated"
+    ? (draftPlayer?.name || cleanName(url.searchParams.get("name")))
+    : null;
   const seatDenied = requestedRole === "seated" && role !== "seated";
 
   response.writeHead(200, {
@@ -254,21 +367,313 @@ function handleRoomStream(roomNumber, url, request, response) {
     "Access-Control-Allow-Origin": frontendOrigin
   });
 
-  room.participants.set(connectionId, {
-    id: connectionId,
+  room.participants.set(participantId, {
+    id: participantId,
     role,
-    name
+    name,
+    connectionToken
   });
-  room.clients.add(response);
-  response.write(`event: viewer\n`);
-  response.write(`data: ${JSON.stringify({ id: connectionId, role, name, seatDenied })}\n\n`);
+  room.clients.set(response, { participantId });
+  response.write("event: viewer\n");
+  response.write(`data: ${JSON.stringify({ id: participantId, role, name, seatDenied })}\n\n`);
   broadcastRoom(roomNumber);
 
   request.on("close", () => {
-    room.participants.delete(connectionId);
+    const participant = room.participants.get(participantId);
+
+    if (participant?.connectionToken === connectionToken) {
+      room.participants.delete(participantId);
+    }
+
     room.clients.delete(response);
     broadcastRoom(roomNumber);
   });
+}
+
+function countDraftedByType(player, type) {
+  return player.draftedItems.filter((item) => item.type === type).length;
+}
+
+function canPlayerDraftItem(player, item, settings) {
+  return countDraftedByType(player, item.type) < (settings.itemsPerType[item.type] || 0);
+}
+
+function getRequiredPickCount(player, bag, draft) {
+  const eligibleCount = bag.items
+    .filter((item) => canPlayerDraftItem(player, item, draft))
+    .length;
+
+  return Math.min(draft.picksPerBag, eligibleCount);
+}
+
+function getDraftSnapshot(room, viewerId) {
+  if (!room.draft) {
+    return {
+      status: "not_started",
+      settings: room.draftSettings
+    };
+  }
+
+  const draft = room.draft;
+  const table = draft.players.map((player) => ({
+    id: player.id,
+    name: player.name,
+    seat: player.seat
+  }));
+
+  if (draft.status === "complete") {
+    return {
+      status: "complete",
+      poolId: draft.poolId,
+      picksPerBag: draft.picksPerBag,
+      itemsPerType: draft.itemsPerType,
+      table,
+      revealedDrafts: draft.players.map((player) => ({
+        playerId: player.id,
+        name: player.name,
+        items: player.draftedItems
+      }))
+    };
+  }
+
+  const player = draft.players.find((candidate) => candidate.id === viewerId);
+  const bag = player?.queue[0] || null;
+
+  return {
+    status: "active",
+    poolId: draft.poolId,
+    picksPerBag: draft.picksPerBag,
+    itemsPerType: draft.itemsPerType,
+    table,
+    currentPlayer: player ? {
+      playerId: player.id,
+      name: player.name,
+      queueLength: player.queue.length,
+      draftedItems: player.draftedItems,
+      currentBag: bag ? {
+        id: bag.id,
+        items: bag.items,
+        eligibleItemIds: bag.items
+          .filter((item) => canPlayerDraftItem(player, item, draft))
+          .map((item) => item.id),
+        requiredPickCount: getRequiredPickCount(player, bag, draft)
+      } : null
+    } : null
+  };
+}
+
+function validateDraftCanStart(room) {
+  if (room.draft) {
+    return "draft_already_started";
+  }
+
+  const seated = getSeatedParticipants(room);
+
+  if (seated.length !== room.maxSeats) {
+    return "room_not_full";
+  }
+
+  if (seated.length === 0) {
+    return "no_players";
+  }
+
+  const pool = draftPools.get(room.draftSettings.poolId);
+
+  if (!pool) {
+    return "invalid_pool";
+  }
+
+  for (const type of pool.types) {
+    const requested = (room.draftSettings.itemsPerType[type] || 0) * seated.length;
+    const available = pool.items.filter((item) => item.type === type).length;
+
+    if (requested > available) {
+      return "not_enough_pool_items";
+    }
+  }
+
+  return null;
+}
+
+function createStartingBags(pool, players, settings) {
+  const itemsByType = new Map(pool.types.map((type) => [
+    type,
+    shuffle(pool.items.filter((item) => item.type === type))
+  ]));
+
+  return players.map((player) => {
+    const items = [];
+
+    for (const type of pool.types) {
+      const count = settings.itemsPerType[type] || 0;
+      const source = itemsByType.get(type);
+
+      for (let index = 0; index < count; index += 1) {
+        items.push(cloneItem(source.pop()));
+      }
+    }
+
+    return {
+      id: crypto.randomUUID(),
+      originalPlayerId: player.id,
+      emptyPasses: 0,
+      items: shuffle(items)
+    };
+  });
+}
+
+function startDraft(room) {
+  const pool = draftPools.get(room.draftSettings.poolId);
+  const players = shuffle(getSeatedParticipants(room)).map((participant, index) => ({
+    id: participant.id,
+    name: participant.name,
+    seat: index + 1,
+    queue: [],
+    draftedItems: []
+  }));
+  const bags = createStartingBags(pool, players, room.draftSettings);
+
+  players.forEach((player, index) => {
+    player.queue.push(bags[index]);
+  });
+
+  room.draft = {
+    status: "active",
+    poolId: pool.id,
+    picksPerBag: room.draftSettings.picksPerBag,
+    itemsPerType: room.draftSettings.itemsPerType,
+    players,
+    discardedItems: []
+  };
+}
+
+async function handleStartDraft(roomNumber, request, response) {
+  const room = rooms.get(roomNumber);
+
+  if (!room) {
+    sendJson(response, 404, { error: "room_not_found" });
+    return;
+  }
+
+  let body;
+
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return;
+  }
+
+  if (body.creatorToken !== room.creatorToken) {
+    sendJson(response, 403, { error: "creator_token_required" });
+    return;
+  }
+
+  const validationError = validateDraftCanStart(room);
+
+  if (validationError) {
+    sendJson(response, 409, { error: validationError });
+    return;
+  }
+
+  startDraft(room);
+  broadcastRoom(roomNumber);
+  sendJson(response, 200, getRoomSnapshot(roomNumber, body.participantId));
+}
+
+function completeDraftIfDone(draft) {
+  const hasQueuedBags = draft.players.some((player) => player.queue.length > 0);
+
+  if (!hasQueuedBags) {
+    draft.status = "complete";
+    draft.completedAt = new Date().toISOString();
+  }
+}
+
+async function handleDraftPick(roomNumber, request, response) {
+  const room = rooms.get(roomNumber);
+
+  if (!room) {
+    sendJson(response, 404, { error: "room_not_found" });
+    return;
+  }
+
+  if (!room.draft || room.draft.status !== "active") {
+    sendJson(response, 409, { error: "draft_not_active" });
+    return;
+  }
+
+  let body;
+
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return;
+  }
+
+  const draft = room.draft;
+  const player = draft.players.find((candidate) => candidate.id === body.playerId);
+
+  if (!player) {
+    sendJson(response, 403, { error: "player_not_in_draft" });
+    return;
+  }
+
+  const bag = player.queue[0];
+
+  if (!bag) {
+    sendJson(response, 409, { error: "no_bag_available" });
+    return;
+  }
+
+  const selectedIds = [...new Set(Array.isArray(body.itemIds) ? body.itemIds.map(String) : [])];
+  const itemsById = new Map(bag.items.map((item) => [item.id, item]));
+  const selectedItems = selectedIds.map((id) => itemsById.get(id));
+
+  if (selectedItems.some((item) => !item)) {
+    sendJson(response, 400, { error: "item_not_in_bag" });
+    return;
+  }
+
+  const requiredPickCount = getRequiredPickCount(player, bag, draft);
+
+  if (selectedItems.length !== requiredPickCount) {
+    sendJson(response, 400, {
+      error: "wrong_pick_count",
+      requiredPickCount
+    });
+    return;
+  }
+
+  if (selectedItems.some((item) => !canPlayerDraftItem(player, item, draft))) {
+    sendJson(response, 400, { error: "type_limit_reached" });
+    return;
+  }
+
+  player.queue.shift();
+  player.draftedItems.push(...selectedItems);
+  bag.items = bag.items.filter((item) => !selectedIds.includes(item.id));
+
+  if (bag.items.length > 0) {
+    if (selectedItems.length === 0) {
+      bag.emptyPasses += 1;
+    } else {
+      bag.emptyPasses = 0;
+    }
+
+    if (bag.emptyPasses >= draft.players.length) {
+      draft.discardedItems.push(...bag.items);
+    } else {
+      const playerIndex = draft.players.findIndex((candidate) => candidate.id === player.id);
+      const nextPlayer = draft.players[(playerIndex + 1) % draft.players.length];
+      nextPlayer.queue.push(bag);
+    }
+  }
+
+  completeDraftIfDone(draft);
+  broadcastRoom(roomNumber);
+  sendJson(response, 200, getRoomSnapshot(roomNumber, player.id));
 }
 
 const server = http.createServer(async (request, response) => {
@@ -290,6 +695,13 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
+  if (url.pathname === "/api/pools" && request.method === "GET") {
+    sendJson(response, 200, {
+      pools: [...draftPools.values()].map(getPoolSummary)
+    });
+    return;
+  }
+
   if (url.pathname === "/api/rooms" && request.method === "POST") {
     handleCreateRoom(response);
     return;
@@ -299,6 +711,20 @@ const server = http.createServer(async (request, response) => {
 
   if (settingsMatch && request.method === "POST") {
     await handleRoomSettings(settingsMatch[1], request, response);
+    return;
+  }
+
+  const startDraftMatch = url.pathname.match(/^\/api\/rooms\/(\d{6})\/draft\/start$/);
+
+  if (startDraftMatch && request.method === "POST") {
+    await handleStartDraft(startDraftMatch[1], request, response);
+    return;
+  }
+
+  const pickMatch = url.pathname.match(/^\/api\/rooms\/(\d{6})\/draft\/pick$/);
+
+  if (pickMatch && request.method === "POST") {
+    await handleDraftPick(pickMatch[1], request, response);
     return;
   }
 

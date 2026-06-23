@@ -23,16 +23,18 @@
       }
 
       main {
-        width: min(100% - 2rem, 48rem);
+        width: min(100% - 2rem, 64rem);
         display: grid;
         gap: 1.25rem;
         justify-items: center;
+        padding: 2rem 0;
         text-align: center;
       }
 
       h1,
       h2,
       h3,
+      h4,
       p {
         margin: 0;
       }
@@ -49,16 +51,22 @@
       }
 
       h3 {
-        font-size: 1.1rem;
+        font-size: 1.2rem;
+        letter-spacing: 0;
+      }
+
+      h4 {
+        font-size: 1rem;
         letter-spacing: 0;
       }
 
       p,
       li,
       label,
-      input {
+      input,
+      select {
         color: #d8cfbd;
-        font-size: clamp(1rem, 2.5vw, 1.2rem);
+        font-size: clamp(1rem, 2.5vw, 1.05rem);
       }
 
       button {
@@ -80,11 +88,12 @@
       }
 
       button:disabled {
-        cursor: progress;
-        opacity: 0.7;
+        cursor: not-allowed;
+        opacity: 0.55;
       }
 
-      input {
+      input,
+      select {
         width: 100%;
         min-height: 2.75rem;
         border: 1px solid #6a6d72;
@@ -96,7 +105,7 @@
       }
 
       ul {
-        width: min(100%, 24rem);
+        width: min(100%, 28rem);
         margin: 0;
         padding: 0;
         display: grid;
@@ -122,15 +131,80 @@
       }
 
       .panel {
-        width: min(100%, 32rem);
+        width: min(100%, 48rem);
         display: grid;
-        gap: 0.75rem;
+        gap: 0.9rem;
         justify-items: center;
+        padding: 1rem;
+        border: 1px solid #3f4248;
+        border-radius: 0.5rem;
+      }
+
+      .settings-grid,
+      .item-grid,
+      .reveal-grid {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+        gap: 0.75rem;
+      }
+
+      .settings-grid label,
+      .modal label {
+        display: grid;
+        gap: 0.4rem;
+        text-align: left;
+      }
+
+      .item-card {
+        display: grid;
+        gap: 0.45rem;
+        padding: 0.85rem;
+        border: 1px solid #4a4d52;
+        border-radius: 0.5rem;
+        background: #202327;
+        text-align: left;
+      }
+
+      .item-card.unavailable {
+        opacity: 0.45;
+      }
+
+      .item-card input {
+        width: auto;
+        min-height: auto;
+      }
+
+      .item-card p,
+      .item-card span {
+        font-size: 0.95rem;
+      }
+
+      .item-type {
+        color: #b7d7c0;
       }
 
       .message {
         min-height: 1.5rem;
         color: #b7d7c0;
+      }
+
+      .round-table {
+        width: min(100%, 32rem);
+        aspect-ratio: 1;
+        display: grid;
+        place-items: center;
+        border: 2px solid #6a6d72;
+        border-radius: 50%;
+        padding: 2rem;
+      }
+
+      .round-table ol {
+        margin: 0;
+        padding-left: 1.5rem;
+        display: grid;
+        gap: 0.4rem;
+        text-align: left;
       }
 
       .modal-backdrop {
@@ -153,12 +227,6 @@
         box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 0.4);
       }
 
-      .modal label {
-        display: grid;
-        gap: 0.4rem;
-        text-align: left;
-      }
-
       [hidden] {
         display: none;
       }
@@ -179,28 +247,63 @@
         <button id="sit-down" class="secondary" type="button" hidden>Sit Down</button>
       </div>
       <p id="room-status"></p>
+
       <section class="panel" id="creator-panel" hidden>
         <h3>Room Settings</h3>
-        <div class="setting-row">
+        <div class="settings-grid">
           <label>
             Seat limit
             <input id="seat-limit-input" type="number" min="1" max="12" step="1">
           </label>
-          <button id="save-seat-limit" type="button">Save</button>
+          <label>
+            Draft pool
+            <select id="pool-select"></select>
+          </label>
+          <label>
+            Picks per bag
+            <input id="picks-per-bag-input" type="number" min="1" max="8" step="1">
+          </label>
+        </div>
+        <div class="settings-grid" id="item-type-settings"></div>
+        <div class="actions">
+          <button id="save-room-settings" type="button">Save Settings</button>
+          <button id="start-draft" type="button">Start Draft</button>
         </div>
       </section>
+
       <section class="panel">
         <h3>Seated</h3>
         <ul id="seated-people"></ul>
+        <p id="spectator-count"></p>
       </section>
-      <p id="spectator-count"></p>
+
+      <section class="panel" id="table-panel" hidden>
+        <h3>Round Table</h3>
+        <div class="round-table">
+          <ol id="table-order"></ol>
+        </div>
+      </section>
+
+      <section class="panel" id="player-draft-panel" hidden>
+        <h3>Your Draft</h3>
+        <p id="draft-instruction"></p>
+        <div class="item-grid" id="current-bag"></div>
+        <button id="lock-choice" type="button">Lock Choices</button>
+        <h4>Drafted Items</h4>
+        <div class="item-grid" id="private-drafted-items"></div>
+      </section>
+
+      <section class="panel" id="reveal-panel" hidden>
+        <h3>Final Drafts</h3>
+        <div class="reveal-grid" id="revealed-drafts"></div>
+      </section>
+
       <p class="message" id="room-message"></p>
     </main>
 
     <div class="modal-backdrop" id="join-modal" hidden>
       <form class="modal" id="join-form">
         <h3>Join Room</h3>
-        <p>You can sit down as a player or spectate for now.</p>
         <label>
           Name
           <input id="join-name" name="name" autocomplete="name" maxlength="40" placeholder="Your name">
@@ -246,7 +349,20 @@
       const roomMessage = document.querySelector("#room-message");
       const creatorPanel = document.querySelector("#creator-panel");
       const seatLimitInput = document.querySelector("#seat-limit-input");
-      const saveSeatLimit = document.querySelector("#save-seat-limit");
+      const poolSelect = document.querySelector("#pool-select");
+      const picksPerBagInput = document.querySelector("#picks-per-bag-input");
+      const itemTypeSettings = document.querySelector("#item-type-settings");
+      const saveRoomSettings = document.querySelector("#save-room-settings");
+      const startDraft = document.querySelector("#start-draft");
+      const tablePanel = document.querySelector("#table-panel");
+      const tableOrder = document.querySelector("#table-order");
+      const playerDraftPanel = document.querySelector("#player-draft-panel");
+      const draftInstruction = document.querySelector("#draft-instruction");
+      const currentBag = document.querySelector("#current-bag");
+      const lockChoice = document.querySelector("#lock-choice");
+      const privateDraftedItems = document.querySelector("#private-drafted-items");
+      const revealPanel = document.querySelector("#reveal-panel");
+      const revealedDrafts = document.querySelector("#revealed-drafts");
       const joinModal = document.querySelector("#join-modal");
       const joinForm = document.querySelector("#join-form");
       const joinName = document.querySelector("#join-name");
@@ -258,6 +374,12 @@
       let roomEvents = null;
       let currentRoomNumber = null;
       let currentRole = null;
+      let currentViewerId = null;
+      let latestRoom = null;
+      let pools = [];
+      let settingsInitialized = false;
+      let selectedItemIds = new Set();
+      let currentBagId = null;
 
       function show(view) {
         homeView.hidden = view !== homeView;
@@ -266,6 +388,33 @@
 
       function storageKey(roomId, key) {
         return `room:${roomId}:${key}`;
+      }
+
+      function makeId() {
+        return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+      }
+
+      function participantIdFor(roomId) {
+        const key = storageKey(roomId, "participantId");
+        const existing = sessionStorage.getItem(key);
+
+        if (existing) {
+          return existing;
+        }
+
+        const id = makeId();
+        sessionStorage.setItem(key, id);
+        return id;
+      }
+
+      async function fetchPools() {
+        if (pools.length > 0) {
+          return;
+        }
+
+        const response = await fetch(apiUrl("/api/pools"));
+        const data = await response.json();
+        pools = data.pools;
       }
 
       function startHomePresence() {
@@ -281,28 +430,241 @@
         };
       }
 
-      function renderSeated(names) {
+      function renderSeated(players) {
         seatedPeople.replaceChildren();
 
-        if (names.length === 0) {
+        if (players.length === 0) {
           const item = document.createElement("li");
           item.textContent = "No one seated yet";
           seatedPeople.append(item);
           return;
         }
 
-        for (const name of names) {
+        for (const player of players) {
           const item = document.createElement("li");
-          item.textContent = name;
+          item.textContent = player.name;
           seatedPeople.append(item);
         }
       }
 
+      function renderItemCard(item, options = {}) {
+        const card = document.createElement("label");
+        card.className = options.available === false ? "item-card unavailable" : "item-card";
+
+        if (options.checkable) {
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.value = item.id;
+          checkbox.disabled = options.available === false;
+          checkbox.checked = selectedItemIds.has(item.id);
+          card.append(checkbox);
+        }
+
+        const name = document.createElement("strong");
+        name.textContent = item.name;
+        const type = document.createElement("span");
+        type.className = "item-type";
+        type.textContent = item.type;
+        const content = document.createElement("p");
+        content.textContent = item.content;
+
+        card.append(name, type, content);
+        return card;
+      }
+
+      function renderItems(container, items) {
+        container.replaceChildren();
+
+        if (items.length === 0) {
+          const empty = document.createElement("p");
+          empty.textContent = "None yet";
+          container.append(empty);
+          return;
+        }
+
+        for (const item of items) {
+          container.append(renderItemCard(item));
+        }
+      }
+
+      function poolById(poolId) {
+        return pools.find((pool) => pool.id === poolId);
+      }
+
+      function renderTypeInputs(pool, values) {
+        itemTypeSettings.replaceChildren();
+
+        for (const itemType of pool.itemTypes) {
+          const label = document.createElement("label");
+          const input = document.createElement("input");
+          input.type = "number";
+          input.min = "0";
+          input.max = "10";
+          input.step = "1";
+          input.dataset.itemType = itemType.type;
+          input.value = values?.[itemType.type] ?? pool.defaultParameters.itemsPerType[itemType.type] ?? 0;
+          label.append(`${itemType.type} per bag`, input);
+          itemTypeSettings.append(label);
+        }
+      }
+
+      function renderDraftSettings(settings) {
+        if (settingsInitialized) {
+          return;
+        }
+
+        poolSelect.replaceChildren();
+
+        for (const pool of pools) {
+          const option = document.createElement("option");
+          option.value = pool.id;
+          option.textContent = pool.name;
+          poolSelect.append(option);
+        }
+
+        const pool = poolById(settings.poolId) || pools[0];
+        poolSelect.value = pool.id;
+        picksPerBagInput.value = settings.picksPerBag;
+        renderTypeInputs(pool, settings.itemsPerType);
+        settingsInitialized = true;
+      }
+
+      function collectDraftSettings() {
+        const itemsPerType = {};
+
+        for (const input of itemTypeSettings.querySelectorAll("input[data-item-type]")) {
+          itemsPerType[input.dataset.itemType] = Number(input.value);
+        }
+
+        return {
+          maxSeats: Number(seatLimitInput.value),
+          poolId: poolSelect.value,
+          picksPerBag: Number(picksPerBagInput.value),
+          itemsPerType
+        };
+      }
+
+      function isCreator() {
+        return Boolean(sessionStorage.getItem(storageKey(currentRoomNumber, "creatorToken")));
+      }
+
+      function renderTable(draft) {
+        tablePanel.hidden = draft.status === "not_started";
+        tableOrder.replaceChildren();
+
+        if (draft.status === "not_started") {
+          return;
+        }
+
+        for (const player of draft.table) {
+          const item = document.createElement("li");
+          item.textContent = `${player.seat}. ${player.name}`;
+          tableOrder.append(item);
+        }
+      }
+
+      function updateLockButton(requiredPickCount) {
+        const selectedCount = selectedItemIds.size;
+        lockChoice.textContent = requiredPickCount === 0 ? "Pass Bag" : "Lock Choices";
+        lockChoice.disabled = selectedCount !== requiredPickCount;
+      }
+
+      function renderCurrentBag(currentPlayer) {
+        currentBag.replaceChildren();
+
+        if (!currentPlayer.currentBag) {
+          draftInstruction.textContent = currentPlayer.queueLength === 0
+            ? "No bags in your queue."
+            : "Waiting for your next bag.";
+          lockChoice.hidden = true;
+          return;
+        }
+
+        const bag = currentPlayer.currentBag;
+
+        if (currentBagId !== bag.id) {
+          currentBagId = bag.id;
+          selectedItemIds = new Set();
+        }
+
+        const eligible = new Set(bag.eligibleItemIds);
+        draftInstruction.textContent = `Select ${bag.requiredPickCount} item${bag.requiredPickCount === 1 ? "" : "s"} from this bag.`;
+
+        for (const item of bag.items) {
+          currentBag.append(renderItemCard(item, {
+            checkable: true,
+            available: eligible.has(item.id)
+          }));
+        }
+
+        lockChoice.hidden = false;
+        updateLockButton(bag.requiredPickCount);
+      }
+
+      function renderPlayerDraft(draft) {
+        const currentPlayer = draft.currentPlayer;
+        playerDraftPanel.hidden = draft.status !== "active" || !currentPlayer;
+
+        if (playerDraftPanel.hidden) {
+          return;
+        }
+
+        renderCurrentBag(currentPlayer);
+        renderItems(privateDraftedItems, currentPlayer.draftedItems);
+      }
+
+      function renderReveal(draft) {
+        revealPanel.hidden = draft.status !== "complete";
+        revealedDrafts.replaceChildren();
+
+        if (draft.status !== "complete") {
+          return;
+        }
+
+        for (const player of draft.revealedDrafts) {
+          const section = document.createElement("section");
+          section.className = "item-card";
+          const title = document.createElement("h4");
+          title.textContent = player.name;
+          const items = document.createElement("div");
+          items.className = "item-grid";
+          section.append(title, items);
+          renderItems(items, player.items);
+          revealedDrafts.append(section);
+        }
+      }
+
+      function renderDraft(draft) {
+        renderTable(draft);
+        renderPlayerDraft(draft);
+        renderReveal(draft);
+
+        if (draft.status === "active" && !draft.currentPlayer) {
+          roomMessage.textContent = currentRole === "spectator" ? "Spectating draft." : roomMessage.textContent;
+        }
+
+        if (draft.status === "complete") {
+          roomMessage.textContent = "Draft complete.";
+        }
+      }
+
       function renderRoom(data) {
+        latestRoom = data;
         renderSeated(data.seated);
         roomStatus.textContent = `${data.seated.length} of ${data.maxSeats} seats filled`;
         spectatorCount.textContent = `${data.spectators} spectator${data.spectators === 1 ? "" : "s"}`;
         seatLimitInput.value = data.maxSeats;
+
+        if (data.draft.status === "not_started") {
+          renderDraftSettings(data.draft.settings);
+        }
+
+        const roomIsFull = data.seated.length === data.maxSeats;
+        const draftNotStarted = data.draft.status === "not_started";
+        creatorPanel.hidden = !isCreator() || !draftNotStarted;
+        startDraft.disabled = !roomIsFull;
+        sitDown.hidden = currentRole !== "spectator" || !draftNotStarted;
+        renderDraft(data.draft);
       }
 
       function openJoinModal() {
@@ -329,7 +691,11 @@
           roomEvents.close();
         }
 
-        const params = new URLSearchParams({ role });
+        currentViewerId = participantIdFor(currentRoomNumber);
+        const params = new URLSearchParams({
+          role,
+          participantId: currentViewerId
+        });
 
         if (name) {
           params.set("name", name);
@@ -339,13 +705,15 @@
 
         roomEvents.addEventListener("viewer", (event) => {
           const viewer = JSON.parse(event.data);
+          currentViewerId = viewer.id;
           currentRole = viewer.role;
-          sitDown.hidden = currentRole !== "spectator";
+          sitDown.hidden = currentRole !== "spectator" || latestRoom?.draft.status !== "not_started";
 
           if (viewer.name) {
             sessionStorage.setItem(storageKey(currentRoomNumber, "name"), viewer.name);
           }
 
+          sessionStorage.setItem(storageKey(currentRoomNumber, "participantId"), viewer.id);
           sessionStorage.setItem(storageKey(currentRoomNumber, "role"), currentRole);
 
           if (viewer.seatDenied) {
@@ -366,13 +734,14 @@
 
       async function enterRoom(id) {
         currentRoomNumber = id;
+        await fetchPools();
         const response = await fetch(apiUrl(`/api/rooms/${id}`));
 
         roomNumber.textContent = id;
         shareRoom.disabled = false;
 
         if (!response.ok) {
-          renderSeated(["Room not found"]);
+          renderSeated([{ name: "Room not found" }]);
           roomStatus.textContent = "";
           spectatorCount.textContent = "";
           sitDown.hidden = true;
@@ -382,9 +751,6 @@
 
         const room = await response.json();
         renderRoom(room);
-
-        const creatorToken = sessionStorage.getItem(storageKey(id, "creatorToken"));
-        creatorPanel.hidden = !creatorToken;
         show(roomView);
 
         const savedRole = sessionStorage.getItem(storageKey(id, "role"));
@@ -433,10 +799,9 @@
         }
       }
 
-      async function saveCreatorSeatLimit() {
+      async function saveSettings(options = {}) {
         const creatorToken = sessionStorage.getItem(storageKey(currentRoomNumber, "creatorToken"));
-        const maxSeats = Number(seatLimitInput.value);
-        saveSeatLimit.disabled = true;
+        saveRoomSettings.disabled = true;
 
         try {
           const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/settings`), {
@@ -444,7 +809,10 @@
             headers: {
               "Content-Type": "application/json"
             },
-            body: JSON.stringify({ creatorToken, maxSeats })
+            body: JSON.stringify({
+              creatorToken,
+              ...collectDraftSettings()
+            })
           });
 
           const data = await response.json();
@@ -454,14 +822,85 @@
               data.error === "seat_limit_below_current_players"
                 ? "Seat limit cannot be below the number of seated players."
                 : "Could not save room settings.";
-            return;
+            return false;
           }
 
           renderRoom(data);
-          roomMessage.textContent = "Room settings saved.";
+
+          if (!options.silent) {
+            roomMessage.textContent = "Room settings saved.";
+          }
+
+          return true;
         } finally {
-          saveSeatLimit.disabled = false;
+          saveRoomSettings.disabled = false;
         }
+      }
+
+      async function handleStartDraft() {
+        startDraft.disabled = true;
+        const settingsSaved = await saveSettings({ silent: true });
+
+        if (!settingsSaved) {
+          startDraft.disabled = false;
+          return;
+        }
+
+        const creatorToken = sessionStorage.getItem(storageKey(currentRoomNumber, "creatorToken"));
+        const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/start`), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            creatorToken,
+            participantId: currentViewerId
+          })
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          roomMessage.textContent = data.error === "room_not_full"
+            ? "The room must be full before starting."
+            : "Could not start the draft.";
+          startDraft.disabled = false;
+          return;
+        }
+
+        renderRoom(data);
+        roomMessage.textContent = "Draft started.";
+      }
+
+      async function lockCurrentChoice() {
+        if (!latestRoom?.draft.currentPlayer?.currentBag) {
+          return;
+        }
+
+        lockChoice.disabled = true;
+        const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/pick`), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            playerId: currentViewerId,
+            itemIds: [...selectedItemIds]
+          })
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          roomMessage.textContent = data.error === "wrong_pick_count"
+            ? `Select ${data.requiredPickCount} item${data.requiredPickCount === 1 ? "" : "s"}.`
+            : "Could not lock that choice.";
+          lockChoice.disabled = false;
+          return;
+        }
+
+        selectedItemIds = new Set();
+        currentBagId = null;
+        renderRoom(data);
+        roomMessage.textContent = "Choice locked.";
       }
 
       joinForm.addEventListener("submit", (event) => {
@@ -497,8 +936,43 @@
         connectToRoom("seated", name);
       });
 
+      currentBag.addEventListener("change", (event) => {
+        if (event.target.type !== "checkbox") {
+          return;
+        }
+
+        const itemId = event.target.value;
+        const requiredPickCount = latestRoom.draft.currentPlayer.currentBag.requiredPickCount;
+
+        if (event.target.checked) {
+          if (selectedItemIds.size >= requiredPickCount) {
+            event.target.checked = false;
+            return;
+          }
+
+          selectedItemIds.add(itemId);
+        } else {
+          selectedItemIds.delete(itemId);
+        }
+
+        updateLockButton(requiredPickCount);
+      });
+
+      poolSelect.addEventListener("change", () => {
+        const pool = poolById(poolSelect.value);
+
+        if (!pool) {
+          return;
+        }
+
+        picksPerBagInput.value = pool.defaultParameters.picksPerBag;
+        renderTypeInputs(pool, pool.defaultParameters.itemsPerType);
+      });
+
       shareRoom.addEventListener("click", copyShareUrl);
-      saveSeatLimit.addEventListener("click", saveCreatorSeatLimit);
+      saveRoomSettings.addEventListener("click", () => saveSettings());
+      startDraft.addEventListener("click", handleStartDraft);
+      lockChoice.addEventListener("click", lockCurrentChoice);
 
       const roomMatch = window.location.pathname.match(/^\/rooms\/(\d{6})$/);
 
