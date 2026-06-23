@@ -56,4 +56,4 @@ The backend health check should be available through the frontend proxy at:
 https://yvonick-frankendrafttool.onrender.com/api/health
 ```
 
-The frontend also opens a live presence stream at `/api/presence` to show how many browser tabs currently have the page open. This count is in-memory per backend instance.
+The frontend also opens a live presence stream at `/api/presence` locally, or directly against the Render backend in production, to show how many browser tabs currently have the page open. This count is in-memory per backend instance.

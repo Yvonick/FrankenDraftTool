@@ -45,7 +45,11 @@
     </main>
     <script>
       const openPages = document.querySelector("#open-pages");
-      const presence = new EventSource("/api/presence");
+      const presenceUrl =
+        window.location.hostname === "yvonick-frankendrafttool.onrender.com"
+          ? "https://yvonick-frankendrafttool-api.onrender.com/api/presence"
+          : "/api/presence";
+      const presence = new EventSource(presenceUrl);
 
       presence.onmessage = (event) => {
         const data = JSON.parse(event.data);
