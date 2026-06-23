@@ -167,15 +167,75 @@
         text-align: left;
       }
 
-      .item-image {
+      .item-image-frame {
         width: 100%;
-        aspect-ratio: 3 / 4;
+        position: relative;
+        aspect-ratio: var(--image-aspect, 3 / 4);
         border: 1px solid #3f4248;
         border-radius: 0.35rem;
         background-color: #111316;
-        background-position: center;
-        background-repeat: no-repeat;
-        background-size: contain;
+      }
+
+      .item-image-crop,
+      .item-preview-crop {
+        width: 100%;
+        height: 100%;
+        position: relative;
+        overflow: hidden;
+        border-radius: inherit;
+      }
+
+      .item-image-crop img,
+      .item-preview-crop img {
+        position: absolute;
+        left: var(--sheet-left, 0%);
+        top: var(--sheet-top, 0%);
+        width: var(--sheet-width, 100%);
+        height: var(--sheet-height, 100%);
+        object-fit: var(--image-fit, contain);
+      }
+
+      .image-unavailable {
+        position: absolute;
+        inset: 0;
+        display: none;
+        place-items: center;
+        padding: 0.75rem;
+        color: #d8cfbd;
+        text-align: center;
+      }
+
+      .item-image-frame.failed .item-image-crop,
+      .item-image-frame.failed .item-preview {
+        display: none;
+      }
+
+      .item-image-frame.failed .image-unavailable {
+        display: grid;
+      }
+
+      .item-preview {
+        width: min(82vw, 32rem);
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        z-index: 20;
+        aspect-ratio: var(--image-aspect, 3 / 4);
+        transform: translate(-50%, -50%);
+        border: 1px solid #6a6d72;
+        border-radius: 0.5rem;
+        background: #111316;
+        box-shadow: 0 2rem 5rem rgb(0 0 0 / 0.55);
+        opacity: 0;
+        pointer-events: none;
+        visibility: hidden;
+        transition: opacity 0.15s ease 1.1s, visibility 0s linear 1.1s;
+      }
+
+      .item-image-frame:hover .item-preview,
+      .item-image-frame:focus-within .item-preview {
+        opacity: 1;
+        visibility: visible;
       }
 
       .item-card.unavailable {
@@ -535,6 +595,67 @@
         }
       }
 
+      function createImageCrop(item) {
+        const crop = document.createElement("div");
+        crop.className = "item-image-crop";
+        const image = document.createElement("img");
+        image.src = item.imageUrl;
+        image.alt = item.name;
+        image.loading = "lazy";
+
+        if (item.imageSheet) {
+          const { columns, rows, index } = item.imageSheet;
+          const column = index % columns;
+          const row = Math.floor(index / columns);
+          crop.style.setProperty("--sheet-width", `${columns * 100}%`);
+          crop.style.setProperty("--sheet-height", `${rows * 100}%`);
+          crop.style.setProperty("--sheet-left", `${-column * 100}%`);
+          crop.style.setProperty("--sheet-top", `${-row * 100}%`);
+          crop.style.setProperty("--image-fit", "fill");
+        }
+
+        crop.append(image);
+        return crop;
+      }
+
+      function getImageAspect(item) {
+        if (item.imageSheet || item.sourceObjectType === "Card" || item.sourceObjectType === "CardCustom") {
+          return "3 / 4";
+        }
+
+        if (item.sourceObjectType === "Custom_Model") {
+          return "1 / 1";
+        }
+
+        return "4 / 3";
+      }
+
+      function renderItemImage(item) {
+        const frame = document.createElement("div");
+        frame.className = "item-image-frame";
+        frame.style.setProperty("--image-aspect", getImageAspect(item));
+        frame.setAttribute("tabindex", "0");
+        frame.setAttribute("aria-label", item.name);
+        const crop = createImageCrop(item);
+        const preview = document.createElement("div");
+        preview.className = "item-preview";
+        const previewCrop = createImageCrop(item);
+        previewCrop.className = "item-preview-crop";
+        const unavailable = document.createElement("div");
+        unavailable.className = "image-unavailable";
+        unavailable.textContent = "Image unavailable";
+
+        for (const image of [...crop.querySelectorAll("img"), ...previewCrop.querySelectorAll("img")]) {
+          image.addEventListener("error", () => {
+            frame.classList.add("failed");
+          });
+        }
+
+        preview.append(previewCrop);
+        frame.append(crop, preview, unavailable);
+        return frame;
+      }
+
       function renderItemCard(item, options = {}) {
         const card = document.createElement("label");
         card.className = options.available === false ? "item-card unavailable" : "item-card";
@@ -549,23 +670,7 @@
         }
 
         if (item.imageUrl) {
-          const image = document.createElement("div");
-          image.className = "item-image";
-          image.setAttribute("role", "img");
-          image.setAttribute("aria-label", item.name);
-          image.style.backgroundImage = `url("${item.imageUrl}")`;
-
-          if (item.imageSheet) {
-            const { columns, rows, index } = item.imageSheet;
-            const column = index % columns;
-            const row = Math.floor(index / columns);
-            const x = columns <= 1 ? 0 : (column / (columns - 1)) * 100;
-            const y = rows <= 1 ? 0 : (row / (rows - 1)) * 100;
-            image.style.backgroundSize = `${columns * 100}% ${rows * 100}%`;
-            image.style.backgroundPosition = `${x}% ${y}%`;
-          }
-
-          card.append(image);
+          card.append(renderItemImage(item));
         }
 
         const name = document.createElement("strong");
