@@ -16,9 +16,11 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Local persistent data
+services/backend/data/
+
 # OS/editor noise
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
-

@@ -60,8 +60,10 @@ The frontend also opens a live presence stream at `/api/presence` locally, or di
 
 Rooms are also stored in memory for now. The home page can create a numbered room at `/rooms/{roomNumber}`. Anyone with that URL can join, choose to sit down with a display name, or spectate. Rooms start with 6 seats, the creator can change that limit, and spectators can sit down later if a seat is available.
 
-The room creator can configure and launch a draft once the room is full. The current prototype includes one generated Testing Pool with 10 item types and 50 items per type. Drafts randomly seat players around the table, deal starting bags from the pool, let players lock legal picks from their current bag, pass remaining bag contents clockwise, and reveal all drafted items when every bag is empty.
+The room creator can configure and launch a draft once the room is full. Drafts randomly seat players around the table, deal starting bags from the pool, let players lock legal picks from their current bag, pass remaining bag contents clockwise, and reveal all drafted items when every bag is empty.
 
 The host can restart an active or completed draft back to setup. Draft views can be grouped by item type or pick order. Named spectators can be promoted to super spectators, which lets them see player draft areas and current bags while a draft is active.
 
 Custom pools can be loaded directly from Tabletop Simulator saved-object JSON files placed in `services/backend/pools/raw`. The backend parses top-level TTS bags as item types and extracts item names plus image URLs from cards, custom tiles, and custom models. The included `Franken Y V69.json` file is loaded this way as the `Franken Y V6.9` pool.
+
+Public saved pools are written to `POOL_STORE_PATH`, defaulting locally to `services/backend/data/public-pools.json`. The Render Blueprint mounts a persistent disk at `/var/data` and sets `POOL_STORE_PATH=/var/data/public-pools.json`, so uploaded/saved public pools survive backend restarts. Render persistent disks require a paid web service instance; without the disk, saved pools fall back to the service's ephemeral filesystem and can disappear after restarts.

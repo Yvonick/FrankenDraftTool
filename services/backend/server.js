@@ -305,7 +305,11 @@ async function handlePoolUpload(request, response) {
     return;
   }
 
-  const pool = registerUploadedTtsPool(rawJson, fileName.replace(/\.json$/i, ""));
+  const saveUploadedPool = body.savePool === true;
+  const pool = registerUploadedTtsPool(rawJson, fileName.replace(/\.json$/i, ""), {
+    name: cleanOptionalName(body.poolName),
+    public: saveUploadedPool
+  });
 
   if (!pool) {
     sendJson(response, 400, { error: "invalid_pool_format" });
@@ -313,7 +317,8 @@ async function handlePoolUpload(request, response) {
   }
 
   sendJson(response, 201, {
-    pool: getPoolSummary(pool)
+    pool: getPoolSummary(pool),
+    pools: saveUploadedPool ? listPublicPools().map(getPoolSummary) : undefined
   });
 }
 

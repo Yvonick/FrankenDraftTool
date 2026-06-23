@@ -544,6 +544,15 @@
       <div class="actions">
         <a class="button-link secondary" href="/">Home</a>
       </div>
+      <section class="panel">
+        <h3>Upload Pool</h3>
+        <div class="pool-upload">
+          <label class="pool-upload-drop" id="public-pool-upload-drop">
+            <span id="public-pool-upload-label">Drop JSON or choose file</span>
+            <input id="public-pool-upload-input" type="file" accept=".json,application/json">
+          </label>
+        </div>
+      </section>
       <div class="pool-admin-list" id="public-pools-list"></div>
       <p class="message" id="pools-message"></p>
     </main>
@@ -689,6 +698,9 @@
       const openPages = document.querySelector("#open-pages");
       const createRoom = document.querySelector("#create-room");
       const publicPoolsList = document.querySelector("#public-pools-list");
+      const publicPoolUploadDrop = document.querySelector("#public-pool-upload-drop");
+      const publicPoolUploadInput = document.querySelector("#public-pool-upload-input");
+      const publicPoolUploadLabel = document.querySelector("#public-pool-upload-label");
       const poolsMessage = document.querySelector("#pools-message");
       const roomNumber = document.querySelector("#room-number");
       const shareRoom = document.querySelector("#share-room");
@@ -1170,6 +1182,47 @@
         } finally {
           poolUploadInput.value = "";
           poolUploadInput.disabled = false;
+        }
+      }
+
+      async function uploadPublicPoolFile(file) {
+        if (!file) {
+          return;
+        }
+
+        publicPoolUploadInput.disabled = true;
+        publicPoolUploadDrop.classList.remove("dragging");
+        publicPoolUploadLabel.textContent = `Uploading ${file.name}...`;
+
+        try {
+          const fileContent = await file.text();
+          const response = await fetch(apiUrl("/api/pools/upload"), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              fileName: file.name,
+              fileContent,
+              savePool: true
+            })
+          });
+          const data = await response.json().catch(() => ({}));
+
+          if (!response.ok) {
+            throw new Error(data.error || "upload_failed");
+          }
+
+          pools = data.pools || [...pools, data.pool];
+          renderPublicPools();
+          publicPoolUploadLabel.textContent = `${data.pool.name} uploaded`;
+          poolsMessage.textContent = "Pool uploaded and saved.";
+        } catch (error) {
+          publicPoolUploadLabel.textContent = "Drop JSON or choose file";
+          poolsMessage.textContent = poolUploadErrorMessage(error.message);
+        } finally {
+          publicPoolUploadInput.value = "";
+          publicPoolUploadInput.disabled = false;
         }
       }
 
@@ -1911,6 +1964,25 @@
         event.preventDefault();
         poolUploadDrop.classList.remove("dragging");
         uploadPoolFile(event.dataTransfer.files?.[0]);
+      });
+
+      publicPoolUploadInput.addEventListener("change", () => {
+        uploadPublicPoolFile(publicPoolUploadInput.files?.[0]);
+      });
+
+      publicPoolUploadDrop.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        publicPoolUploadDrop.classList.add("dragging");
+      });
+
+      publicPoolUploadDrop.addEventListener("dragleave", () => {
+        publicPoolUploadDrop.classList.remove("dragging");
+      });
+
+      publicPoolUploadDrop.addEventListener("drop", (event) => {
+        event.preventDefault();
+        publicPoolUploadDrop.classList.remove("dragging");
+        uploadPublicPoolFile(event.dataTransfer.files?.[0]);
       });
 
       publicPoolsList.addEventListener("click", (event) => {

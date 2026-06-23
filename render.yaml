@@ -2,16 +2,22 @@ services:
   - type: web
     name: yvonick-frankendrafttool-api
     runtime: node
-    plan: free
+    plan: starter
     region: frankfurt
     rootDir: services/backend
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/health
     autoDeployTrigger: commit
+    disk:
+      name: pool-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: FRONTEND_ORIGIN
         value: https://yvonick-frankendrafttool.onrender.com
+      - key: POOL_STORE_PATH
+        value: /var/data/public-pools.json
 
   - type: web
     name: yvonick-frankendrafttool

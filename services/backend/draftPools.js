@@ -1,6 +1,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+const poolStorePath = process.env.POOL_STORE_PATH
+  || path.join(__dirname, "data", "public-pools.json");
+
 function slugify(value) {
   return String(value)
     .toLowerCase()
@@ -242,6 +245,63 @@ function withPoolMetadata(pool, options = {}) {
   };
 }
 
+function serializePool(pool) {
+  return {
+    id: pool.id,
+    name: pool.name,
+    source: pool.source,
+    public: Boolean(pool.public),
+    types: pool.types,
+    items: pool.items,
+    defaultParameters: normalizeDefaultParameters(pool, pool.defaultParameters)
+  };
+}
+
+function loadStoredPublicPools() {
+  if (!fs.existsSync(poolStorePath)) {
+    return null;
+  }
+
+  try {
+    const stored = JSON.parse(fs.readFileSync(poolStorePath, "utf8"));
+    const storedPools = Array.isArray(stored) ? stored : stored.pools;
+
+    if (!Array.isArray(storedPools)) {
+      return null;
+    }
+
+    return storedPools
+      .filter((pool) => pool?.id && Array.isArray(pool.types) && Array.isArray(pool.items))
+      .map((pool) => withPoolMetadata(pool, {
+        public: true,
+        defaultParameters: pool.defaultParameters
+      }));
+  } catch (error) {
+    console.warn(`Could not load public pool store at ${poolStorePath}: ${error.message}`);
+    return null;
+  }
+}
+
+function persistPublicPools() {
+  const publicPools = listPublicPools().map(serializePool);
+  const directory = path.dirname(poolStorePath);
+  const temporaryPath = `${poolStorePath}.${process.pid}.tmp`;
+
+  try {
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(temporaryPath, JSON.stringify({
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      pools: publicPools
+    }, null, 2));
+    fs.renameSync(temporaryPath, poolStorePath);
+    return true;
+  } catch (error) {
+    console.warn(`Could not persist public pool store at ${poolStorePath}: ${error.message}`);
+    return false;
+  }
+}
+
 function loadTtsPools() {
   const rawPoolsDir = path.join(__dirname, "pools", "raw");
 
@@ -259,7 +319,7 @@ function loadTtsPools() {
     .filter(Boolean);
 }
 
-const allPools = loadTtsPools().map((pool) => withPoolMetadata(pool, {
+const allPools = loadStoredPublicPools() || loadTtsPools().map((pool) => withPoolMetadata(pool, {
   public: true
 }));
 
@@ -293,7 +353,7 @@ function uniquePoolId(baseId) {
   return `${base}-${suffix}`;
 }
 
-function registerUploadedTtsPool(rawJson, fallbackName) {
+function registerUploadedTtsPool(rawJson, fallbackName, options = {}) {
   const parsedPool = parseTtsPool(rawJson, fallbackName);
 
   if (!parsedPool) {
@@ -302,13 +362,20 @@ function registerUploadedTtsPool(rawJson, fallbackName) {
 
   const pool = {
     ...withPoolMetadata(clonePoolWithId(parsedPool, uniquePoolId(parsedPool.id)), {
-      public: false
+      name: options.name,
+      public: Boolean(options.public),
+      defaultParameters: options.defaultParameters
     }),
-    source: "tts-upload",
-    public: false
+    source: options.public ? "tts-saved" : "tts-upload",
+    public: Boolean(options.public)
   };
 
   draftPools.set(pool.id, pool);
+
+  if (pool.public) {
+    persistPublicPools();
+  }
+
   return pool;
 }
 
@@ -330,6 +397,7 @@ function savePool(poolId, options = {}) {
   };
 
   draftPools.set(savedPool.id, savedPool);
+  persistPublicPools();
   return savedPool;
 }
 
@@ -354,6 +422,7 @@ function removePublicPool(poolId) {
   }
 
   draftPools.delete(pool.id);
+  persistPublicPools();
   return true;
 }
 
