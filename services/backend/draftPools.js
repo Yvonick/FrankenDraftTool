@@ -76,6 +76,10 @@ function shouldKeepSecondaryImage(type) {
   return !/(?:planet|anomaly|home\s*systems?)/i.test(type);
 }
 
+function shouldCropSystemTileTexture(type, item) {
+  return item.Name === "Custom_Model" && /(?:planet|anomaly|home\s*systems?)/i.test(type);
+}
+
 function getDeckForCard(item) {
   const customDeck = item.CustomDeck || {};
   const deckId = item.CardID === undefined ? null : String(Math.floor(Number(item.CardID) / 100));
@@ -142,7 +146,9 @@ function extractTtsItem(item, type, poolId, index) {
     type,
     imageUrl: resolveAssetUrl(image.imageUrl),
     imageSecondaryUrl: shouldKeepSecondaryImage(type) ? resolveAssetUrl(image.imageSecondaryUrl) : null,
-    imageSheet: image.imageSheet,
+    imageSheet: shouldCropSystemTileTexture(type, item)
+      ? { columns: 2, rows: 1, index: 0 }
+      : image.imageSheet,
     sourceObjectType: item.Name || "Unknown"
   };
 }

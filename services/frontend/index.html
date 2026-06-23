@@ -205,23 +205,30 @@
       .item-image-crop,
       .item-preview-crop {
         position: relative;
+        aspect-ratio: var(--crop-aspect, var(--image-aspect, 1 / 1));
         overflow: hidden;
         border-radius: inherit;
       }
 
       .item-image-crop {
         width: 100%;
-        height: 100%;
+        max-width: 100%;
+        max-height: 100%;
       }
 
       .item-image-frame.portrait .item-image-crop {
-        width: 75%;
         height: 100%;
+        width: auto;
       }
 
       .item-image-frame.landscape .item-image-crop {
         width: 100%;
-        height: 75%;
+        height: auto;
+      }
+
+      .item-image-frame.square .item-image-crop {
+        width: 100%;
+        height: 100%;
       }
 
       .item-preview-crop {
@@ -259,12 +266,14 @@
       }
 
       .item-preview {
-        width: min(82vw, 32rem);
+        width: var(--preview-width, min(82vw, 32rem));
         position: fixed;
         left: 50%;
         top: 50%;
         z-index: 20;
-        aspect-ratio: var(--image-aspect, 3 / 4);
+        max-width: 92vw;
+        max-height: 88vh;
+        aspect-ratio: var(--crop-aspect, var(--image-aspect, 1 / 1));
         transform: translate(-50%, -50%);
         border: 1px solid #6a6d72;
         border-radius: 0.5rem;
@@ -675,7 +684,20 @@
         }
       }
 
-      function createImageCrop(item) {
+      function setImageRatio(frame, ratio) {
+        if (!Number.isFinite(ratio) || ratio <= 0) {
+          return;
+        }
+
+        frame.style.setProperty("--crop-aspect", String(ratio));
+        const maxWidth = Math.min(window.innerWidth * 0.92, 704, window.innerHeight * 0.88 * ratio);
+        frame.style.setProperty("--preview-width", `${Math.max(180, maxWidth)}px`);
+        frame.classList.toggle("portrait", ratio < 0.9);
+        frame.classList.toggle("landscape", ratio > 1.1);
+        frame.classList.toggle("square", ratio >= 0.9 && ratio <= 1.1);
+      }
+
+      function createImageCrop(item, frame) {
         const crop = document.createElement("div");
         crop.className = "item-image-crop";
         const image = document.createElement("img");
@@ -694,12 +716,18 @@
           crop.style.setProperty("--image-fit", "fill");
         }
 
+        image.addEventListener("load", () => {
+          const sheet = item.imageSheet || { columns: 1, rows: 1 };
+          const ratio = (image.naturalWidth / sheet.columns) / (image.naturalHeight / sheet.rows);
+          setImageRatio(frame, ratio);
+        });
+
         crop.append(image);
         return crop;
       }
 
       function getImageAspect(item) {
-        if (item.imageSheet || item.sourceObjectType === "Card" || item.sourceObjectType === "CardCustom") {
+        if (item.sourceObjectType === "Card" || item.sourceObjectType === "CardCustom") {
           return "3 / 4";
         }
 
@@ -728,12 +756,13 @@
         const frame = document.createElement("div");
         frame.className = `item-image-frame ${getImageShape(item)}`;
         frame.style.setProperty("--image-aspect", getImageAspect(item));
+        setImageRatio(frame, Number(getImageAspect(item).split("/")[0]) / Number(getImageAspect(item).split("/")[1]));
         frame.setAttribute("tabindex", "0");
         frame.setAttribute("aria-label", item.name);
-        const crop = createImageCrop(item);
+        const crop = createImageCrop(item, frame);
         const preview = document.createElement("div");
         preview.className = "item-preview";
-        const previewCrop = createImageCrop(item);
+        const previewCrop = createImageCrop(item, frame);
         previewCrop.className = "item-preview-crop";
         const unavailable = document.createElement("div");
         unavailable.className = "image-unavailable";
