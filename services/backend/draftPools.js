@@ -64,12 +64,37 @@ function loadAssetOverrides() {
 
 const assetOverrides = loadAssetOverrides();
 
+function normalizeSteamAssetUrl(url) {
+  let parsedUrl;
+
+  try {
+    parsedUrl = new URL(url);
+  } catch (error) {
+    return url;
+  }
+
+  if (/^cloud-\d+\.steamusercontent\.com$/i.test(parsedUrl.hostname) && parsedUrl.pathname.startsWith("/ugc/")) {
+    parsedUrl.protocol = "https:";
+    parsedUrl.hostname = "steamusercontent-a.akamaihd.net";
+    return parsedUrl.toString();
+  }
+
+  if (parsedUrl.protocol === "http:" && /^steamusercontent-a\.akamaihd\.net$/i.test(parsedUrl.hostname)) {
+    parsedUrl.protocol = "https:";
+    return parsedUrl.toString();
+  }
+
+  return url;
+}
+
 function resolveAssetUrl(url) {
   if (!url) {
     return null;
   }
 
-  return assetOverrides[url] || url;
+  const normalizedUrl = normalizeSteamAssetUrl(url);
+
+  return assetOverrides[url] || assetOverrides[normalizedUrl] || normalizedUrl;
 }
 
 function shouldKeepSecondaryImage(type) {
