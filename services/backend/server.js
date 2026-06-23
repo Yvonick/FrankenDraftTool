@@ -238,7 +238,11 @@ function cloneItem(item) {
     id: item.id,
     name: item.name,
     content: item.content,
-    type: item.type
+    type: item.type,
+    imageUrl: item.imageUrl,
+    imageSecondaryUrl: item.imageSecondaryUrl,
+    imageSheet: item.imageSheet,
+    sourceObjectType: item.sourceObjectType
   };
 }
 

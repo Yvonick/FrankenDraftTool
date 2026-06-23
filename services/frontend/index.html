@@ -167,6 +167,17 @@
         text-align: left;
       }
 
+      .item-image {
+        width: 100%;
+        aspect-ratio: 3 / 4;
+        border: 1px solid #3f4248;
+        border-radius: 0.35rem;
+        background-color: #111316;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-size: contain;
+      }
+
       .item-card.unavailable {
         opacity: 0.45;
       }
@@ -290,6 +301,7 @@
       <div class="actions">
         <button id="share-room" type="button">Share Room</button>
         <button id="sit-down" class="secondary" type="button" hidden>Sit Down</button>
+        <button id="spectate-room" class="secondary" type="button" hidden>Become Spectator</button>
         <button id="restart-draft" class="secondary" type="button" hidden>Restart Draft</button>
       </div>
       <p id="room-status"></p>
@@ -371,7 +383,7 @@
       <form class="modal" id="join-form">
         <h3>Join Room</h3>
         <label>
-          Name
+          Name <span>(optional for spectators)</span>
           <input id="join-name" name="name" autocomplete="name" maxlength="40" placeholder="Your name">
         </label>
         <div class="actions">
@@ -409,6 +421,7 @@
       const roomNumber = document.querySelector("#room-number");
       const shareRoom = document.querySelector("#share-room");
       const sitDown = document.querySelector("#sit-down");
+      const spectateRoom = document.querySelector("#spectate-room");
       const restartDraft = document.querySelector("#restart-draft");
       const roomStatus = document.querySelector("#room-status");
       const seatingPanel = document.querySelector("#seating-panel");
@@ -533,6 +546,26 @@
           checkbox.disabled = options.available === false;
           checkbox.checked = selectedItemIds.has(item.id);
           card.append(checkbox);
+        }
+
+        if (item.imageUrl) {
+          const image = document.createElement("div");
+          image.className = "item-image";
+          image.setAttribute("role", "img");
+          image.setAttribute("aria-label", item.name);
+          image.style.backgroundImage = `url("${item.imageUrl}")`;
+
+          if (item.imageSheet) {
+            const { columns, rows, index } = item.imageSheet;
+            const column = index % columns;
+            const row = Math.floor(index / columns);
+            const x = columns <= 1 ? 0 : (column / (columns - 1)) * 100;
+            const y = rows <= 1 ? 0 : (row / (rows - 1)) * 100;
+            image.style.backgroundSize = `${columns * 100}% ${rows * 100}%`;
+            image.style.backgroundPosition = `${x}% ${y}%`;
+          }
+
+          card.append(image);
         }
 
         const name = document.createElement("strong");
@@ -877,6 +910,7 @@
         seatingPanel.hidden = !draftNotStarted;
         startDraft.disabled = !roomIsFull;
         sitDown.hidden = currentRole !== "spectator" || !draftNotStarted;
+        spectateRoom.hidden = currentRole !== "seated" || !draftNotStarted;
         renderDraft(data.draft);
       }
 
@@ -1190,6 +1224,10 @@
       });
 
       sitDown.addEventListener("click", openSitModal);
+      spectateRoom.addEventListener("click", () => {
+        const name = sessionStorage.getItem(storageKey(currentRoomNumber, "name")) || "";
+        connectToRoom("spectator", name);
+      });
       cancelSit.addEventListener("click", closeSitModal);
       sitForm.addEventListener("submit", (event) => {
         event.preventDefault();
