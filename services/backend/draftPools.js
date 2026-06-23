@@ -64,6 +64,10 @@ function resolveAssetUrl(url) {
   return assetOverrides[url] || assetOverrides[normalizedUrl] || normalizedUrl;
 }
 
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 function shouldKeepSecondaryImage(type) {
   return !/(?:planet|anomaly|home\s*systems?)/i.test(type);
 }
@@ -141,7 +145,8 @@ function extractTtsItem(item, type, poolId, index) {
     imageSheet: shouldCropSystemTileTexture(type, item)
       ? { columns: 2, rows: 1, index: 0 }
       : image.imageSheet,
-    sourceObjectType: item.Name || "Unknown"
+    sourceObjectType: item.Name || "Unknown",
+    ttsObject: cloneJson(item)
   };
 }
 

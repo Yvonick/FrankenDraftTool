@@ -69,6 +69,17 @@ function sendHead(response, statusCode) {
   response.end();
 }
 
+function sendJsonDownload(response, fileName, body) {
+  response.writeHead(200, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Disposition": `attachment; filename="${fileName}"`,
+    "Cache-Control": "no-store",
+    "Access-Control-Allow-Origin": frontendOrigin,
+    "Access-Control-Expose-Headers": "Content-Disposition"
+  });
+  response.end(JSON.stringify(body, null, 2));
+}
+
 function sendPresenceEvent(response) {
   response.write(`data: ${JSON.stringify({ openPages: presenceClients.size })}\n\n`);
 }
@@ -262,7 +273,128 @@ function cloneItem(item) {
     imageUrl: item.imageUrl,
     imageSecondaryUrl: item.imageSecondaryUrl,
     imageSheet: item.imageSheet,
+    sourceObjectType: item.sourceObjectType,
+    ttsObject: item.ttsObject
+  };
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function getItemSnapshot(item) {
+  return {
+    id: item.id,
+    name: item.name,
+    content: item.content,
+    type: item.type,
+    imageUrl: item.imageUrl,
+    imageSecondaryUrl: item.imageSecondaryUrl,
+    imageSheet: item.imageSheet,
     sourceObjectType: item.sourceObjectType
+  };
+}
+
+function getDraftGroupSnapshot(group) {
+  return {
+    id: group.id,
+    pickNumber: group.pickNumber,
+    bagId: group.bagId,
+    items: group.items.map(getItemSnapshot)
+  };
+}
+
+function createTtsGuid(usedGuids) {
+  let guid;
+
+  do {
+    guid = crypto.randomBytes(3).toString("hex");
+  } while (usedGuids.has(guid));
+
+  usedGuids.add(guid);
+  return guid;
+}
+
+function createTtsBag(player, index, usedGuids) {
+  return {
+    GUID: createTtsGuid(usedGuids),
+    Name: "Bag",
+    Transform: {
+      posX: index * 3,
+      posY: 1,
+      posZ: 0,
+      rotX: 0,
+      rotY: 180,
+      rotZ: 0,
+      scaleX: 1,
+      scaleY: 1,
+      scaleZ: 1
+    },
+    Nickname: player.name,
+    Description: `Drafted items for ${player.name}`,
+    GMNotes: "",
+    AltLookAngle: { x: 0, y: 0, z: 0 },
+    ColorDiffuse: { r: 0.7058823, g: 0.366520882, b: 0 },
+    LayoutGroupSortIndex: 0,
+    Value: 0,
+    Locked: false,
+    Grid: false,
+    Snap: true,
+    IgnoreFoW: false,
+    MeasureMovement: false,
+    DragSelectable: true,
+    Autoraise: true,
+    Sticky: true,
+    Tooltip: true,
+    GridProjection: false,
+    HideWhenFaceDown: false,
+    Hands: false,
+    MaterialIndex: -1,
+    MeshIndex: -1,
+    Bag: { Order: 0 },
+    LuaScript: "",
+    LuaScriptState: "",
+    XmlUI: "",
+    ContainedObjects: player.draftedItems.map((item) => cloneJson(item.ttsObject))
+  };
+}
+
+function createTtsDraftExport(roomNumber, draft) {
+  const missingItemCount = draft.players.reduce((count, player) => (
+    count + player.draftedItems.filter((item) => !item.ttsObject).length
+  ), 0);
+
+  if (missingItemCount > 0) {
+    return {
+      error: "tts_source_unavailable",
+      missingItemCount
+    };
+  }
+
+  const usedGuids = new Set(draft.players.flatMap((player) => (
+    player.draftedItems
+      .map((item) => item.ttsObject?.GUID)
+      .filter(Boolean)
+  )));
+
+  return {
+    SaveName: `Franken Draft ${roomNumber}`,
+    Date: "",
+    VersionNumber: "",
+    GameMode: "",
+    GameType: "",
+    GameComplexity: "",
+    Tags: [],
+    Gravity: 0.5,
+    PlayArea: 0.5,
+    Table: "",
+    Sky: "",
+    Note: "",
+    TabStates: {},
+    LuaScript: "",
+    LuaScriptState: "",
+    XmlUI: "",
+    ObjectStates: draft.players.map((player, index) => createTtsBag(player, index, usedGuids))
   };
 }
 
@@ -571,11 +703,11 @@ function getPlayerDraftView(player, draft, includeCurrentBag) {
     playerId: player.id,
     name: player.name,
     queueLength: player.queue.length,
-    draftedItems: player.draftedItems,
-    draftedGroups: player.draftedGroups,
+    draftedItems: player.draftedItems.map(getItemSnapshot),
+    draftedGroups: player.draftedGroups.map(getDraftGroupSnapshot),
     currentBag: includeCurrentBag && bag ? {
       id: bag.id,
-      items: bag.items,
+      items: bag.items.map(getItemSnapshot),
       eligibleItemIds: bag.items
         .filter((item) => canPlayerDraftItem(player, item, draft))
         .map((item) => item.id),
@@ -612,8 +744,8 @@ function getDraftSnapshot(room, viewerId) {
       revealedDrafts: draft.players.map((player) => ({
         playerId: player.id,
         name: player.name,
-        items: player.draftedItems,
-        groups: player.draftedGroups
+        items: player.draftedItems.map(getItemSnapshot),
+        groups: player.draftedGroups.map(getDraftGroupSnapshot)
       }))
     };
   }
@@ -768,6 +900,29 @@ async function handleStartDraft(roomNumber, request, response) {
   startDraft(room);
   broadcastRoom(roomNumber);
   sendJson(response, 200, getRoomSnapshot(roomNumber, body.participantId));
+}
+
+function handleDraftExport(roomNumber, response) {
+  const room = rooms.get(roomNumber);
+
+  if (!room) {
+    sendJson(response, 404, { error: "room_not_found" });
+    return;
+  }
+
+  if (!room.draft || room.draft.status !== "complete") {
+    sendJson(response, 409, { error: "draft_not_complete" });
+    return;
+  }
+
+  const exportJson = createTtsDraftExport(roomNumber, room.draft);
+
+  if (exportJson.error) {
+    sendJson(response, 409, exportJson);
+    return;
+  }
+
+  sendJsonDownload(response, `franken-draft-${roomNumber}.json`, exportJson);
 }
 
 async function handleRestartDraft(roomNumber, request, response) {
@@ -1003,6 +1158,13 @@ const server = http.createServer(async (request, response) => {
 
   if (restartDraftMatch && request.method === "POST") {
     await handleRestartDraft(restartDraftMatch[1], request, response);
+    return;
+  }
+
+  const exportDraftMatch = url.pathname.match(/^\/api\/rooms\/(\d{6})\/draft\/export$/);
+
+  if (exportDraftMatch && request.method === "GET") {
+    handleDraftExport(exportDraftMatch[1], response);
     return;
   }
 
