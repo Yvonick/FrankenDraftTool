@@ -19,9 +19,11 @@
       }
 
       main {
+        width: min(100% - 2rem, 48rem);
         display: grid;
-        gap: 1rem;
+        gap: 1.25rem;
         justify-items: center;
+        text-align: center;
       }
 
       h1 {
@@ -31,34 +33,185 @@
         letter-spacing: 0;
       }
 
-      p {
+      h2 {
+        margin: 0;
+        font-size: clamp(2rem, 6vw, 4rem);
+        letter-spacing: 0;
+      }
+
+      p,
+      li {
         margin: 0;
         color: #d8cfbd;
         font-size: clamp(1rem, 2.5vw, 1.35rem);
       }
+
+      button {
+        min-height: 2.75rem;
+        border: 0;
+        border-radius: 0.5rem;
+        padding: 0 1.25rem;
+        color: #17191c;
+        background: #f7f3ea;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        cursor: progress;
+        opacity: 0.7;
+      }
+
+      a {
+        color: #f7f3ea;
+      }
+
+      ul {
+        width: min(100%, 24rem);
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 0.5rem;
+        list-style: none;
+      }
+
+      li {
+        min-height: 2.5rem;
+        display: grid;
+        place-items: center;
+        border: 1px solid #4a4d52;
+        border-radius: 0.5rem;
+      }
+
+      [hidden] {
+        display: none;
+      }
     </style>
   </head>
   <body>
-    <main>
+    <main id="home-view" hidden>
       <h1>FrankenDraftTool</h1>
+      <button id="create-room" type="button">Create Room</button>
       <p><span id="open-pages">0</span> open right now</p>
     </main>
+    <main id="room-view" hidden>
+      <h1>FrankenDraftTool</h1>
+      <h2>Room <span id="room-number"></span></h2>
+      <p><a id="share-link" href="#">Share this room</a></p>
+      <ul id="people"></ul>
+    </main>
     <script>
-      const openPages = document.querySelector("#open-pages");
-      const presenceUrl =
+      const backendOrigin =
         window.location.hostname === "yvonick-frankendrafttool.onrender.com"
-          ? "https://yvonick-frankendrafttool-api.onrender.com/api/presence"
-          : "/api/presence";
-      const presence = new EventSource(presenceUrl);
+          ? "https://yvonick-frankendrafttool-api.onrender.com"
+          : "";
 
-      presence.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        openPages.textContent = String(data.openPages);
-      };
+      const apiUrl = (path) => `${backendOrigin}${path}`;
+      const homeView = document.querySelector("#home-view");
+      const roomView = document.querySelector("#room-view");
+      const openPages = document.querySelector("#open-pages");
+      const createRoom = document.querySelector("#create-room");
+      const roomNumber = document.querySelector("#room-number");
+      const shareLink = document.querySelector("#share-link");
+      const people = document.querySelector("#people");
 
-      presence.onerror = () => {
-        openPages.textContent = "?";
-      };
+      function show(view) {
+        homeView.hidden = view !== homeView;
+        roomView.hidden = view !== roomView;
+      }
+
+      function startHomePresence() {
+        const presence = new EventSource(apiUrl("/api/presence"));
+
+        presence.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          openPages.textContent = String(data.openPages);
+        };
+
+        presence.onerror = () => {
+          openPages.textContent = "?";
+        };
+      }
+
+      function renderPeople(names) {
+        people.replaceChildren();
+
+        if (names.length === 0) {
+          const item = document.createElement("li");
+          item.textContent = "No one here yet";
+          people.append(item);
+          return;
+        }
+
+        for (const name of names) {
+          const item = document.createElement("li");
+          item.textContent = name;
+          people.append(item);
+        }
+      }
+
+      async function enterRoom(id) {
+        const response = await fetch(apiUrl(`/api/rooms/${id}`));
+
+        if (!response.ok) {
+          roomNumber.textContent = id;
+          renderPeople(["Room not found"]);
+          show(roomView);
+          return;
+        }
+
+        const savedName = sessionStorage.getItem(`room:${id}:name`);
+        const enteredName = savedName || window.prompt("Who are you?");
+        const name = (enteredName || "").trim() || `Guest ${Math.floor(1000 + Math.random() * 9000)}`;
+        sessionStorage.setItem(`room:${id}:name`, name);
+
+        roomNumber.textContent = id;
+        shareLink.href = window.location.href;
+        renderPeople([]);
+        show(roomView);
+
+        const roomEvents = new EventSource(apiUrl(`/api/rooms/${id}/presence?name=${encodeURIComponent(name)}`));
+
+        roomEvents.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          renderPeople(data.people);
+        };
+
+        roomEvents.onerror = () => {
+          renderPeople(["Connection lost"]);
+        };
+      }
+
+      async function handleCreateRoom() {
+        createRoom.disabled = true;
+
+        try {
+          const response = await fetch(apiUrl("/api/rooms"), {
+            method: "POST"
+          });
+
+          if (!response.ok) {
+            throw new Error("Room creation failed");
+          }
+
+          const room = await response.json();
+          window.location.href = room.path;
+        } catch (error) {
+          createRoom.disabled = false;
+          window.alert("Could not create a room.");
+        }
+      }
+
+      const roomMatch = window.location.pathname.match(/^\/rooms\/(\d{6})$/);
+
+      if (roomMatch) {
+        enterRoom(roomMatch[1]);
+      } else {
+        show(homeView);
+        startHomePresence();
+        createRoom.addEventListener("click", handleCreateRoom);
+      }
     </script>
   </body>
 </html>
