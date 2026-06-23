@@ -1,6 +1,6 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
-const { draftPools, getPoolSummary } = require("./draftPools");
+const { draftPools, getPoolSummary, registerUploadedTtsPool } = require("./draftPools");
 
 const port = Number(process.env.PORT || 3000);
 const serviceName = "franken-draft-tool-backend";
@@ -8,6 +8,8 @@ const frontendOrigin = process.env.FRONTEND_ORIGIN || "*";
 const presenceClients = new Set();
 const rooms = new Map();
 const defaultSeatLimit = 6;
+const defaultJsonBodyLimit = 10000;
+const poolUploadJsonBodyLimit = 25 * 1024 * 1024;
 
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, {
@@ -18,14 +20,15 @@ function sendJson(response, statusCode, body) {
   response.end(JSON.stringify(body));
 }
 
-function readJsonBody(request) {
+function readJsonBody(request, options = {}) {
   return new Promise((resolve, reject) => {
     let body = "";
+    const maxBytes = options.maxBytes || defaultJsonBodyLimit;
 
     request.on("data", (chunk) => {
       body += chunk;
 
-      if (body.length > 10000) {
+      if (Buffer.byteLength(body, "utf8") > maxBytes) {
         reject(new Error("request_body_too_large"));
         request.destroy();
       }
@@ -255,6 +258,45 @@ function handleCreateRoom(response) {
     path: `/rooms/${roomNumber}`,
     creatorToken: room.creatorToken,
     maxSeats: room.maxSeats
+  });
+}
+
+async function handlePoolUpload(request, response) {
+  let body;
+
+  try {
+    body = await readJsonBody(request, { maxBytes: poolUploadJsonBodyLimit });
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return;
+  }
+
+  const fileName = cleanOptionalName(body.fileName) || "uploaded-pool.json";
+  let rawJson;
+
+  if (typeof body.fileContent === "string") {
+    try {
+      rawJson = JSON.parse(body.fileContent);
+    } catch (error) {
+      sendJson(response, 400, { error: "invalid_pool_json" });
+      return;
+    }
+  } else if (body.poolJson && typeof body.poolJson === "object") {
+    rawJson = body.poolJson;
+  } else {
+    sendJson(response, 400, { error: "missing_pool_file" });
+    return;
+  }
+
+  const pool = registerUploadedTtsPool(rawJson, fileName.replace(/\.json$/i, ""));
+
+  if (!pool) {
+    sendJson(response, 400, { error: "invalid_pool_format" });
+    return;
+  }
+
+  sendJson(response, 201, {
+    pool: getPoolSummary(pool)
   });
 }
 
@@ -812,6 +854,11 @@ const server = http.createServer(async (request, response) => {
     sendJson(response, 200, {
       pools: [...draftPools.values()].map(getPoolSummary)
     });
+    return;
+  }
+
+  if (url.pathname === "/api/pools/upload" && request.method === "POST") {
+    await handlePoolUpload(request, response);
     return;
   }
 

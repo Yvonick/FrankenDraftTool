@@ -412,6 +412,39 @@
         background: #202327;
       }
 
+      .pool-upload {
+        width: 100%;
+        display: grid;
+        gap: 0.5rem;
+      }
+
+      .pool-upload-drop {
+        min-height: 4rem;
+        display: grid;
+        place-items: center;
+        padding: 0.9rem;
+        border: 1px dashed #6a6d72;
+        border-radius: 0.5rem;
+        background: #202327;
+        color: #d8cfbd;
+        cursor: pointer;
+      }
+
+      .pool-upload-drop.dragging {
+        border-color: #f7f3ea;
+        color: #f7f3ea;
+      }
+
+      .pool-upload input {
+        position: absolute;
+        inline-size: 1px;
+        block-size: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+
       .modal-backdrop {
         position: fixed;
         inset: 0;
@@ -469,6 +502,12 @@
           <label>
             Picks per bag
             <input id="picks-per-bag-input" type="number" min="1" max="8" step="1">
+          </label>
+        </div>
+        <div class="pool-upload">
+          <label class="pool-upload-drop" id="pool-upload-drop">
+            <span id="pool-upload-label">Drop JSON or choose file</span>
+            <input id="pool-upload-input" type="file" accept=".json,application/json">
           </label>
         </div>
         <div class="settings-grid" id="item-type-settings"></div>
@@ -583,6 +622,9 @@
       const creatorPanel = document.querySelector("#creator-panel");
       const seatLimitInput = document.querySelector("#seat-limit-input");
       const poolSelect = document.querySelector("#pool-select");
+      const poolUploadDrop = document.querySelector("#pool-upload-drop");
+      const poolUploadInput = document.querySelector("#pool-upload-input");
+      const poolUploadLabel = document.querySelector("#pool-upload-label");
       const picksPerBagInput = document.querySelector("#picks-per-bag-input");
       const itemTypeSettings = document.querySelector("#item-type-settings");
       const saveRoomSettings = document.querySelector("#save-room-settings");
@@ -652,6 +694,16 @@
         const response = await fetch(apiUrl("/api/pools"));
         const data = await response.json();
         pools = data.pools;
+      }
+
+      function addOrReplacePool(pool) {
+        const existingIndex = pools.findIndex((candidate) => candidate.id === pool.id);
+
+        if (existingIndex >= 0) {
+          pools[existingIndex] = pool;
+        } else {
+          pools.push(pool);
+        }
       }
 
       function startHomePresence() {
@@ -893,6 +945,21 @@
         return pools.find((pool) => pool.id === poolId);
       }
 
+      function renderPoolOptions(selectedPoolId) {
+        poolSelect.replaceChildren();
+
+        for (const pool of pools) {
+          const option = document.createElement("option");
+          option.value = pool.id;
+          option.textContent = pool.name;
+          poolSelect.append(option);
+        }
+
+        if (selectedPoolId) {
+          poolSelect.value = selectedPoolId;
+        }
+      }
+
       function renderTypeInputs(pool, values) {
         itemTypeSettings.replaceChildren();
 
@@ -915,16 +982,8 @@
           return;
         }
 
-        poolSelect.replaceChildren();
-
-        for (const pool of pools) {
-          const option = document.createElement("option");
-          option.value = pool.id;
-          option.textContent = pool.name;
-          poolSelect.append(option);
-        }
-
         const pool = poolById(settings.poolId) || pools[0];
+        renderPoolOptions(pool.id);
         poolSelect.value = pool.id;
         picksPerBagInput.value = settings.picksPerBag;
         renderTypeInputs(pool, settings.itemsPerType);
@@ -944,6 +1003,68 @@
           picksPerBag: Number(picksPerBagInput.value),
           itemsPerType
         };
+      }
+
+      function poolUploadErrorMessage(error) {
+        if (error === "invalid_pool_json") {
+          return "That file is not valid JSON.";
+        }
+
+        if (error === "invalid_pool_format") {
+          return "No draftable TTS bags were found in that file.";
+        }
+
+        if (error === "missing_pool_file") {
+          return "Choose a JSON file to upload.";
+        }
+
+        if (error === "request_body_too_large") {
+          return "That JSON file is too large to upload.";
+        }
+
+        return "Pool upload failed.";
+      }
+
+      async function uploadPoolFile(file) {
+        if (!file) {
+          return;
+        }
+
+        poolUploadInput.disabled = true;
+        poolUploadDrop.classList.remove("dragging");
+        poolUploadLabel.textContent = `Uploading ${file.name}...`;
+
+        try {
+          const fileContent = await file.text();
+          const response = await fetch(apiUrl("/api/pools/upload"), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              fileName: file.name,
+              fileContent
+            })
+          });
+          const data = await response.json().catch(() => ({}));
+
+          if (!response.ok) {
+            throw new Error(data.error || "upload_failed");
+          }
+
+          addOrReplacePool(data.pool);
+          renderPoolOptions(data.pool.id);
+          picksPerBagInput.value = data.pool.defaultParameters.picksPerBag;
+          renderTypeInputs(data.pool, data.pool.defaultParameters.itemsPerType);
+          poolUploadLabel.textContent = `${data.pool.name} uploaded`;
+          roomMessage.textContent = "Pool uploaded and selected. Save settings to use it for this room.";
+        } catch (error) {
+          poolUploadLabel.textContent = "Drop JSON or choose file";
+          roomMessage.textContent = poolUploadErrorMessage(error.message);
+        } finally {
+          poolUploadInput.value = "";
+          poolUploadInput.disabled = false;
+        }
       }
 
       function isCreator() {
@@ -1517,6 +1638,25 @@
 
         picksPerBagInput.value = pool.defaultParameters.picksPerBag;
         renderTypeInputs(pool, pool.defaultParameters.itemsPerType);
+      });
+
+      poolUploadInput.addEventListener("change", () => {
+        uploadPoolFile(poolUploadInput.files?.[0]);
+      });
+
+      poolUploadDrop.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        poolUploadDrop.classList.add("dragging");
+      });
+
+      poolUploadDrop.addEventListener("dragleave", () => {
+        poolUploadDrop.classList.remove("dragging");
+      });
+
+      poolUploadDrop.addEventListener("drop", (event) => {
+        event.preventDefault();
+        poolUploadDrop.classList.remove("dragging");
+        uploadPoolFile(event.dataTransfer.files?.[0]);
       });
 
       namedSpectators.addEventListener("click", (event) => {

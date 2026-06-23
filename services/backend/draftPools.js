@@ -201,6 +201,23 @@ function parseTtsPool(rawJson, fallbackName) {
   };
 }
 
+function clonePoolWithId(pool, id) {
+  if (pool.id === id) {
+    return pool;
+  }
+
+  return {
+    ...pool,
+    id,
+    items: pool.items.map((item) => ({
+      ...item,
+      id: item.id.startsWith(`${pool.id}-`)
+        ? `${id}-${item.id.slice(pool.id.length + 1)}`
+        : `${id}-${item.id}`
+    }))
+  };
+}
+
 function loadTtsPools() {
   const rawPoolsDir = path.join(__dirname, "pools", "raw");
 
@@ -225,6 +242,38 @@ const allPools = [
 
 const draftPools = new Map(allPools.map((pool) => [pool.id, pool]));
 
+function uniquePoolId(baseId) {
+  const base = slugify(baseId) || "uploaded-pool";
+
+  if (!draftPools.has(base)) {
+    return base;
+  }
+
+  let suffix = 2;
+
+  while (draftPools.has(`${base}-${suffix}`)) {
+    suffix += 1;
+  }
+
+  return `${base}-${suffix}`;
+}
+
+function registerUploadedTtsPool(rawJson, fallbackName) {
+  const parsedPool = parseTtsPool(rawJson, fallbackName);
+
+  if (!parsedPool) {
+    return null;
+  }
+
+  const pool = {
+    ...clonePoolWithId(parsedPool, uniquePoolId(parsedPool.id)),
+    source: "tts-upload"
+  };
+
+  draftPools.set(pool.id, pool);
+  return pool;
+}
+
 function getPoolSummary(pool) {
   return {
     id: pool.id,
@@ -244,5 +293,6 @@ function getPoolSummary(pool) {
 module.exports = {
   draftPools,
   getPoolSummary,
-  parseTtsPool
+  parseTtsPool,
+  registerUploadedTtsPool
 };
