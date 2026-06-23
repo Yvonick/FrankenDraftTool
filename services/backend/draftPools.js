@@ -72,6 +72,10 @@ function resolveAssetUrl(url) {
   return assetOverrides[url] || url;
 }
 
+function shouldKeepSecondaryImage(type) {
+  return !/(?:planet|anomaly|home\s*systems?)/i.test(type);
+}
+
 function getDeckForCard(item) {
   const customDeck = item.CustomDeck || {};
   const deckId = item.CardID === undefined ? null : String(Math.floor(Number(item.CardID) / 100));
@@ -137,7 +141,7 @@ function extractTtsItem(item, type, poolId, index) {
     content: item.Description || "",
     type,
     imageUrl: resolveAssetUrl(image.imageUrl),
-    imageSecondaryUrl: resolveAssetUrl(image.imageSecondaryUrl),
+    imageSecondaryUrl: shouldKeepSecondaryImage(type) ? resolveAssetUrl(image.imageSecondaryUrl) : null,
     imageSheet: image.imageSheet,
     sourceObjectType: item.Name || "Unknown"
   };

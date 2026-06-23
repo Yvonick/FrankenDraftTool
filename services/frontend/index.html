@@ -146,8 +146,17 @@
       .spectator-grid {
         width: 100%;
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
         gap: 0.75rem;
+        align-items: stretch;
+      }
+
+      .reveal-grid {
+        grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+      }
+
+      .item-grid {
+        grid-auto-rows: 1fr;
       }
 
       .settings-grid label,
@@ -158,8 +167,12 @@
       }
 
       .item-card {
+        height: 100%;
+        min-width: 0;
+        position: relative;
         display: grid;
         gap: 0.45rem;
+        align-content: start;
         padding: 0.85rem;
         border: 1px solid #4a4d52;
         border-radius: 0.5rem;
@@ -167,10 +180,23 @@
         text-align: left;
       }
 
+      .item-card.checkable {
+        cursor: pointer;
+      }
+
+      .item-card.selected {
+        border-color: #f7f3ea;
+        box-shadow: inset 0 0 0 1px #f7f3ea;
+      }
+
       .item-image-frame {
         width: 100%;
         position: relative;
-        aspect-ratio: var(--image-aspect, 3 / 4);
+        display: grid;
+        place-items: center;
+        aspect-ratio: 1;
+        padding: 0.3rem;
+        overflow: hidden;
         border: 1px solid #3f4248;
         border-radius: 0.35rem;
         background-color: #111316;
@@ -178,11 +204,29 @@
 
       .item-image-crop,
       .item-preview-crop {
-        width: 100%;
-        height: 100%;
         position: relative;
         overflow: hidden;
         border-radius: inherit;
+      }
+
+      .item-image-crop {
+        width: 100%;
+        height: 100%;
+      }
+
+      .item-image-frame.portrait .item-image-crop {
+        width: 75%;
+        height: 100%;
+      }
+
+      .item-image-frame.landscape .item-image-crop {
+        width: 100%;
+        height: 75%;
+      }
+
+      .item-preview-crop {
+        width: 100%;
+        height: 100%;
       }
 
       .item-image-crop img,
@@ -242,14 +286,50 @@
         opacity: 0.45;
       }
 
-      .item-card input {
-        width: auto;
-        min-height: auto;
+      .selection-control {
+        width: 1.35rem;
+        height: 1.35rem;
+        position: absolute;
+        top: 0.55rem;
+        right: 0.55rem;
+        z-index: 2;
+        display: grid;
+        place-items: center;
+        border-radius: 0.3rem;
+        background: rgb(17 19 22 / 0.85);
+      }
+
+      .selection-control input {
+        width: 1rem;
+        height: 1rem;
+        min-height: 0;
+        margin: 0;
+        padding: 0;
+        appearance: none;
+        border: 2px solid #d8cfbd;
+        border-radius: 0.2rem;
+        background: #111316;
+      }
+
+      .selection-control input:checked {
+        background: #f7f3ea;
+        box-shadow: inset 0 0 0 0.18rem #202327;
       }
 
       .item-card p,
       .item-card span {
         font-size: 0.95rem;
+      }
+
+      .item-card p {
+        display: -webkit-box;
+        overflow: hidden;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 4;
+      }
+
+      .item-card strong {
+        min-height: 2.4em;
       }
 
       .item-type {
@@ -630,9 +710,23 @@
         return "4 / 3";
       }
 
+      function getImageShape(item) {
+        const aspect = getImageAspect(item);
+
+        if (aspect === "3 / 4") {
+          return "portrait";
+        }
+
+        if (aspect === "4 / 3") {
+          return "landscape";
+        }
+
+        return "square";
+      }
+
       function renderItemImage(item) {
         const frame = document.createElement("div");
-        frame.className = "item-image-frame";
+        frame.className = `item-image-frame ${getImageShape(item)}`;
         frame.style.setProperty("--image-aspect", getImageAspect(item));
         frame.setAttribute("tabindex", "0");
         frame.setAttribute("aria-label", item.name);
@@ -658,15 +752,24 @@
 
       function renderItemCard(item, options = {}) {
         const card = document.createElement("label");
-        card.className = options.available === false ? "item-card unavailable" : "item-card";
+        const selected = selectedItemIds.has(item.id);
+        card.className = [
+          "item-card",
+          options.checkable ? "checkable" : "",
+          options.available === false ? "unavailable" : "",
+          selected ? "selected" : ""
+        ].filter(Boolean).join(" ");
 
         if (options.checkable) {
+          const control = document.createElement("span");
+          control.className = "selection-control";
           const checkbox = document.createElement("input");
           checkbox.type = "checkbox";
           checkbox.value = item.id;
           checkbox.disabled = options.available === false;
-          checkbox.checked = selectedItemIds.has(item.id);
-          card.append(checkbox);
+          checkbox.checked = selected;
+          control.append(checkbox);
+          card.append(control);
         }
 
         if (item.imageUrl) {
@@ -681,7 +784,12 @@
         const content = document.createElement("p");
         content.textContent = item.content;
 
-        card.append(name, type, content);
+        card.append(name, type);
+
+        if (item.content) {
+          card.append(content);
+        }
+
         return card;
       }
 
@@ -1358,6 +1466,7 @@
         if (event.target.checked) {
           if (selectedItemIds.size >= requiredPickCount) {
             event.target.checked = false;
+            event.target.closest(".item-card")?.classList.remove("selected");
             return;
           }
 
@@ -1366,6 +1475,7 @@
           selectedItemIds.delete(itemId);
         }
 
+        event.target.closest(".item-card")?.classList.toggle("selected", event.target.checked);
         updateLockButton(requiredPickCount);
       });
 
