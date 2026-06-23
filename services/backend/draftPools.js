@@ -44,6 +44,34 @@ const testingPool = {
   items: testingTypes.flatMap(createTestingItems)
 };
 
+function loadAssetOverrides() {
+  const overridesDir = path.join(__dirname, "pools", "asset-overrides");
+
+  if (!fs.existsSync(overridesDir)) {
+    return {};
+  }
+
+  return fs.readdirSync(overridesDir)
+    .filter((fileName) => fileName.endsWith(".json"))
+    .reduce((overrides, fileName) => {
+      const filePath = path.join(overridesDir, fileName);
+      return {
+        ...overrides,
+        ...JSON.parse(fs.readFileSync(filePath, "utf8"))
+      };
+    }, {});
+}
+
+const assetOverrides = loadAssetOverrides();
+
+function resolveAssetUrl(url) {
+  if (!url) {
+    return null;
+  }
+
+  return assetOverrides[url] || url;
+}
+
 function getDeckForCard(item) {
   const customDeck = item.CustomDeck || {};
   const deckId = item.CardID === undefined ? null : String(Math.floor(Number(item.CardID) / 100));
@@ -108,8 +136,8 @@ function extractTtsItem(item, type, poolId, index) {
     name,
     content: item.Description || "",
     type,
-    imageUrl: image.imageUrl,
-    imageSecondaryUrl: image.imageSecondaryUrl,
+    imageUrl: resolveAssetUrl(image.imageUrl),
+    imageSecondaryUrl: resolveAssetUrl(image.imageSecondaryUrl),
     imageSheet: image.imageSheet,
     sourceObjectType: item.Name || "Unknown"
   };
