@@ -58,4 +58,4 @@ https://yvonick-frankendrafttool.onrender.com/api/health
 
 The frontend also opens a live presence stream at `/api/presence` locally, or directly against the Render backend in production, to show how many browser tabs currently have the page open. This count is in-memory per backend instance.
 
-Rooms are also stored in memory for now. The home page can create a numbered room at `/rooms/{roomNumber}`. Anyone with that URL can join, enter a display name, and see the current list of people connected to that room.
+Rooms are also stored in memory for now. The home page can create a numbered room at `/rooms/{roomNumber}`. Anyone with that URL can join, choose to sit down with a display name, or spectate. Rooms start with 6 seats, the creator can change that limit, and spectators can sit down later if a seat is available.

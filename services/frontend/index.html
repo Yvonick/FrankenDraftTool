@@ -11,6 +11,10 @@
         font-family: Arial, Helvetica, sans-serif;
       }
 
+      * {
+        box-sizing: border-box;
+      }
+
       body {
         min-height: 100vh;
         margin: 0;
@@ -26,24 +30,35 @@
         text-align: center;
       }
 
-      h1 {
+      h1,
+      h2,
+      h3,
+      p {
         margin: 0;
+      }
+
+      h1 {
         font-size: clamp(2.5rem, 8vw, 6rem);
         font-weight: 700;
         letter-spacing: 0;
       }
 
       h2 {
-        margin: 0;
         font-size: clamp(2rem, 6vw, 4rem);
         letter-spacing: 0;
       }
 
+      h3 {
+        font-size: 1.1rem;
+        letter-spacing: 0;
+      }
+
       p,
-      li {
-        margin: 0;
+      li,
+      label,
+      input {
         color: #d8cfbd;
-        font-size: clamp(1rem, 2.5vw, 1.35rem);
+        font-size: clamp(1rem, 2.5vw, 1.2rem);
       }
 
       button {
@@ -58,13 +73,26 @@
         cursor: pointer;
       }
 
+      button.secondary {
+        color: #f7f3ea;
+        background: transparent;
+        border: 1px solid #6a6d72;
+      }
+
       button:disabled {
         cursor: progress;
         opacity: 0.7;
       }
 
-      a {
+      input {
+        width: 100%;
+        min-height: 2.75rem;
+        border: 1px solid #6a6d72;
+        border-radius: 0.5rem;
+        padding: 0 0.85rem;
         color: #f7f3ea;
+        background: #23262a;
+        font: inherit;
       }
 
       ul {
@@ -84,6 +112,53 @@
         border-radius: 0.5rem;
       }
 
+      .actions,
+      .setting-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .panel {
+        width: min(100%, 32rem);
+        display: grid;
+        gap: 0.75rem;
+        justify-items: center;
+      }
+
+      .message {
+        min-height: 1.5rem;
+        color: #b7d7c0;
+      }
+
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 1rem;
+        background: rgb(0 0 0 / 0.68);
+      }
+
+      .modal {
+        width: min(100%, 28rem);
+        display: grid;
+        gap: 1rem;
+        padding: 1.25rem;
+        border: 1px solid #4a4d52;
+        border-radius: 0.5rem;
+        background: #17191c;
+        box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 0.4);
+      }
+
+      .modal label {
+        display: grid;
+        gap: 0.4rem;
+        text-align: left;
+      }
+
       [hidden] {
         display: none;
       }
@@ -95,12 +170,62 @@
       <button id="create-room" type="button">Create Room</button>
       <p><span id="open-pages">0</span> open right now</p>
     </main>
+
     <main id="room-view" hidden>
       <h1>FrankenDraftTool</h1>
       <h2>Room <span id="room-number"></span></h2>
-      <p><a id="share-link" href="#">Share this room</a></p>
-      <ul id="people"></ul>
+      <div class="actions">
+        <button id="share-room" type="button">Share Room</button>
+        <button id="sit-down" class="secondary" type="button" hidden>Sit Down</button>
+      </div>
+      <p id="room-status"></p>
+      <section class="panel" id="creator-panel" hidden>
+        <h3>Room Settings</h3>
+        <div class="setting-row">
+          <label>
+            Seat limit
+            <input id="seat-limit-input" type="number" min="1" max="12" step="1">
+          </label>
+          <button id="save-seat-limit" type="button">Save</button>
+        </div>
+      </section>
+      <section class="panel">
+        <h3>Seated</h3>
+        <ul id="seated-people"></ul>
+      </section>
+      <p id="spectator-count"></p>
+      <p class="message" id="room-message"></p>
     </main>
+
+    <div class="modal-backdrop" id="join-modal" hidden>
+      <form class="modal" id="join-form">
+        <h3>Join Room</h3>
+        <p>You can sit down as a player or spectate for now.</p>
+        <label>
+          Name
+          <input id="join-name" name="name" autocomplete="name" maxlength="40" placeholder="Your name">
+        </label>
+        <div class="actions">
+          <button id="join-seat" type="submit">Sit Down</button>
+          <button id="join-spectate" class="secondary" type="button">Spectate</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-backdrop" id="sit-modal" hidden>
+      <form class="modal" id="sit-form">
+        <h3>Sit Down</h3>
+        <label>
+          Name
+          <input id="sit-name" name="name" autocomplete="name" maxlength="40" placeholder="Your name">
+        </label>
+        <div class="actions">
+          <button type="submit">Sit Down</button>
+          <button id="cancel-sit" class="secondary" type="button">Cancel</button>
+        </div>
+      </form>
+    </div>
+
     <script>
       const backendOrigin =
         window.location.hostname === "yvonick-frankendrafttool.onrender.com"
@@ -113,12 +238,34 @@
       const openPages = document.querySelector("#open-pages");
       const createRoom = document.querySelector("#create-room");
       const roomNumber = document.querySelector("#room-number");
-      const shareLink = document.querySelector("#share-link");
-      const people = document.querySelector("#people");
+      const shareRoom = document.querySelector("#share-room");
+      const sitDown = document.querySelector("#sit-down");
+      const roomStatus = document.querySelector("#room-status");
+      const seatedPeople = document.querySelector("#seated-people");
+      const spectatorCount = document.querySelector("#spectator-count");
+      const roomMessage = document.querySelector("#room-message");
+      const creatorPanel = document.querySelector("#creator-panel");
+      const seatLimitInput = document.querySelector("#seat-limit-input");
+      const saveSeatLimit = document.querySelector("#save-seat-limit");
+      const joinModal = document.querySelector("#join-modal");
+      const joinForm = document.querySelector("#join-form");
+      const joinName = document.querySelector("#join-name");
+      const joinSpectate = document.querySelector("#join-spectate");
+      const sitModal = document.querySelector("#sit-modal");
+      const sitForm = document.querySelector("#sit-form");
+      const sitName = document.querySelector("#sit-name");
+      const cancelSit = document.querySelector("#cancel-sit");
+      let roomEvents = null;
+      let currentRoomNumber = null;
+      let currentRole = null;
 
       function show(view) {
         homeView.hidden = view !== homeView;
         roomView.hidden = view !== roomView;
+      }
+
+      function storageKey(roomId, key) {
+        return `room:${roomId}:${key}`;
       }
 
       function startHomePresence() {
@@ -134,53 +281,126 @@
         };
       }
 
-      function renderPeople(names) {
-        people.replaceChildren();
+      function renderSeated(names) {
+        seatedPeople.replaceChildren();
 
         if (names.length === 0) {
           const item = document.createElement("li");
-          item.textContent = "No one here yet";
-          people.append(item);
+          item.textContent = "No one seated yet";
+          seatedPeople.append(item);
           return;
         }
 
         for (const name of names) {
           const item = document.createElement("li");
           item.textContent = name;
-          people.append(item);
+          seatedPeople.append(item);
         }
       }
 
+      function renderRoom(data) {
+        renderSeated(data.seated);
+        roomStatus.textContent = `${data.seated.length} of ${data.maxSeats} seats filled`;
+        spectatorCount.textContent = `${data.spectators} spectator${data.spectators === 1 ? "" : "s"}`;
+        seatLimitInput.value = data.maxSeats;
+      }
+
+      function openJoinModal() {
+        joinModal.hidden = false;
+        joinName.focus();
+      }
+
+      function closeJoinModal() {
+        joinModal.hidden = true;
+      }
+
+      function openSitModal() {
+        sitName.value = sessionStorage.getItem(storageKey(currentRoomNumber, "name")) || "";
+        sitModal.hidden = false;
+        sitName.focus();
+      }
+
+      function closeSitModal() {
+        sitModal.hidden = true;
+      }
+
+      function connectToRoom(role, name = "") {
+        if (roomEvents) {
+          roomEvents.close();
+        }
+
+        const params = new URLSearchParams({ role });
+
+        if (name) {
+          params.set("name", name);
+        }
+
+        roomEvents = new EventSource(apiUrl(`/api/rooms/${currentRoomNumber}/presence?${params}`));
+
+        roomEvents.addEventListener("viewer", (event) => {
+          const viewer = JSON.parse(event.data);
+          currentRole = viewer.role;
+          sitDown.hidden = currentRole !== "spectator";
+
+          if (viewer.name) {
+            sessionStorage.setItem(storageKey(currentRoomNumber, "name"), viewer.name);
+          }
+
+          sessionStorage.setItem(storageKey(currentRoomNumber, "role"), currentRole);
+
+          if (viewer.seatDenied) {
+            roomMessage.textContent = "All seats are filled, so you are spectating for now.";
+          } else {
+            roomMessage.textContent = currentRole === "seated" ? "You are seated." : "You are spectating.";
+          }
+        });
+
+        roomEvents.onmessage = (event) => {
+          renderRoom(JSON.parse(event.data));
+        };
+
+        roomEvents.onerror = () => {
+          roomMessage.textContent = "Connection lost. Trying to reconnect...";
+        };
+      }
+
       async function enterRoom(id) {
+        currentRoomNumber = id;
         const response = await fetch(apiUrl(`/api/rooms/${id}`));
 
+        roomNumber.textContent = id;
+        shareRoom.disabled = false;
+
         if (!response.ok) {
-          roomNumber.textContent = id;
-          renderPeople(["Room not found"]);
+          renderSeated(["Room not found"]);
+          roomStatus.textContent = "";
+          spectatorCount.textContent = "";
+          sitDown.hidden = true;
           show(roomView);
           return;
         }
 
-        const savedName = sessionStorage.getItem(`room:${id}:name`);
-        const enteredName = savedName || window.prompt("Who are you?");
-        const name = (enteredName || "").trim() || `Guest ${Math.floor(1000 + Math.random() * 9000)}`;
-        sessionStorage.setItem(`room:${id}:name`, name);
+        const room = await response.json();
+        renderRoom(room);
 
-        roomNumber.textContent = id;
-        shareLink.href = window.location.href;
-        renderPeople([]);
+        const creatorToken = sessionStorage.getItem(storageKey(id, "creatorToken"));
+        creatorPanel.hidden = !creatorToken;
         show(roomView);
 
-        const roomEvents = new EventSource(apiUrl(`/api/rooms/${id}/presence?name=${encodeURIComponent(name)}`));
+        const savedRole = sessionStorage.getItem(storageKey(id, "role"));
+        const savedName = sessionStorage.getItem(storageKey(id, "name"));
 
-        roomEvents.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          renderPeople(data.people);
-        };
+        if (savedRole === "seated" && savedName) {
+          connectToRoom("seated", savedName);
+          return;
+        }
 
-        roomEvents.onerror = () => {
-          renderPeople(["Connection lost"]);
-        };
+        if (savedRole === "spectator") {
+          connectToRoom("spectator");
+          return;
+        }
+
+        openJoinModal();
       }
 
       async function handleCreateRoom() {
@@ -196,12 +416,89 @@
           }
 
           const room = await response.json();
+          sessionStorage.setItem(storageKey(room.roomNumber, "creatorToken"), room.creatorToken);
           window.location.href = room.path;
         } catch (error) {
           createRoom.disabled = false;
-          window.alert("Could not create a room.");
+          openPages.textContent = "Could not create a room";
         }
       }
+
+      async function copyShareUrl() {
+        try {
+          await navigator.clipboard.writeText(window.location.href);
+          roomMessage.textContent = "Room URL copied.";
+        } catch (error) {
+          roomMessage.textContent = "Could not copy the room URL.";
+        }
+      }
+
+      async function saveCreatorSeatLimit() {
+        const creatorToken = sessionStorage.getItem(storageKey(currentRoomNumber, "creatorToken"));
+        const maxSeats = Number(seatLimitInput.value);
+        saveSeatLimit.disabled = true;
+
+        try {
+          const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/settings`), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ creatorToken, maxSeats })
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            roomMessage.textContent =
+              data.error === "seat_limit_below_current_players"
+                ? "Seat limit cannot be below the number of seated players."
+                : "Could not save room settings.";
+            return;
+          }
+
+          renderRoom(data);
+          roomMessage.textContent = "Room settings saved.";
+        } finally {
+          saveSeatLimit.disabled = false;
+        }
+      }
+
+      joinForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const name = joinName.value.trim();
+
+        if (!name) {
+          joinName.focus();
+          return;
+        }
+
+        closeJoinModal();
+        connectToRoom("seated", name);
+      });
+
+      joinSpectate.addEventListener("click", () => {
+        closeJoinModal();
+        connectToRoom("spectator");
+      });
+
+      sitDown.addEventListener("click", openSitModal);
+      cancelSit.addEventListener("click", closeSitModal);
+      sitForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const name = sitName.value.trim();
+
+        if (!name) {
+          sitName.focus();
+          return;
+        }
+
+        closeSitModal();
+        connectToRoom("seated", name);
+      });
+
+      shareRoom.addEventListener("click", copyShareUrl);
+      saveSeatLimit.addEventListener("click", saveCreatorSeatLimit);
 
       const roomMatch = window.location.pathname.match(/^\/rooms\/(\d{6})$/);
 
