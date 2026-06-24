@@ -18,6 +18,8 @@ services:
         value: https://yvonick-frankendrafttool.onrender.com
       - key: POOL_STORE_PATH
         value: /var/data/public-pools.json
+      - key: DRAFT_METHOD_STORE_PATH
+        value: /var/data/draft-methods.json
 
   - type: web
     name: yvonick-frankendrafttool

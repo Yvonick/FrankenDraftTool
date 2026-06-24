@@ -581,11 +581,26 @@
         border-color: #6a6d72;
       }
 
+      .method-summary {
+        display: grid;
+        gap: 0.75rem;
+      }
+
+      .method-summary p {
+        text-align: left;
+      }
+
       .method-field-grid {
         width: 100%;
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr));
         gap: 0.75rem;
+      }
+
+      .method-editor-layout {
+        width: 100%;
+        display: grid;
+        gap: 1rem;
       }
 
       .pool-type-list {
@@ -699,10 +714,59 @@
       <div class="actions">
         <a class="button-link secondary" href="/">Home</a>
         <a class="button-link secondary" href="/pools">Manage Pools</a>
-        <button id="create-method" type="button">New Method</button>
+        <a class="button-link" href="/methods/new">Create New Method</a>
       </div>
       <div class="method-admin-list" id="methods-list"></div>
       <p class="message" id="methods-message"></p>
+    </main>
+
+    <main id="method-editor-view" hidden>
+      <h1>FrankenDraftTool</h1>
+      <h2 id="method-editor-title">Draft Method</h2>
+      <div class="actions">
+        <a class="button-link secondary" href="/methods">All Methods</a>
+        <a class="button-link secondary" href="/">Home</a>
+      </div>
+      <section class="panel">
+        <div class="method-editor-layout">
+          <div class="method-field-grid">
+            <label>
+              Name
+              <input id="method-name-input" maxlength="80">
+            </label>
+            <label>
+              Engine
+              <select id="method-engine-select"></select>
+            </label>
+          </div>
+          <label>
+            Short Description
+            <textarea id="method-description-input"></textarea>
+          </label>
+          <label>
+            Natural Language Instructions
+            <textarea id="method-instructions-input" placeholder="Describe the draft method you want. Include table order, hidden or public information, auction budget, passing rules, completion condition, and anything that should become enforceable."></textarea>
+          </label>
+          <div class="actions">
+            <button id="copy-method-prompt" type="button">Copy GPT Prompt</button>
+            <a id="open-chatgpt" class="button-link secondary" href="https://chatgpt.com" target="_blank" rel="noopener">Open ChatGPT</a>
+          </div>
+          <label>
+            Paste GPT JSON Result
+            <textarea id="method-gpt-json-input" placeholder="{ ... }"></textarea>
+          </label>
+          <div class="actions">
+            <button id="apply-method-json" class="secondary" type="button">Apply JSON</button>
+            <button id="save-method" type="button">Save Method</button>
+            <button id="delete-method" class="secondary" type="button" hidden>Delete Method</button>
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <h3>Prompt Sent To ChatGPT</h3>
+        <textarea id="method-generated-prompt" readonly></textarea>
+      </section>
+      <p class="message" id="method-editor-message"></p>
     </main>
 
     <main id="room-view" hidden>
@@ -859,10 +923,10 @@
       const homeView = document.querySelector("#home-view");
       const poolsView = document.querySelector("#pools-view");
       const methodsView = document.querySelector("#methods-view");
+      const methodEditorView = document.querySelector("#method-editor-view");
       const roomView = document.querySelector("#room-view");
       const openPages = document.querySelector("#open-pages");
       const createRoom = document.querySelector("#create-room");
-      const createMethod = document.querySelector("#create-method");
       const publicPoolsList = document.querySelector("#public-pools-list");
       const publicPoolUploadDrop = document.querySelector("#public-pool-upload-drop");
       const publicPoolUploadInput = document.querySelector("#public-pool-upload-input");
@@ -870,6 +934,19 @@
       const poolsMessage = document.querySelector("#pools-message");
       const methodsList = document.querySelector("#methods-list");
       const methodsMessage = document.querySelector("#methods-message");
+      const methodEditorTitle = document.querySelector("#method-editor-title");
+      const methodNameInput = document.querySelector("#method-name-input");
+      const methodEngineSelect = document.querySelector("#method-engine-select");
+      const methodDescriptionInput = document.querySelector("#method-description-input");
+      const methodInstructionsInput = document.querySelector("#method-instructions-input");
+      const copyMethodPrompt = document.querySelector("#copy-method-prompt");
+      const openChatGpt = document.querySelector("#open-chatgpt");
+      const methodGptJsonInput = document.querySelector("#method-gpt-json-input");
+      const applyMethodJson = document.querySelector("#apply-method-json");
+      const saveMethod = document.querySelector("#save-method");
+      const deleteMethod = document.querySelector("#delete-method");
+      const methodGeneratedPrompt = document.querySelector("#method-generated-prompt");
+      const methodEditorMessage = document.querySelector("#method-editor-message");
       const roomNumber = document.querySelector("#room-number");
       const shareRoom = document.querySelector("#share-room");
       const sitDown = document.querySelector("#sit-down");
@@ -936,9 +1013,11 @@
       let currentBagId = null;
       let pendingConfirmation = null;
       let draggedPoolTypeRow = null;
+      let currentMethodDraft = null;
+      let currentMethodId = null;
 
       function show(view) {
-        for (const candidate of [homeView, poolsView, methodsView, roomView]) {
+        for (const candidate of [homeView, poolsView, methodsView, methodEditorView, roomView]) {
           candidate.hidden = view !== candidate;
         }
       }
@@ -1784,90 +1863,12 @@
         select.value = selectedValue;
       }
 
-      function createMethodTextField(labelText, field, value, disabled, multiline = false) {
-        const label = document.createElement("label");
-        const input = multiline ? document.createElement("textarea") : document.createElement("input");
-        input.dataset.methodField = field;
-        input.value = value || "";
-        input.disabled = disabled;
-        label.append(labelText, input);
-        return label;
-      }
-
-      function createMethodNumberField(labelText, field, value, disabled) {
-        const label = document.createElement("label");
-        const input = document.createElement("input");
-        input.type = "number";
-        input.min = "0";
-        input.step = "1";
-        input.dataset.methodField = field;
-        input.value = value ?? 0;
-        input.disabled = disabled;
-        label.append(labelText, input);
-        return label;
-      }
-
-      function createMethodSelectField(labelText, field, values, value, disabled) {
-        const label = document.createElement("label");
-        const select = document.createElement("select");
-        select.dataset.methodField = field;
-        select.disabled = disabled;
-        appendSelectOptions(select, values, value);
-        label.append(labelText, select);
-        return label;
-      }
-
-      function createMethodToggle(labelText, field, checked, disabled) {
-        const label = document.createElement("label");
-        label.className = "toggle-row";
-        const input = document.createElement("input");
-        input.type = "checkbox";
-        input.dataset.methodField = field;
-        input.checked = Boolean(checked);
-        input.disabled = disabled;
-        label.append(input, labelText);
-        return label;
-      }
-
-      function collectManagedMethod(card) {
-        const field = (name) => card.querySelector(`[data-method-field='${name}']`);
-
-        return {
-          name: field("name").value,
-          engine: field("engine").value,
-          description: field("description").value,
-          playerOrder: field("playerOrder").value,
-          itemPresentation: field("itemPresentation").value,
-          selectionTiming: field("selectionTiming").value,
-          passing: field("passing").value,
-          visibility: field("visibility").value,
-          completion: field("completion").value,
-          supportsExport: field("supportsExport").checked,
-          bag: {
-            usesRoomPicksPerBag: field("usesRoomPicksPerBag").checked,
-            usesPoolTypeCounts: field("usesPoolTypeCounts").checked,
-            enforceTypeCaps: field("enforceTypeCaps").checked,
-            firstRotationUniqueType: field("firstRotationUniqueType").checked,
-            discardAfterFullEmptyPass: field("discardAfterFullEmptyPass").checked
-          },
-          auction: {
-            startingBudget: Number(field("startingBudget").value),
-            minimumBid: Number(field("minimumBid").value),
-            bidVisibility: field("bidVisibility").value,
-            nominationOrder: field("nominationOrder").value,
-            tieBreaker: field("tieBreaker").value
-          },
-          customNotes: field("customNotes").value
-        };
-      }
-
       function renderMethodsPage() {
         methodsList.replaceChildren();
 
         for (const method of draftMethods) {
-          const editable = !method.builtIn;
           const card = document.createElement("section");
-          card.className = `method-admin-card${method.builtIn ? " built-in" : ""}`;
+          card.className = `method-admin-card method-summary${method.builtIn ? " built-in" : ""}`;
           card.dataset.methodId = method.id;
           const header = document.createElement("header");
           const title = document.createElement("h3");
@@ -1875,167 +1876,277 @@
           const status = document.createElement("span");
           status.textContent = method.playable ? "Playable" : "Definition only";
           header.append(title, status);
-
-          const basics = document.createElement("div");
-          basics.className = "method-field-grid";
-          basics.append(
-            createMethodTextField("Name", "name", method.name, !editable),
-            createMethodSelectField("Engine", "engine", methodOptionLabels.engine, method.engine, !editable),
-            createMethodSelectField("Player order", "playerOrder", methodOptionLabels.playerOrder, method.playerOrder, !editable),
-            createMethodSelectField("Item presentation", "itemPresentation", methodOptionLabels.itemPresentation, method.itemPresentation, !editable),
-            createMethodSelectField("Selection timing", "selectionTiming", methodOptionLabels.selectionTiming, method.selectionTiming, !editable),
-            createMethodSelectField("Passing", "passing", methodOptionLabels.passing, method.passing, !editable),
-            createMethodSelectField("Visibility", "visibility", methodOptionLabels.visibility, method.visibility, !editable),
-            createMethodSelectField("Completion", "completion", methodOptionLabels.completion, method.completion, !editable)
-          );
-
-          const description = createMethodTextField("Description", "description", method.description, !editable, true);
-          const bagOptions = document.createElement("div");
-          bagOptions.className = "method-field-grid";
-          bagOptions.append(
-            createMethodToggle("Use room picks per bag", "usesRoomPicksPerBag", method.bag.usesRoomPicksPerBag, !editable),
-            createMethodToggle("Use pool type counts", "usesPoolTypeCounts", method.bag.usesPoolTypeCounts, !editable),
-            createMethodToggle("Enforce type caps", "enforceTypeCaps", method.bag.enforceTypeCaps, !editable),
-            createMethodToggle("First rotation unique types", "firstRotationUniqueType", method.bag.firstRotationUniqueType, !editable),
-            createMethodToggle("Discard after full empty pass", "discardAfterFullEmptyPass", method.bag.discardAfterFullEmptyPass, !editable),
-            createMethodToggle("Supports TTS export", "supportsExport", method.supportsExport, !editable)
-          );
-
-          const auctionOptions = document.createElement("div");
-          auctionOptions.className = "method-field-grid";
-          auctionOptions.append(
-            createMethodNumberField("Auction budget", "startingBudget", method.auction.startingBudget, !editable),
-            createMethodNumberField("Minimum bid", "minimumBid", method.auction.minimumBid, !editable),
-            createMethodSelectField("Bid visibility", "bidVisibility", methodOptionLabels.bidVisibility, method.auction.bidVisibility, !editable),
-            createMethodSelectField("Nomination order", "nominationOrder", methodOptionLabels.nominationOrder, method.auction.nominationOrder, !editable),
-            createMethodSelectField("Tie breaker", "tieBreaker", methodOptionLabels.tieBreaker, method.auction.tieBreaker, !editable)
-          );
-          const customNotes = createMethodTextField("Notes", "customNotes", method.customNotes, !editable, true);
-
+          const description = document.createElement("p");
+          description.textContent = method.description || "No description yet.";
+          const details = document.createElement("p");
+          details.textContent = [
+            methodOptionLabels.engine[method.engine] || method.engine,
+            methodOptionLabels.itemPresentation[method.itemPresentation] || method.itemPresentation,
+            methodOptionLabels.completion[method.completion] || method.completion
+          ].join(" / ");
           const actions = document.createElement("div");
           actions.className = "actions";
-          const duplicateButton = document.createElement("button");
-          duplicateButton.type = "button";
-          duplicateButton.className = "secondary";
-          duplicateButton.dataset.methodAction = "duplicate";
-          duplicateButton.textContent = "Duplicate";
-          actions.append(duplicateButton);
-
-          if (editable) {
-            const saveButton = document.createElement("button");
-            saveButton.type = "button";
-            saveButton.dataset.methodAction = "save";
-            saveButton.textContent = "Save";
-            const removeButton = document.createElement("button");
-            removeButton.type = "button";
-            removeButton.className = "secondary";
-            removeButton.dataset.methodAction = "remove";
-            removeButton.textContent = "Remove";
-            actions.prepend(saveButton);
-            actions.append(removeButton);
-          }
-
-          card.append(header, basics, description, bagOptions, auctionOptions, customNotes, actions);
+          const editLink = document.createElement("a");
+          editLink.className = "button-link secondary";
+          editLink.href = `/methods/${encodeURIComponent(method.id)}`;
+          editLink.textContent = "Edit Method";
+          actions.append(editLink);
+          card.append(header, description, details, actions);
           methodsList.append(card);
         }
       }
 
-      async function createManagedMethod(source = null) {
-        const body = source
-          ? {
-            ...source,
-            name: `${source.name} Copy`
-          }
-          : {
-            name: "New Draft Method",
-            engine: "custom",
-            description: "Describe how this draft should run.",
-            playerOrder: "custom",
-            itemPresentation: "custom",
-            selectionTiming: "custom",
-            passing: "custom",
-            visibility: "custom",
-            completion: "custom",
-            supportsExport: false,
-            bag: {},
-            auction: {
-              startingBudget: 100,
-              minimumBid: 1,
-              bidVisibility: "open",
-              nominationOrder: "table-order",
-              tieBreaker: "seat-order"
-            },
-            customNotes: ""
-          };
-        const response = await fetch(apiUrl("/api/methods"), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(body)
-        });
-        const data = await response.json();
-
-        if (!response.ok) {
-          methodsMessage.textContent = "Could not create method.";
-          return;
-        }
-
-        draftMethods = data.methods;
-        renderMethodsPage();
-        methodsMessage.textContent = "Method created.";
+      function cloneJson(value) {
+        return JSON.parse(JSON.stringify(value));
       }
 
-      async function saveManagedMethod(card) {
-        const methodId = card.dataset.methodId;
-        const button = card.querySelector("button[data-method-action='save']");
-        button.disabled = true;
+      function createMethodTemplate() {
+        return {
+          name: "New Draft Method",
+          engine: "custom",
+          description: "",
+          playerOrder: "custom",
+          itemPresentation: "custom",
+          selectionTiming: "custom",
+          passing: "custom",
+          visibility: "custom",
+          completion: "custom",
+          supportsExport: false,
+          bag: {
+            usesRoomPicksPerBag: false,
+            usesPoolTypeCounts: false,
+            enforceTypeCaps: false,
+            firstRotationUniqueType: false,
+            discardAfterFullEmptyPass: false
+          },
+          auction: {
+            startingBudget: 100,
+            minimumBid: 1,
+            bidVisibility: "open",
+            nominationOrder: "table-order",
+            tieBreaker: "seat-order"
+          },
+          customNotes: ""
+        };
+      }
+
+      function getEditorMethodPayload() {
+        return {
+          ...currentMethodDraft,
+          name: methodNameInput.value,
+          engine: methodEngineSelect.value,
+          description: methodDescriptionInput.value,
+          customNotes: methodInstructionsInput.value,
+          bag: {
+            ...currentMethodDraft.bag
+          },
+          auction: {
+            ...currentMethodDraft.auction
+          }
+        };
+      }
+
+      function setEditorMethod(method, options = {}) {
+        currentMethodDraft = {
+          ...createMethodTemplate(),
+          ...cloneJson(method),
+          bag: {
+            ...createMethodTemplate().bag,
+            ...cloneJson(method.bag || {})
+          },
+          auction: {
+            ...createMethodTemplate().auction,
+            ...cloneJson(method.auction || {})
+          }
+        };
+        currentMethodId = options.editableId || null;
+        methodEditorTitle.textContent = options.isNew ? "Create Draft Method" : `Edit ${currentMethodDraft.name}`;
+        methodNameInput.value = currentMethodDraft.name;
+        methodDescriptionInput.value = currentMethodDraft.description || "";
+        methodInstructionsInput.value = currentMethodDraft.customNotes || "";
+        methodEngineSelect.replaceChildren();
+        appendSelectOptions(methodEngineSelect, methodOptionLabels.engine, currentMethodDraft.engine);
+        saveMethod.textContent = currentMethodId ? "Save Method" : "Save New Method";
+        deleteMethod.hidden = !currentMethodId;
+        methodGptJsonInput.value = "";
+        methodEditorMessage.textContent = "";
+        updateMethodPrompt();
+      }
+
+      function buildMethodPrompt(method) {
+        return `You are helping configure a draft method for FrankenDraftTool.
+
+Return only strict JSON. Do not wrap it in markdown.
+
+The JSON shape is:
+{
+  "name": string,
+  "engine": "bag-pass" | "auction" | "snake" | "open-pick" | "custom",
+  "description": string,
+  "playerOrder": "random-table" | "seated-order" | "manual" | "auction-nomination" | "custom",
+  "itemPresentation": "starting-bags" | "shared-market" | "auction-nominations" | "open-packs" | "custom",
+  "selectionTiming": "simultaneous" | "turn-order" | "live-bidding" | "asynchronous" | "custom",
+  "passing": "clockwise-queue" | "counterclockwise-queue" | "snake" | "none" | "custom",
+  "visibility": "private-until-complete" | "live-public" | "host-only" | "custom",
+  "completion": "all-bags-empty" | "fixed-rounds" | "budget-spent" | "all-items-claimed" | "custom",
+  "supportsExport": boolean,
+  "bag": {
+    "usesRoomPicksPerBag": boolean,
+    "usesPoolTypeCounts": boolean,
+    "enforceTypeCaps": boolean,
+    "firstRotationUniqueType": boolean,
+    "discardAfterFullEmptyPass": boolean
+  },
+  "auction": {
+    "startingBudget": integer,
+    "minimumBid": integer,
+    "bidVisibility": "open" | "sealed" | "ascending" | "custom",
+    "nominationOrder": "random" | "table-order" | "snake" | "host" | "custom",
+    "tieBreaker": "seat-order" | "random" | "host" | "custom"
+  },
+  "customNotes": string
+}
+
+Current draft method:
+${JSON.stringify(method, null, 2)}
+
+Natural language instructions:
+${methodInstructionsInput.value || "(none yet)"}`;
+      }
+
+      function updateMethodPrompt() {
+        methodGeneratedPrompt.value = buildMethodPrompt(getEditorMethodPayload());
+      }
+
+      function mergeMethodJson(result) {
+        const base = getEditorMethodPayload();
+
+        return {
+          ...base,
+          ...result,
+          bag: {
+            ...base.bag,
+            ...(result.bag || {})
+          },
+          auction: {
+            ...base.auction,
+            ...(result.auction || {})
+          }
+        };
+      }
+
+      function parseMethodJsonResult(value) {
+        const text = value.trim();
+
+        if (!text) {
+          throw new Error("empty_json");
+        }
 
         try {
-          const response = await fetch(apiUrl(`/api/methods/${encodeURIComponent(methodId)}`), {
+          return JSON.parse(text);
+        } catch (error) {
+          const start = text.indexOf("{");
+          const end = text.lastIndexOf("}");
+
+          if (start < 0 || end <= start) {
+            throw error;
+          }
+
+          return JSON.parse(text.slice(start, end + 1));
+        }
+      }
+
+      function applyMethodJsonResult() {
+        try {
+          const parsed = parseMethodJsonResult(methodGptJsonInput.value);
+          setEditorMethod(mergeMethodJson(parsed), {
+            editableId: currentMethodId,
+            isNew: !currentMethodId
+          });
+          methodEditorMessage.textContent = "GPT JSON applied.";
+        } catch (error) {
+          methodEditorMessage.textContent = "That GPT result is not valid JSON.";
+        }
+      }
+
+      async function saveEditorMethod() {
+        saveMethod.disabled = true;
+
+        try {
+          const payload = getEditorMethodPayload();
+          const url = currentMethodId
+            ? `/api/methods/${encodeURIComponent(currentMethodId)}`
+            : "/api/methods";
+          const response = await fetch(apiUrl(url), {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
             },
-            body: JSON.stringify(collectManagedMethod(card))
+            body: JSON.stringify(payload)
           });
           const data = await response.json();
 
           if (!response.ok) {
-            methodsMessage.textContent = "Could not save method.";
+            methodEditorMessage.textContent = "Could not save method.";
             return;
           }
 
           draftMethods = data.methods;
-          renderMethodsPage();
-          methodsMessage.textContent = "Method saved.";
+          setEditorMethod(data.method, {
+            editableId: data.method.builtIn ? null : data.method.id
+          });
+          window.history.replaceState(null, "", `/methods/${encodeURIComponent(data.method.id)}`);
+          methodEditorMessage.textContent = "Method saved.";
         } finally {
-          button.disabled = false;
+          saveMethod.disabled = false;
         }
       }
 
-      async function removeManagedMethod(card) {
-        const methodId = card.dataset.methodId;
-        const button = card.querySelector("button[data-method-action='remove']");
-        button.disabled = true;
-
-        try {
-          const response = await fetch(apiUrl(`/api/methods/${encodeURIComponent(methodId)}/delete`), {
-            method: "POST"
-          });
-          const data = await response.json();
-
-          if (!response.ok) {
-            methodsMessage.textContent = "Could not remove method.";
-            return;
-          }
-
-          draftMethods = data.methods;
-          renderMethodsPage();
-          methodsMessage.textContent = "Method removed.";
-        } finally {
-          button.disabled = false;
+      async function deleteEditorMethod() {
+        if (!currentMethodId) {
+          return;
         }
+
+        const confirmed = await requestConfirmation({
+          title: "Remove Method",
+          message: `Remove "${methodNameInput.value || "this method"}" from draft methods? This cannot be undone.`,
+          acceptLabel: "Remove"
+        });
+
+        if (!confirmed) {
+          return;
+        }
+
+        const response = await fetch(apiUrl(`/api/methods/${encodeURIComponent(currentMethodId)}/delete`), {
+          method: "POST"
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          methodEditorMessage.textContent = "Could not remove method.";
+          return;
+        }
+
+        draftMethods = data.methods;
+        window.location.href = "/methods";
+      }
+
+      async function loadMethodEditor(methodId) {
+        await fetchDraftMethods({ force: true });
+        const source = methodId === "new" ? createMethodTemplate() : draftMethodById(methodId);
+
+        if (!source) {
+          setEditorMethod(createMethodTemplate(), { isNew: true });
+          methodEditorMessage.textContent = "Method not found.";
+          show(methodEditorView);
+          return;
+        }
+
+        setEditorMethod(source, {
+          editableId: source.builtIn ? null : source.id,
+          isNew: methodId === "new"
+        });
+        show(methodEditorView);
       }
 
       async function loadMethodsPage() {
@@ -2847,36 +2958,36 @@
         }
       });
 
-      createMethod.addEventListener("click", () => {
-        createManagedMethod();
-      });
+      methodNameInput.addEventListener("input", updateMethodPrompt);
+      methodEngineSelect.addEventListener("change", updateMethodPrompt);
+      methodDescriptionInput.addEventListener("input", updateMethodPrompt);
+      methodInstructionsInput.addEventListener("input", updateMethodPrompt);
 
-      methodsList.addEventListener("click", async (event) => {
-        const button = event.target.closest("button[data-method-action]");
+      copyMethodPrompt.addEventListener("click", async () => {
+        updateMethodPrompt();
 
-        if (!button) {
-          return;
-        }
-
-        const card = button.closest(".method-admin-card");
-
-        if (button.dataset.methodAction === "save") {
-          saveManagedMethod(card);
-        } else if (button.dataset.methodAction === "duplicate") {
-          createManagedMethod(collectManagedMethod(card));
-        } else if (button.dataset.methodAction === "remove") {
-          const methodName = card.querySelector("input[data-method-field='name']").value.trim() || "this method";
-          const confirmed = await requestConfirmation({
-            title: "Remove Method",
-            message: `Remove "${methodName}" from draft methods? This cannot be undone.`,
-            acceptLabel: "Remove"
-          });
-
-          if (confirmed) {
-            removeManagedMethod(card);
-          }
+        try {
+          await navigator.clipboard.writeText(methodGeneratedPrompt.value);
+          methodEditorMessage.textContent = "Prompt copied.";
+        } catch (error) {
+          methodEditorMessage.textContent = "Could not copy prompt.";
         }
       });
+
+      openChatGpt.addEventListener("click", async () => {
+        updateMethodPrompt();
+
+        try {
+          await navigator.clipboard.writeText(methodGeneratedPrompt.value);
+          methodEditorMessage.textContent = "Prompt copied. Paste it into ChatGPT.";
+        } catch (error) {
+          methodEditorMessage.textContent = "ChatGPT opened. Copy the prompt manually if needed.";
+        }
+      });
+
+      applyMethodJson.addEventListener("click", applyMethodJsonResult);
+      saveMethod.addEventListener("click", saveEditorMethod);
+      deleteMethod.addEventListener("click", deleteEditorMethod);
 
       namedSpectators.addEventListener("click", (event) => {
         const button = event.target.closest("button[data-participant-id]");
@@ -2902,6 +3013,7 @@
       lockChoice.addEventListener("click", lockCurrentChoice);
 
       const roomMatch = window.location.pathname.match(/^\/rooms\/(\d{6})$/);
+      const methodEditorMatch = window.location.pathname.match(/^\/methods\/([^/]+)$/);
 
       if (roomMatch) {
         enterRoom(roomMatch[1]);
@@ -2909,6 +3021,8 @@
         loadPoolsPage();
       } else if (window.location.pathname === "/methods") {
         loadMethodsPage();
+      } else if (methodEditorMatch) {
+        loadMethodEditor(decodeURIComponent(methodEditorMatch[1]));
       } else {
         show(homeView);
         startHomePresence();
