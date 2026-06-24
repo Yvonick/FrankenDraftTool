@@ -564,26 +564,40 @@
       .pool-type-list {
         width: 100%;
         display: grid;
-        gap: 0.6rem;
+        grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr));
+        gap: 0.55rem;
       }
 
       .pool-type-row {
         display: grid;
         grid-template-columns: auto minmax(0, 1fr);
         gap: 0.5rem;
-        align-items: end;
+        align-items: center;
+        padding: 0.55rem;
+        border: 1px solid #3f4248;
+        border-radius: 0.5rem;
+        background: #17191c;
       }
 
       .pool-type-row.dragging {
         opacity: 0.45;
       }
 
+      .pool-type-row label {
+        gap: 0.3rem;
+        font-size: 0.95rem;
+      }
+
+      .pool-type-row input {
+        min-height: 2.25rem;
+      }
+
       .pool-type-drag-handle {
-        min-width: 2.75rem;
-        min-height: 2.75rem;
+        min-width: 2.25rem;
+        min-height: 2.25rem;
         display: grid;
         place-items: center;
-        align-self: end;
+        align-self: center;
         border: 1px solid #6a6d72;
         border-radius: 0.5rem;
         color: #f7f3ea;
@@ -1542,18 +1556,52 @@
         }
       }
 
-      function getDragAfterTypeRow(typeList, y) {
-        return [...typeList.querySelectorAll(".pool-type-row:not(.dragging)")]
-          .reduce((closest, row) => {
-            const box = row.getBoundingClientRect();
-            const offset = y - box.top - (box.height / 2);
+      function getDragAfterTypeRow(typeList, x, y) {
+        const visualRows = [...typeList.querySelectorAll(".pool-type-row:not(.dragging)")]
+          .map((row) => ({
+            row,
+            box: row.getBoundingClientRect()
+          }))
+          .sort((left, right) => {
+            const topDifference = left.box.top - right.box.top;
+            return Math.abs(topDifference) > 8
+              ? topDifference
+              : left.box.left - right.box.left;
+          })
+          .reduce((rows, item) => {
+            const lastRow = rows[rows.length - 1];
 
-            if (offset < 0 && offset > closest.offset) {
-              return { offset, row };
+            if (!lastRow || Math.abs(item.box.top - lastRow.top) > 8) {
+              rows.push({
+                top: item.box.top,
+                bottom: item.box.bottom,
+                items: [item]
+              });
+            } else {
+              lastRow.bottom = Math.max(lastRow.bottom, item.box.bottom);
+              lastRow.items.push(item);
             }
 
-            return closest;
-          }, { offset: Number.NEGATIVE_INFINITY, row: null }).row;
+            return rows;
+          }, []);
+
+        for (let index = 0; index < visualRows.length; index += 1) {
+          const visualRow = visualRows[index];
+
+          if (y < visualRow.top) {
+            return visualRow.items[0].row;
+          }
+
+          if (y <= visualRow.bottom) {
+            const afterItem = visualRow.items.find((item) => (
+              x < item.box.left + (item.box.width / 2)
+            ));
+
+            return afterItem?.row || visualRows[index + 1]?.items[0]?.row || null;
+          }
+        }
+
+        return null;
       }
 
       async function loadPoolsPage() {
@@ -2309,7 +2357,7 @@
         }
 
         event.preventDefault();
-        const afterRow = getDragAfterTypeRow(typeList, event.clientY);
+        const afterRow = getDragAfterTypeRow(typeList, event.clientX, event.clientY);
 
         if (afterRow) {
           typeList.insertBefore(draggedPoolTypeRow, afterRow);
