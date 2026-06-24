@@ -166,26 +166,23 @@
       .item-grid,
       .reveal-grid {
         width: 100%;
-        display: grid;
         gap: 0.75rem;
         align-items: start;
       }
 
       .item-grid {
-        grid-template-columns: repeat(auto-fill, minmax(min(100%, 11rem), 13rem));
+        display: flex;
+        flex-wrap: wrap;
         justify-content: start;
       }
 
       .reveal-grid {
+        display: grid;
         grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
       }
 
-      .item-grid {
-        grid-auto-rows: auto;
-      }
-
       .item-grid > .group-section {
-        grid-column: 1 / -1;
+        flex: 0 1 min(100%, var(--group-basis, 13rem));
       }
 
       .group-section {
@@ -196,11 +193,19 @@
       }
 
       .item-stack {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(min(100%, 11rem), 13rem));
+        display: flex;
+        flex-wrap: wrap;
         gap: 0.75rem;
         justify-content: start;
         align-items: start;
+      }
+
+      .item-stack > .group-section {
+        flex: 0 1 min(100%, var(--group-basis, 13rem));
+      }
+
+      .item-stack > .item-card {
+        flex: 0 1 13rem;
       }
 
       .settings-grid label,
@@ -1100,6 +1105,12 @@
         }));
       }
 
+      function setGroupBasis(wrapper, itemCount) {
+        const columns = Math.min(Math.max(itemCount, 1), 6);
+        const basis = (columns * 13) + ((columns - 1) * 0.75);
+        wrapper.style.setProperty("--group-basis", `${basis}rem`);
+      }
+
       function renderTypeSections(container, items, options = {}) {
         container.replaceChildren();
 
@@ -1113,6 +1124,7 @@
         for (const section of groupItemsByType(items, options.typeOrder || preferredTypeOrder())) {
           const wrapper = document.createElement("section");
           wrapper.className = "group-section";
+          setGroupBasis(wrapper, section.items.length);
           const title = document.createElement("h4");
           title.textContent = section.label;
           const stack = document.createElement("div");
@@ -1144,6 +1156,7 @@
         for (const section of sections) {
           const wrapper = document.createElement("section");
           wrapper.className = "group-section";
+          setGroupBasis(wrapper, section.items.length);
           const title = document.createElement("h4");
           title.textContent = section.label;
           const stack = document.createElement("div");
