@@ -4,10 +4,12 @@ const {
   getDefaultPublicPool,
   getPool,
   getPoolSummary,
+  isSpeakerOrderType,
   listPublicPools,
   registerUploadedTtsPool,
   removePublicPool,
   savePool,
+  speakerOrderType,
   updatePublicPool
 } = require("./draftPools");
 
@@ -243,14 +245,16 @@ function cleanItemsPerType(pool, itemsPerType) {
       return null;
     }
 
-    cleaned[type] = Math.min(Math.max(parsed, 0), 10);
+    cleaned[type] = Math.min(Math.max(parsed, 0), isSpeakerOrderType(type) ? 1 : 10);
   }
 
   return cleaned;
 }
 
 function cleanTypeOrder(pool, typeOrder) {
-  const requested = Array.isArray(typeOrder) ? typeOrder : [];
+  const requested = Array.isArray(typeOrder)
+    ? typeOrder.map((type) => (isSpeakerOrderType(type) ? speakerOrderType : type))
+    : [];
 
   return [
     ...requested.filter((type, index) => (
@@ -291,6 +295,8 @@ function cloneItem(item) {
     imageSecondaryUrl: item.imageSecondaryUrl,
     imageSheet: item.imageSheet,
     sourceObjectType: item.sourceObjectType,
+    metaType: item.metaType,
+    order: item.order,
     ttsObject: item.ttsObject
   };
 }
@@ -308,7 +314,9 @@ function getItemSnapshot(item) {
     imageUrl: item.imageUrl,
     imageSecondaryUrl: item.imageSecondaryUrl,
     imageSheet: item.imageSheet,
-    sourceObjectType: item.sourceObjectType
+    sourceObjectType: item.sourceObjectType,
+    metaType: item.metaType,
+    order: item.order
   };
 }
 
@@ -330,6 +338,54 @@ function createTtsGuid(usedGuids) {
 
   usedGuids.add(guid);
   return guid;
+}
+
+function isExportableDraftItem(item) {
+  return Boolean(item.ttsObject) || item.metaType === "speaker-order";
+}
+
+function createTtsSpeakerOrderNotecard(item, usedGuids) {
+  return {
+    GUID: createTtsGuid(usedGuids),
+    Name: "Notecard",
+    Transform: {
+      posX: 0,
+      posY: 1,
+      posZ: 0,
+      rotX: 0,
+      rotY: 180,
+      rotZ: 0,
+      scaleX: 1,
+      scaleY: 1,
+      scaleZ: 1
+    },
+    Nickname: item.name,
+    Description: item.content,
+    GMNotes: "",
+    ColorDiffuse: { r: 1, g: 1, b: 1 },
+    Locked: false,
+    Grid: true,
+    Snap: true,
+    IgnoreFoW: false,
+    Autoraise: true,
+    Sticky: true,
+    Tooltip: true,
+    LuaScript: "",
+    LuaScriptState: "",
+    XmlUI: ""
+  };
+}
+
+function createTtsDraftItem(item, usedGuids) {
+  if (item.ttsObject) {
+    return cloneJson(item.ttsObject);
+  }
+
+  if (item.metaType === "speaker-order") {
+    return createTtsSpeakerOrderNotecard(item, usedGuids);
+  }
+
+  return null;
 }
 
 function createTtsBag(player, index, usedGuids) {
@@ -372,13 +428,15 @@ function createTtsBag(player, index, usedGuids) {
     LuaScript: "",
     LuaScriptState: "",
     XmlUI: "",
-    ContainedObjects: player.draftedItems.map((item) => cloneJson(item.ttsObject))
+    ContainedObjects: player.draftedItems
+      .map((item) => createTtsDraftItem(item, usedGuids))
+      .filter(Boolean)
   };
 }
 
 function createTtsDraftExport(roomNumber, draft) {
   const missingItemCount = draft.players.reduce((count, player) => (
-    count + player.draftedItems.filter((item) => !item.ttsObject).length
+    count + player.draftedItems.filter((item) => !isExportableDraftItem(item)).length
   ), 0);
 
   if (missingItemCount > 0) {
@@ -882,6 +940,10 @@ function validateDraftCanStart(room) {
   }
 
   for (const type of cleanTypeOrder(pool, room.draftSettings.typeOrder)) {
+    if (isSpeakerOrderType(type)) {
+      continue;
+    }
+
     const requested = (room.draftSettings.itemsPerType[type] || 0) * seated.length;
     const available = pool.items.filter((item) => item.type === type).length;
 
@@ -893,11 +955,32 @@ function validateDraftCanStart(room) {
   return null;
 }
 
+function createSpeakerOrderItems(players) {
+  return players.map((player, index) => {
+    const order = index + 1;
+
+    return {
+      id: `speaker-order-${order}`,
+      name: `Speaker Order ${order}`,
+      content: `Speaker order position ${order} of ${players.length}`,
+      type: speakerOrderType,
+      imageUrl: null,
+      imageSecondaryUrl: null,
+      imageSheet: null,
+      sourceObjectType: "Meta",
+      metaType: "speaker-order",
+      order
+    };
+  });
+}
+
 function createStartingBags(pool, players, settings) {
   const typeOrder = cleanTypeOrder(pool, settings.typeOrder);
   const itemsByType = new Map(typeOrder.map((type) => [
     type,
-    shuffle(pool.items.filter((item) => item.type === type))
+    isSpeakerOrderType(type)
+      ? shuffle(createSpeakerOrderItems(players))
+      : shuffle(pool.items.filter((item) => item.type === type))
   ]));
 
   return players.map((player) => {
@@ -908,7 +991,11 @@ function createStartingBags(pool, players, settings) {
       const source = itemsByType.get(type);
 
       for (let index = 0; index < count; index += 1) {
-        items.push(cloneItem(source.pop()));
+        const item = source.pop();
+
+        if (item) {
+          items.push(cloneItem(item));
+        }
       }
     }
 

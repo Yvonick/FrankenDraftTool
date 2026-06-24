@@ -23,7 +23,7 @@
       }
 
       main {
-        width: min(100% - 2rem, 64rem);
+        width: min(100% - 2rem, 96rem);
         display: grid;
         gap: 1.25rem;
         justify-items: center;
@@ -145,7 +145,7 @@
       }
 
       .panel {
-        width: min(100%, 48rem);
+        width: 100%;
         display: grid;
         gap: 0.9rem;
         justify-items: center;
@@ -155,8 +155,6 @@
       }
 
       .settings-grid,
-      .item-grid,
-      .reveal-grid,
       .spectator-grid {
         width: 100%;
         display: grid;
@@ -165,17 +163,25 @@
         align-items: stretch;
       }
 
+      .item-grid,
       .reveal-grid {
-        grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+        width: 100%;
+        display: grid;
+        gap: 0.75rem;
+        align-items: start;
       }
 
       .item-grid {
-        grid-auto-rows: 1fr;
+        grid-template-columns: repeat(auto-fill, minmax(min(100%, 11rem), 13rem));
+        justify-content: start;
       }
 
-      .item-grid > .group-section,
-      .reveal-grid > .group-section {
-        grid-column: 1 / -1;
+      .reveal-grid {
+        grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+      }
+
+      .item-grid {
+        grid-auto-rows: auto;
       }
 
       .group-section {
@@ -187,7 +193,7 @@
 
       .item-stack {
         display: grid;
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         gap: 0.75rem;
       }
 
@@ -497,7 +503,7 @@
       }
 
       .pool-admin-list {
-        width: min(100%, 56rem);
+        width: 100%;
         display: grid;
         gap: 1rem;
       }
@@ -1159,7 +1165,7 @@
           const input = document.createElement("input");
           input.type = "number";
           input.min = "0";
-          input.max = "10";
+          input.max = String(itemType.maxPerBag ?? 10);
           input.step = "1";
           input.dataset.itemType = itemType.type;
           input.value = values?.[itemType.type] ?? pool.defaultParameters.itemsPerType[itemType.type] ?? 0;
@@ -1380,7 +1386,7 @@
             const input = document.createElement("input");
             input.type = "number";
             input.min = "0";
-            input.max = "10";
+            input.max = String(itemType.maxPerBag ?? 10);
             input.step = "1";
             input.dataset.itemType = itemType.type;
             input.value = pool.defaultParameters.itemsPerType[itemType.type] ?? 0;

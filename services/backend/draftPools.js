@@ -30,6 +30,11 @@ function loadAssetOverrides() {
 }
 
 const assetOverrides = loadAssetOverrides();
+const speakerOrderType = "Speaker Order";
+
+function isSpeakerOrderType(type) {
+  return /speaker\s*order/i.test(String(type || ""));
+}
 
 function normalizeSteamAssetUrl(url) {
   let parsedUrl;
@@ -177,6 +182,11 @@ function parseTtsPool(rawJson, fallbackName) {
 
   for (const bag of root.ContainedObjects.filter(shouldUseTtsBag)) {
     const type = bag.Nickname || bag.Name;
+
+    if (isSpeakerOrderType(type)) {
+      continue;
+    }
+
     const parsedItems = bag.ContainedObjects
       .map((item, index) => extractTtsItem(item, type, poolId, index))
       .filter(Boolean);
@@ -199,6 +209,34 @@ function parseTtsPool(rawJson, fallbackName) {
     source: "tts",
     types,
     items
+  };
+}
+
+function normalizePoolTypes(types = []) {
+  const contentTypes = [];
+
+  for (const type of Array.isArray(types) ? types : []) {
+    if (!type || isSpeakerOrderType(type) || contentTypes.includes(type)) {
+      continue;
+    }
+
+    contentTypes.push(type);
+  }
+
+  return [...contentTypes, speakerOrderType];
+}
+
+function normalizePoolItems(items = []) {
+  return Array.isArray(items)
+    ? items.filter((item) => item && !isSpeakerOrderType(item.type))
+    : [];
+}
+
+function normalizePoolShape(pool) {
+  return {
+    ...pool,
+    types: normalizePoolTypes(pool.types),
+    items: normalizePoolItems(pool.items)
   };
 }
 
@@ -225,6 +263,7 @@ function cleanPoolName(name, fallback) {
 }
 
 function normalizeDefaultParameters(pool, parameters = {}) {
+  const poolTypes = normalizePoolTypes(pool.types);
   const parsedMaxSeats = Number(parameters.maxSeats);
   const maxSeats = Number.isInteger(parsedMaxSeats)
     ? Math.min(Math.max(parsedMaxSeats, 1), 12)
@@ -233,18 +272,21 @@ function normalizeDefaultParameters(pool, parameters = {}) {
   const picksPerBag = Number.isInteger(parsedPicksPerBag)
     ? Math.min(Math.max(parsedPicksPerBag, 1), 8)
     : 2;
-  const requestedTypeOrder = Array.isArray(parameters.typeOrder) ? parameters.typeOrder : [];
+  const requestedTypeOrder = Array.isArray(parameters.typeOrder)
+    ? parameters.typeOrder.map((type) => (isSpeakerOrderType(type) ? speakerOrderType : type))
+    : [];
   const typeOrder = [
     ...requestedTypeOrder.filter((type, index) => (
-      pool.types.includes(type) && requestedTypeOrder.indexOf(type) === index
+      poolTypes.includes(type) && requestedTypeOrder.indexOf(type) === index
     )),
-    ...pool.types.filter((type) => !requestedTypeOrder.includes(type))
+    ...poolTypes.filter((type) => !requestedTypeOrder.includes(type))
   ];
   const sourceItemsPerType = parameters.itemsPerType || {};
-  const itemsPerType = Object.fromEntries(pool.types.map((type) => {
+  const itemsPerType = Object.fromEntries(poolTypes.map((type) => {
     const parsed = Number(sourceItemsPerType[type]);
+    const maxValue = isSpeakerOrderType(type) ? 1 : 10;
     const value = Number.isInteger(parsed)
-      ? Math.min(Math.max(parsed, 0), 10)
+      ? Math.min(Math.max(parsed, 0), maxValue)
       : 1;
 
     return [type, value];
@@ -259,23 +301,27 @@ function normalizeDefaultParameters(pool, parameters = {}) {
 }
 
 function withPoolMetadata(pool, options = {}) {
+  const normalizedPool = normalizePoolShape(pool);
+
   return {
-    ...pool,
-    name: cleanPoolName(options.name || pool.name, pool.name),
-    public: options.public ?? Boolean(pool.public),
-    defaultParameters: normalizeDefaultParameters(pool, options.defaultParameters || pool.defaultParameters)
+    ...normalizedPool,
+    name: cleanPoolName(options.name || normalizedPool.name, normalizedPool.name),
+    public: options.public ?? Boolean(normalizedPool.public),
+    defaultParameters: normalizeDefaultParameters(normalizedPool, options.defaultParameters || normalizedPool.defaultParameters)
   };
 }
 
 function serializePool(pool) {
+  const normalizedPool = normalizePoolShape(pool);
+
   return {
-    id: pool.id,
-    name: pool.name,
-    source: pool.source,
+    id: normalizedPool.id,
+    name: normalizedPool.name,
+    source: normalizedPool.source,
     public: Boolean(pool.public),
-    types: pool.types,
-    items: pool.items,
-    defaultParameters: normalizeDefaultParameters(pool, pool.defaultParameters)
+    types: normalizedPool.types,
+    items: normalizedPool.items,
+    defaultParameters: normalizeDefaultParameters(normalizedPool, pool.defaultParameters)
   };
 }
 
@@ -458,7 +504,11 @@ function getPoolSummary(pool) {
     public: Boolean(pool.public),
     itemTypes: defaultParameters.typeOrder.map((type) => ({
       type,
-      itemCount: pool.items.filter((item) => item.type === type).length
+      itemCount: isSpeakerOrderType(type)
+        ? (defaultParameters.itemsPerType[type] ? defaultParameters.maxSeats : 0)
+        : pool.items.filter((item) => item.type === type).length,
+      isMeta: isSpeakerOrderType(type),
+      maxPerBag: isSpeakerOrderType(type) ? 1 : 10
     })),
     defaultParameters
   };
@@ -469,11 +519,13 @@ module.exports = {
   getDefaultPublicPool,
   getPool,
   getPoolSummary,
+  isSpeakerOrderType,
   listPublicPools,
   normalizeDefaultParameters,
   parseTtsPool,
   registerUploadedTtsPool,
   removePublicPool,
   savePool,
+  speakerOrderType,
   updatePublicPool
 };
