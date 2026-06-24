@@ -1,6 +1,15 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
 const {
+  createDraftMethod,
+  getDefaultDraftMethod,
+  getDraftMethod,
+  getDraftMethodSummary,
+  listDraftMethods,
+  removeDraftMethod,
+  updateDraftMethod
+} = require("./draftMethods");
+const {
   getDefaultPublicPool,
   getPool,
   getPoolSummary,
@@ -112,10 +121,12 @@ function handlePresenceStream(request, response) {
 
 function defaultDraftSettings() {
   const pool = getDefaultPublicPool();
+  const method = getDefaultDraftMethod();
 
   if (!pool) {
     return {
       poolId: null,
+      methodId: method.id,
       maxSeats: defaultSeatLimit,
       picksPerBag: 2,
       typeOrder: [],
@@ -125,6 +136,7 @@ function defaultDraftSettings() {
 
   return {
     poolId: pool.id,
+    methodId: method.id,
     maxSeats: pool.defaultParameters.maxSeats,
     picksPerBag: pool.defaultParameters.picksPerBag,
     typeOrder: pool.defaultParameters.typeOrder,
@@ -602,6 +614,60 @@ function handleRemovePublicPool(poolId, response) {
   });
 }
 
+function getDraftMethodListPayload(extra = {}) {
+  return {
+    ...extra,
+    methods: listDraftMethods().map(getDraftMethodSummary)
+  };
+}
+
+async function handleCreateDraftMethod(request, response) {
+  let body;
+
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return;
+  }
+
+  const method = createDraftMethod(body);
+  sendJson(response, 201, getDraftMethodListPayload({
+    method: getDraftMethodSummary(method)
+  }));
+}
+
+async function handleUpdateDraftMethod(methodId, request, response) {
+  let body;
+
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return;
+  }
+
+  const method = updateDraftMethod(methodId, body);
+
+  if (!method) {
+    sendJson(response, 404, { error: "draft_method_not_editable" });
+    return;
+  }
+
+  sendJson(response, 200, getDraftMethodListPayload({
+    method: getDraftMethodSummary(method)
+  }));
+}
+
+function handleRemoveDraftMethod(methodId, response) {
+  if (!removeDraftMethod(methodId)) {
+    sendJson(response, 404, { error: "draft_method_not_editable" });
+    return;
+  }
+
+  sendJson(response, 200, getDraftMethodListPayload());
+}
+
 async function handleRoomSettings(roomNumber, request, response) {
   const room = rooms.get(roomNumber);
 
@@ -653,6 +719,13 @@ async function handleRoomSettings(roomNumber, request, response) {
     return;
   }
 
+  const method = getDraftMethod(body.methodId || room.draftSettings.methodId);
+
+  if (!method) {
+    sendJson(response, 400, { error: "invalid_draft_method" });
+    return;
+  }
+
   const picksPerBag = body.picksPerBag === undefined
     ? room.draftSettings.picksPerBag
     : cleanPicksPerBag(body.picksPerBag);
@@ -676,6 +749,7 @@ async function handleRoomSettings(roomNumber, request, response) {
   room.maxSeats = maxSeats;
   room.draftSettings = {
     poolId: pool.id,
+    methodId: method.id,
     maxSeats,
     picksPerBag,
     typeOrder,
@@ -870,17 +944,21 @@ function getPlayerDraftView(player, draft, includeCurrentBag) {
 function getDraftSnapshot(room, viewerId) {
   if (!room.draft) {
     const pool = getPool(room.draftSettings.poolId);
+    const method = getDraftMethod(room.draftSettings.methodId) || getDefaultDraftMethod();
 
     return {
       status: "not_started",
       settings: {
         ...room.draftSettings,
-        pool: pool ? getPoolSummary(pool) : null
+        methodId: method.id,
+        pool: pool ? getPoolSummary(pool) : null,
+        method: getDraftMethodSummary(method)
       }
     };
   }
 
   const draft = room.draft;
+  const method = getDraftMethod(draft.methodId) || getDefaultDraftMethod();
   const viewer = room.participants.get(viewerId);
   const isSuperSpectator = viewer?.role === "spectator" && viewer.superSpectator;
   const table = draft.players.map(getTablePlayerSnapshot);
@@ -889,6 +967,8 @@ function getDraftSnapshot(room, viewerId) {
     return {
       status: "complete",
       poolId: draft.poolId,
+      methodId: method.id,
+      method: getDraftMethodSummary(method),
       picksPerBag: draft.picksPerBag,
       typeOrder: draft.typeOrder,
       itemsPerType: draft.itemsPerType,
@@ -907,6 +987,8 @@ function getDraftSnapshot(room, viewerId) {
   return {
     status: "active",
     poolId: draft.poolId,
+    methodId: method.id,
+    method: getDraftMethodSummary(method),
     picksPerBag: draft.picksPerBag,
     typeOrder: draft.typeOrder,
     itemsPerType: draft.itemsPerType,
@@ -937,6 +1019,16 @@ function validateDraftCanStart(room) {
 
   if (!pool) {
     return "invalid_pool";
+  }
+
+  const method = getDraftMethod(room.draftSettings.methodId);
+
+  if (!method) {
+    return "invalid_draft_method";
+  }
+
+  if (!method.playable || method.engine !== "bag-pass") {
+    return "unsupported_draft_method";
   }
 
   for (const type of cleanTypeOrder(pool, room.draftSettings.typeOrder)) {
@@ -1029,6 +1121,7 @@ function startDraft(room) {
   room.draft = {
     status: "active",
     poolId: pool.id,
+    methodId: room.draftSettings.methodId,
     picksPerBag: room.draftSettings.picksPerBag,
     typeOrder: cleanTypeOrder(pool, room.draftSettings.typeOrder),
     itemsPerType: room.draftSettings.itemsPerType,
@@ -1328,6 +1421,30 @@ const server = http.createServer(async (request, response) => {
 
   if (poolDeleteMatch && request.method === "POST") {
     handleRemovePublicPool(decodeURIComponent(poolDeleteMatch[1]), response);
+    return;
+  }
+
+  if (url.pathname === "/api/methods" && request.method === "GET") {
+    sendJson(response, 200, getDraftMethodListPayload());
+    return;
+  }
+
+  if (url.pathname === "/api/methods" && request.method === "POST") {
+    await handleCreateDraftMethod(request, response);
+    return;
+  }
+
+  const methodUpdateMatch = url.pathname.match(/^\/api\/methods\/([^/]+)$/);
+
+  if (methodUpdateMatch && request.method === "POST") {
+    await handleUpdateDraftMethod(decodeURIComponent(methodUpdateMatch[1]), request, response);
+    return;
+  }
+
+  const methodDeleteMatch = url.pathname.match(/^\/api\/methods\/([^/]+)\/delete$/);
+
+  if (methodDeleteMatch && request.method === "POST") {
+    handleRemoveDraftMethod(decodeURIComponent(methodDeleteMatch[1]), response);
     return;
   }
 
