@@ -569,14 +569,31 @@
 
       .pool-type-row {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto auto;
+        grid-template-columns: auto minmax(0, 1fr);
         gap: 0.5rem;
         align-items: end;
       }
 
-      .pool-type-row button {
+      .pool-type-row.dragging {
+        opacity: 0.45;
+      }
+
+      .pool-type-drag-handle {
+        min-width: 2.75rem;
         min-height: 2.75rem;
-        padding: 0 0.75rem;
+        display: grid;
+        place-items: center;
+        align-self: end;
+        border: 1px solid #6a6d72;
+        border-radius: 0.5rem;
+        color: #f7f3ea;
+        background: #202327;
+        cursor: grab;
+        user-select: none;
+      }
+
+      .pool-type-drag-handle:active {
+        cursor: grabbing;
       }
 
       .modal-backdrop {
@@ -853,6 +870,7 @@
       let selectedItemIds = new Set();
       let currentBagId = null;
       let pendingConfirmation = null;
+      let draggedPoolTypeRow = null;
 
       function show(view) {
         for (const candidate of [homeView, poolsView, roomView]) {
@@ -1419,6 +1437,11 @@
             const row = document.createElement("div");
             row.className = "pool-type-row";
             row.dataset.itemType = itemType.type;
+            const dragHandle = document.createElement("span");
+            dragHandle.className = "pool-type-drag-handle";
+            dragHandle.draggable = true;
+            dragHandle.setAttribute("aria-label", `Drag ${itemType.type}`);
+            dragHandle.textContent = "::";
             const label = document.createElement("label");
             const input = document.createElement("input");
             input.type = "number";
@@ -1428,17 +1451,7 @@
             input.dataset.itemType = itemType.type;
             input.value = pool.defaultParameters.itemsPerType[itemType.type] ?? 0;
             label.append(`${itemType.type} per bag`, input);
-            const upButton = document.createElement("button");
-            upButton.type = "button";
-            upButton.className = "secondary";
-            upButton.dataset.poolAction = "type-up";
-            upButton.textContent = "Up";
-            const downButton = document.createElement("button");
-            downButton.type = "button";
-            downButton.className = "secondary";
-            downButton.dataset.poolAction = "type-down";
-            downButton.textContent = "Down";
-            row.append(label, upButton, downButton);
+            row.append(dragHandle, label);
             typeList.append(row);
           }
 
@@ -1527,6 +1540,20 @@
         } finally {
           button.disabled = false;
         }
+      }
+
+      function getDragAfterTypeRow(typeList, y) {
+        return [...typeList.querySelectorAll(".pool-type-row:not(.dragging)")]
+          .reduce((closest, row) => {
+            const box = row.getBoundingClientRect();
+            const offset = y - box.top - (box.height / 2);
+
+            if (offset < 0 && offset > closest.offset) {
+              return { offset, row };
+            }
+
+            return closest;
+          }, { offset: Number.NEGATIVE_INFINITY, row: null }).row;
       }
 
       async function loadPoolsPage() {
@@ -2261,6 +2288,47 @@
         uploadPublicPoolFile(event.dataTransfer.files?.[0]);
       });
 
+      publicPoolsList.addEventListener("dragstart", (event) => {
+        const handle = event.target.closest(".pool-type-drag-handle");
+
+        if (!handle) {
+          return;
+        }
+
+        draggedPoolTypeRow = handle.closest(".pool-type-row");
+        draggedPoolTypeRow.classList.add("dragging");
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", draggedPoolTypeRow.dataset.itemType);
+      });
+
+      publicPoolsList.addEventListener("dragover", (event) => {
+        const typeList = event.target.closest(".pool-type-list");
+
+        if (!typeList || !draggedPoolTypeRow || !typeList.contains(draggedPoolTypeRow)) {
+          return;
+        }
+
+        event.preventDefault();
+        const afterRow = getDragAfterTypeRow(typeList, event.clientY);
+
+        if (afterRow) {
+          typeList.insertBefore(draggedPoolTypeRow, afterRow);
+        } else {
+          typeList.append(draggedPoolTypeRow);
+        }
+      });
+
+      publicPoolsList.addEventListener("drop", (event) => {
+        if (draggedPoolTypeRow) {
+          event.preventDefault();
+        }
+      });
+
+      publicPoolsList.addEventListener("dragend", () => {
+        draggedPoolTypeRow?.classList.remove("dragging");
+        draggedPoolTypeRow = null;
+      });
+
       publicPoolsList.addEventListener("click", async (event) => {
         const button = event.target.closest("button[data-pool-action]");
 
@@ -2269,21 +2337,10 @@
         }
 
         const card = button.closest(".pool-admin-card");
-        const row = button.closest(".pool-type-row");
-
-        if (button.dataset.poolAction === "type-up" && row?.previousElementSibling) {
-          row.parentElement.insertBefore(row, row.previousElementSibling);
-          return;
-        }
-
-        if (button.dataset.poolAction === "type-down" && row?.nextElementSibling) {
-          row.parentElement.insertBefore(row.nextElementSibling, row);
-          return;
-        }
 
         if (button.dataset.poolAction === "save") {
           saveManagedPool(card);
-        } else {
+        } else if (button.dataset.poolAction === "remove") {
           const poolName = card.querySelector("input[data-pool-field='name']").value.trim() || "this pool";
           const confirmed = await requestConfirmation({
             title: "Remove Pool",
