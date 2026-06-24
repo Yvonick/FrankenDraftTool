@@ -114,14 +114,18 @@ function defaultDraftSettings() {
   if (!pool) {
     return {
       poolId: null,
+      maxSeats: defaultSeatLimit,
       picksPerBag: 2,
+      typeOrder: [],
       itemsPerType: {}
     };
   }
 
   return {
     poolId: pool.id,
+    maxSeats: pool.defaultParameters.maxSeats,
     picksPerBag: pool.defaultParameters.picksPerBag,
+    typeOrder: pool.defaultParameters.typeOrder,
     itemsPerType: pool.defaultParameters.itemsPerType
   };
 }
@@ -133,10 +137,12 @@ function createRoom() {
     roomNumber = String(Math.floor(100000 + Math.random() * 900000));
   } while (rooms.has(roomNumber));
 
+  const draftSettings = defaultDraftSettings();
+
   rooms.set(roomNumber, {
     creatorToken: crypto.randomUUID(),
-    maxSeats: defaultSeatLimit,
-    draftSettings: defaultDraftSettings(),
+    maxSeats: draftSettings.maxSeats,
+    draftSettings,
     draft: null,
     participants: new Map(),
     clients: new Map()
@@ -241,6 +247,17 @@ function cleanItemsPerType(pool, itemsPerType) {
   }
 
   return cleaned;
+}
+
+function cleanTypeOrder(pool, typeOrder) {
+  const requested = Array.isArray(typeOrder) ? typeOrder : [];
+
+  return [
+    ...requested.filter((type, index) => (
+      pool.types.includes(type) && requested.indexOf(type) === index
+    )),
+    ...pool.types.filter((type) => !requested.includes(type))
+  ];
 }
 
 function getParticipantId(value) {
@@ -472,12 +489,23 @@ async function handleUpdatePublicPool(poolId, request, response) {
   }
 
   const defaultParameters = body.defaultParameters || {};
+  const maxSeats = defaultParameters.maxSeats === undefined
+    ? pool.defaultParameters.maxSeats
+    : cleanSeatLimit(defaultParameters.maxSeats);
   const picksPerBag = defaultParameters.picksPerBag === undefined
     ? pool.defaultParameters.picksPerBag
     : cleanPicksPerBag(defaultParameters.picksPerBag);
+  const typeOrder = defaultParameters.typeOrder === undefined
+    ? pool.defaultParameters.typeOrder
+    : cleanTypeOrder(pool, defaultParameters.typeOrder);
   const itemsPerType = defaultParameters.itemsPerType === undefined
     ? pool.defaultParameters.itemsPerType
     : cleanItemsPerType(pool, defaultParameters.itemsPerType);
+
+  if (!maxSeats) {
+    sendJson(response, 400, { error: "invalid_seat_limit" });
+    return;
+  }
 
   if (!picksPerBag) {
     sendJson(response, 400, { error: "invalid_picks_per_bag" });
@@ -492,7 +520,9 @@ async function handleUpdatePublicPool(poolId, request, response) {
   const updatedPool = updatePublicPool(pool.id, {
     name: body.name === undefined ? pool.name : cleanOptionalName(body.name),
     defaultParameters: {
+      maxSeats,
       picksPerBag,
+      typeOrder,
       itemsPerType
     }
   });
@@ -568,6 +598,9 @@ async function handleRoomSettings(roomNumber, request, response) {
   const picksPerBag = body.picksPerBag === undefined
     ? room.draftSettings.picksPerBag
     : cleanPicksPerBag(body.picksPerBag);
+  const typeOrder = body.typeOrder === undefined
+    ? cleanTypeOrder(pool, room.draftSettings.typeOrder || pool.defaultParameters.typeOrder)
+    : cleanTypeOrder(pool, body.typeOrder);
   const itemsPerType = body.itemsPerType === undefined
     ? room.draftSettings.itemsPerType
     : cleanItemsPerType(pool, body.itemsPerType);
@@ -585,7 +618,9 @@ async function handleRoomSettings(roomNumber, request, response) {
   room.maxSeats = maxSeats;
   room.draftSettings = {
     poolId: pool.id,
+    maxSeats,
     picksPerBag,
+    typeOrder,
     itemsPerType
   };
 
@@ -739,6 +774,7 @@ function getDraftSnapshot(room, viewerId) {
       status: "complete",
       poolId: draft.poolId,
       picksPerBag: draft.picksPerBag,
+      typeOrder: draft.typeOrder,
       itemsPerType: draft.itemsPerType,
       table,
       revealedDrafts: draft.players.map((player) => ({
@@ -756,6 +792,7 @@ function getDraftSnapshot(room, viewerId) {
     status: "active",
     poolId: draft.poolId,
     picksPerBag: draft.picksPerBag,
+    typeOrder: draft.typeOrder,
     itemsPerType: draft.itemsPerType,
     table,
     currentPlayer: player ? getPlayerDraftView(player, draft, true) : null,
@@ -786,7 +823,7 @@ function validateDraftCanStart(room) {
     return "invalid_pool";
   }
 
-  for (const type of pool.types) {
+  for (const type of cleanTypeOrder(pool, room.draftSettings.typeOrder)) {
     const requested = (room.draftSettings.itemsPerType[type] || 0) * seated.length;
     const available = pool.items.filter((item) => item.type === type).length;
 
@@ -799,7 +836,8 @@ function validateDraftCanStart(room) {
 }
 
 function createStartingBags(pool, players, settings) {
-  const itemsByType = new Map(pool.types.map((type) => [
+  const typeOrder = cleanTypeOrder(pool, settings.typeOrder);
+  const itemsByType = new Map(typeOrder.map((type) => [
     type,
     shuffle(pool.items.filter((item) => item.type === type))
   ]));
@@ -807,7 +845,7 @@ function createStartingBags(pool, players, settings) {
   return players.map((player) => {
     const items = [];
 
-    for (const type of pool.types) {
+    for (const type of typeOrder) {
       const count = settings.itemsPerType[type] || 0;
       const source = itemsByType.get(type);
 
@@ -845,6 +883,7 @@ function startDraft(room) {
     status: "active",
     poolId: pool.id,
     picksPerBag: room.draftSettings.picksPerBag,
+    typeOrder: cleanTypeOrder(pool, room.draftSettings.typeOrder),
     itemsPerType: room.draftSettings.itemsPerType,
     players,
     discardedItems: []
@@ -883,7 +922,10 @@ async function handleStartDraft(roomNumber, request, response) {
   if (body.savePool) {
     const savedPool = savePool(room.draftSettings.poolId, {
       name: cleanOptionalName(body.poolName),
-      defaultParameters: room.draftSettings
+      defaultParameters: {
+        ...room.draftSettings,
+        maxSeats: room.maxSeats
+      }
     });
 
     if (!savedPool) {

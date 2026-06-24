@@ -76,6 +76,10 @@ function shouldCropSystemTileTexture(type, item) {
   return item.Name === "Custom_Model" && /(?:planet|anomaly|home\s*systems?)/i.test(type);
 }
 
+function shouldIncludeImageOptionalItem(type) {
+  return /speaker\s*order\s*choice/i.test(type);
+}
+
 function getDeckForCard(item) {
   const customDeck = item.CustomDeck || {};
   const deckId = item.CardID === undefined ? null : String(Math.floor(Number(item.CardID) / 100));
@@ -128,7 +132,7 @@ function getImageData(item) {
 function extractTtsItem(item, type, poolId, index) {
   const image = getImageData(item);
 
-  if (!image.imageUrl) {
+  if (!image.imageUrl && !shouldIncludeImageOptionalItem(type)) {
     return null;
   }
 
@@ -221,10 +225,21 @@ function cleanPoolName(name, fallback) {
 }
 
 function normalizeDefaultParameters(pool, parameters = {}) {
+  const parsedMaxSeats = Number(parameters.maxSeats);
+  const maxSeats = Number.isInteger(parsedMaxSeats)
+    ? Math.min(Math.max(parsedMaxSeats, 1), 12)
+    : 6;
   const parsedPicksPerBag = Number(parameters.picksPerBag);
   const picksPerBag = Number.isInteger(parsedPicksPerBag)
     ? Math.min(Math.max(parsedPicksPerBag, 1), 8)
     : 2;
+  const requestedTypeOrder = Array.isArray(parameters.typeOrder) ? parameters.typeOrder : [];
+  const typeOrder = [
+    ...requestedTypeOrder.filter((type, index) => (
+      pool.types.includes(type) && requestedTypeOrder.indexOf(type) === index
+    )),
+    ...pool.types.filter((type) => !requestedTypeOrder.includes(type))
+  ];
   const sourceItemsPerType = parameters.itemsPerType || {};
   const itemsPerType = Object.fromEntries(pool.types.map((type) => {
     const parsed = Number(sourceItemsPerType[type]);
@@ -236,7 +251,9 @@ function normalizeDefaultParameters(pool, parameters = {}) {
   }));
 
   return {
+    maxSeats,
     picksPerBag,
+    typeOrder,
     itemsPerType
   };
 }
@@ -439,7 +456,7 @@ function getPoolSummary(pool) {
     name: pool.name,
     source: pool.source || "generated",
     public: Boolean(pool.public),
-    itemTypes: pool.types.map((type) => ({
+    itemTypes: defaultParameters.typeOrder.map((type) => ({
       type,
       itemCount: pool.items.filter((item) => item.type === type).length
     })),

@@ -168,6 +168,24 @@
         grid-auto-rows: 1fr;
       }
 
+      .item-grid > .group-section,
+      .reveal-grid > .group-section {
+        grid-column: 1 / -1;
+      }
+
+      .group-section {
+        width: 100%;
+        display: grid;
+        gap: 0.55rem;
+        align-content: start;
+      }
+
+      .item-stack {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+      }
+
       .settings-grid label,
       .pool-admin-card label,
       .modal label {
@@ -501,6 +519,24 @@
       .pool-admin-card header span {
         color: #8fd4cf;
         font-weight: 700;
+      }
+
+      .pool-type-list {
+        width: 100%;
+        display: grid;
+        gap: 0.6rem;
+      }
+
+      .pool-type-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 0.5rem;
+        align-items: end;
+      }
+
+      .pool-type-row button {
+        min-height: 2.75rem;
+        padding: 0 0.75rem;
       }
 
       .modal-backdrop {
@@ -975,22 +1011,13 @@
         return card;
       }
 
-      function renderItems(container, items) {
-        container.replaceChildren();
-
-        if (items.length === 0) {
-          const empty = document.createElement("p");
-          empty.textContent = "None yet";
-          container.append(empty);
-          return;
-        }
-
-        for (const item of items) {
-          container.append(renderItemCard(item));
-        }
+      function preferredTypeOrder() {
+        return latestRoom?.draft?.typeOrder
+          || poolById(poolSelect.value)?.defaultParameters.typeOrder
+          || [];
       }
 
-      function groupItemsByType(items) {
+      function groupItemsByType(items, typeOrder = []) {
         const grouped = new Map();
 
         for (const item of items) {
@@ -1001,7 +1028,12 @@
           grouped.get(item.type).push(item);
         }
 
-        return [...grouped.entries()].map(([label, groupItems]) => ({ label, items: groupItems }));
+        const orderedTypes = [
+          ...typeOrder.filter((type) => grouped.has(type)),
+          ...[...grouped.keys()].filter((type) => !typeOrder.includes(type))
+        ];
+
+        return orderedTypes.map((label) => ({ label, items: grouped.get(label) }));
       }
 
       function groupItemsByPick(groups = [], fallbackItems = []) {
@@ -1013,6 +1045,33 @@
           label: `Pick ${group.pickNumber}`,
           items: group.items
         }));
+      }
+
+      function renderTypeSections(container, items, options = {}) {
+        container.replaceChildren();
+
+        if (items.length === 0) {
+          const empty = document.createElement("p");
+          empty.textContent = options.emptyText || "None yet";
+          container.append(empty);
+          return;
+        }
+
+        for (const section of groupItemsByType(items, options.typeOrder || preferredTypeOrder())) {
+          const wrapper = document.createElement("section");
+          wrapper.className = "group-section";
+          const title = document.createElement("h4");
+          title.textContent = section.label;
+          const stack = document.createElement("div");
+          stack.className = "item-stack";
+
+          for (const item of section.items) {
+            stack.append(renderItemCard(item, options.itemOptions ? options.itemOptions(item) : {}));
+          }
+
+          wrapper.append(title, stack);
+          container.append(wrapper);
+        }
       }
 
       function renderGroupedItems(container, items, groups = []) {
@@ -1027,17 +1086,25 @@
 
         const sections = draftGrouping.value === "pick"
           ? groupItemsByPick(groups, items)
-          : groupItemsByType(items);
+          : groupItemsByType(items, preferredTypeOrder());
 
         for (const section of sections) {
           const wrapper = document.createElement("section");
           wrapper.className = "group-section";
           const title = document.createElement("h4");
           title.textContent = section.label;
-          const grid = document.createElement("div");
-          grid.className = "item-grid";
-          wrapper.append(title, grid);
-          renderItems(grid, section.items);
+          const stack = document.createElement("div");
+          stack.className = "item-stack";
+          wrapper.append(title, stack);
+
+          if (draftGrouping.value === "pick") {
+            renderTypeSections(stack, section.items);
+          } else {
+            for (const item of section.items) {
+              stack.append(renderItemCard(item));
+            }
+          }
+
           container.append(wrapper);
         }
       }
@@ -1101,6 +1168,7 @@
 
         renderPoolOptions(pool.id);
         poolSelect.value = pool.id;
+        seatLimitInput.value = settings.maxSeats ?? pool.defaultParameters.maxSeats;
         picksPerBagInput.value = settings.picksPerBag;
         poolSaveInput.checked = false;
         poolSaveNameInput.value = pool.name;
@@ -1119,6 +1187,7 @@
           maxSeats: Number(seatLimitInput.value),
           poolId: poolSelect.value,
           picksPerBag: Number(picksPerBagInput.value),
+          typeOrder: poolById(poolSelect.value)?.defaultParameters.typeOrder || [],
           itemsPerType
         };
       }
@@ -1172,6 +1241,7 @@
 
           addOrReplacePool(data.pool);
           renderPoolOptions(data.pool.id);
+          seatLimitInput.value = data.pool.defaultParameters.maxSeats;
           picksPerBagInput.value = data.pool.defaultParameters.picksPerBag;
           poolSaveInput.checked = false;
           poolSaveNameInput.value = data.pool.name;
@@ -1256,6 +1326,16 @@
           nameInput.value = pool.name;
           nameLabel.append("Name", nameInput);
 
+          const seatsLabel = document.createElement("label");
+          const seatsInput = document.createElement("input");
+          seatsInput.type = "number";
+          seatsInput.min = "1";
+          seatsInput.max = "12";
+          seatsInput.step = "1";
+          seatsInput.dataset.poolField = "seats";
+          seatsInput.value = pool.defaultParameters.maxSeats;
+          seatsLabel.append("Players at table", seatsInput);
+
           const picksLabel = document.createElement("label");
           const picksInput = document.createElement("input");
           picksInput.type = "number";
@@ -1266,10 +1346,13 @@
           picksInput.value = pool.defaultParameters.picksPerBag;
           picksLabel.append("Picks per bag", picksInput);
 
-          const typeGrid = document.createElement("div");
-          typeGrid.className = "settings-grid";
+          const typeList = document.createElement("div");
+          typeList.className = "pool-type-list";
 
           for (const itemType of pool.itemTypes) {
+            const row = document.createElement("div");
+            row.className = "pool-type-row";
+            row.dataset.itemType = itemType.type;
             const label = document.createElement("label");
             const input = document.createElement("input");
             input.type = "number";
@@ -1279,7 +1362,18 @@
             input.dataset.itemType = itemType.type;
             input.value = pool.defaultParameters.itemsPerType[itemType.type] ?? 0;
             label.append(`${itemType.type} per bag`, input);
-            typeGrid.append(label);
+            const upButton = document.createElement("button");
+            upButton.type = "button";
+            upButton.className = "secondary";
+            upButton.dataset.poolAction = "type-up";
+            upButton.textContent = "Up";
+            const downButton = document.createElement("button");
+            downButton.type = "button";
+            downButton.className = "secondary";
+            downButton.dataset.poolAction = "type-down";
+            downButton.textContent = "Down";
+            row.append(label, upButton, downButton);
+            typeList.append(row);
           }
 
           const actions = document.createElement("div");
@@ -1294,7 +1388,7 @@
           removeButton.dataset.poolAction = "remove";
           removeButton.textContent = "Remove";
           actions.append(saveButton, removeButton);
-          card.append(header, nameLabel, picksLabel, typeGrid, actions);
+          card.append(header, nameLabel, seatsLabel, picksLabel, typeList, actions);
           publicPoolsList.append(card);
         }
       }
@@ -1309,7 +1403,9 @@
         return {
           name: card.querySelector("input[data-pool-field='name']").value,
           defaultParameters: {
+            maxSeats: Number(card.querySelector("input[data-pool-field='seats']").value),
             picksPerBag: Number(card.querySelector("input[data-pool-field='picks']").value),
+            typeOrder: [...card.querySelectorAll(".pool-type-row")].map((row) => row.dataset.itemType),
             itemsPerType
           }
         };
@@ -1473,12 +1569,13 @@
         const eligible = new Set(bag.eligibleItemIds);
         draftInstruction.textContent = `${currentPlayer.queueLength} bag${currentPlayer.queueLength === 1 ? "" : "s"} in your queue. Select ${bag.requiredPickCount} item${bag.requiredPickCount === 1 ? "" : "s"} from this bag.`;
 
-        for (const item of bag.items) {
-          currentBag.append(renderItemCard(item, {
+        renderTypeSections(currentBag, bag.items, {
+          typeOrder: latestRoom?.draft.typeOrder,
+          itemOptions: (item) => ({
             checkable: true,
             available: eligible.has(item.id)
-          }));
-        }
+          })
+        });
 
         lockChoice.hidden = false;
         updateLockButton(bag.requiredPickCount);
@@ -1518,7 +1615,9 @@
           const draftedGrid = document.createElement("div");
           draftedGrid.className = "item-grid";
           section.append(title, bagTitle, bagGrid, draftedTitle, draftedGrid);
-          renderItems(bagGrid, player.currentBag?.items || []);
+          renderTypeSections(bagGrid, player.currentBag?.items || [], {
+            typeOrder: latestRoom?.draft.typeOrder
+          });
           renderGroupedItems(draftedGrid, player.draftedItems, player.draftedGroups);
           superDraftAreas.append(section);
         }
@@ -1538,7 +1637,7 @@
           const title = document.createElement("h4");
           title.textContent = player.name;
           const items = document.createElement("div");
-          items.className = "item-grid";
+          items.className = "type-section-list";
           section.append(title, items);
           renderGroupedItems(items, player.items, player.groups);
           revealedDrafts.append(section);
@@ -1978,6 +2077,7 @@
           return;
         }
 
+        seatLimitInput.value = pool.defaultParameters.maxSeats;
         picksPerBagInput.value = pool.defaultParameters.picksPerBag;
         poolSaveNameInput.value = pool.name;
         renderTypeInputs(pool, pool.defaultParameters.itemsPerType);
@@ -2029,6 +2129,17 @@
         }
 
         const card = button.closest(".pool-admin-card");
+        const row = button.closest(".pool-type-row");
+
+        if (button.dataset.poolAction === "type-up" && row?.previousElementSibling) {
+          row.parentElement.insertBefore(row, row.previousElementSibling);
+          return;
+        }
+
+        if (button.dataset.poolAction === "type-down" && row?.nextElementSibling) {
+          row.parentElement.insertBefore(row.nextElementSibling, row);
+          return;
+        }
 
         if (button.dataset.poolAction === "save") {
           saveManagedPool(card);
