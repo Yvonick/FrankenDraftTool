@@ -2016,6 +2016,23 @@
         }
       }
 
+      async function loadMethodGenerationStatus() {
+        try {
+          const response = await fetch(apiUrl("/api/methods/generate/status"));
+          const data = await response.json();
+
+          if (!response.ok) {
+            return;
+          }
+
+          if (!data.configured) {
+            methodEditorMessage.textContent = "Backend GPT generation needs OPENAI_API_KEY on the backend service.";
+          }
+        } catch (error) {
+          // The generate action will surface backend reachability errors if needed.
+        }
+      }
+
       async function generateMethodWithGpt() {
         const instructions = methodInstructionsInput.value.trim();
 
@@ -2042,7 +2059,7 @@
 
           if (!response.ok) {
             if (data.error === "openai_api_key_missing") {
-              methodEditorMessage.textContent = "GPT generation is not configured on the backend yet.";
+              methodEditorMessage.textContent = "Backend GPT generation needs OPENAI_API_KEY on the backend service.";
             } else if (data.error === "openai_request_timeout") {
               methodEditorMessage.textContent = "GPT generation timed out.";
             } else {
@@ -2141,6 +2158,7 @@
           editableId: source.builtIn ? null : source.id,
           isNew: methodId === "new"
         });
+        loadMethodGenerationStatus();
         show(methodEditorView);
       }
 

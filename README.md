@@ -71,3 +71,5 @@ Public saved pools are written to `POOL_STORE_PATH`, defaulting locally to `serv
 Custom draft methods are written to `DRAFT_METHOD_STORE_PATH`, defaulting locally to `services/backend/data/draft-methods.json`. The Render Blueprint stores them at `/var/data/draft-methods.json` on the same persistent disk.
 
 The draft method editor can generate method definitions through the OpenAI API. Set `OPENAI_API_KEY` on the backend service; the browser never receives this key. `OPENAI_METHOD_MODEL` defaults to `gpt-5.5` and can be changed without code changes.
+
+ChatGPT account login is not an OpenAI API credential for this standalone website. A ChatGPT Apps SDK integration would run this tool inside ChatGPT instead; this hosted site uses the backend API-key model.

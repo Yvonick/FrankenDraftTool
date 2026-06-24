@@ -1634,6 +1634,14 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
+  if (url.pathname === "/api/methods/generate/status" && request.method === "GET") {
+    sendJson(response, 200, {
+      configured: Boolean(openAiApiKey),
+      model: openAiModel
+    });
+    return;
+  }
+
   if (url.pathname === "/api/methods/generate" && request.method === "POST") {
     await handleGenerateDraftMethod(request, response);
     return;
