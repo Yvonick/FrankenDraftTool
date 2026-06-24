@@ -20,6 +20,10 @@ services:
         value: /var/data/public-pools.json
       - key: DRAFT_METHOD_STORE_PATH
         value: /var/data/draft-methods.json
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_METHOD_MODEL
+        value: gpt-5.5
 
   - type: web
     name: yvonick-frankendrafttool

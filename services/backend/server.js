@@ -6,6 +6,7 @@ const {
   getDraftMethod,
   getDraftMethodSummary,
   listDraftMethods,
+  normalizeDraftMethodPreview,
   removeDraftMethod,
   updateDraftMethod
 } = require("./draftMethods");
@@ -25,6 +26,9 @@ const {
 const port = Number(process.env.PORT || 3000);
 const serviceName = "franken-draft-tool-backend";
 const frontendOrigin = process.env.FRONTEND_ORIGIN || "*";
+const openAiApiKey = process.env.OPENAI_API_KEY || "";
+const openAiModel = process.env.OPENAI_METHOD_MODEL || "gpt-5.5";
+const openAiBaseUrl = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
 const presenceClients = new Set();
 const rooms = new Map();
 const defaultSeatLimit = 6;
@@ -619,6 +623,202 @@ function getDraftMethodListPayload(extra = {}) {
     ...extra,
     methods: listDraftMethods().map(getDraftMethodSummary)
   };
+}
+
+const draftMethodResponseSchema = {
+  type: "object",
+  properties: {
+    name: { type: "string" },
+    engine: { type: "string", enum: ["bag-pass", "auction", "snake", "open-pick", "custom"] },
+    description: { type: "string" },
+    playerOrder: { type: "string", enum: ["random-table", "seated-order", "manual", "auction-nomination", "custom"] },
+    itemPresentation: { type: "string", enum: ["starting-bags", "shared-market", "auction-nominations", "open-packs", "custom"] },
+    selectionTiming: { type: "string", enum: ["simultaneous", "turn-order", "live-bidding", "asynchronous", "custom"] },
+    passing: { type: "string", enum: ["clockwise-queue", "counterclockwise-queue", "snake", "none", "custom"] },
+    visibility: { type: "string", enum: ["private-until-complete", "live-public", "host-only", "custom"] },
+    completion: { type: "string", enum: ["all-bags-empty", "fixed-rounds", "budget-spent", "all-items-claimed", "custom"] },
+    supportsExport: { type: "boolean" },
+    bag: {
+      type: "object",
+      properties: {
+        usesRoomPicksPerBag: { type: "boolean" },
+        usesPoolTypeCounts: { type: "boolean" },
+        enforceTypeCaps: { type: "boolean" },
+        firstRotationUniqueType: { type: "boolean" },
+        discardAfterFullEmptyPass: { type: "boolean" }
+      },
+      required: [
+        "usesRoomPicksPerBag",
+        "usesPoolTypeCounts",
+        "enforceTypeCaps",
+        "firstRotationUniqueType",
+        "discardAfterFullEmptyPass"
+      ],
+      additionalProperties: false
+    },
+    auction: {
+      type: "object",
+      properties: {
+        startingBudget: { type: "integer" },
+        minimumBid: { type: "integer" },
+        bidVisibility: { type: "string", enum: ["open", "sealed", "ascending", "custom"] },
+        nominationOrder: { type: "string", enum: ["random", "table-order", "snake", "host", "custom"] },
+        tieBreaker: { type: "string", enum: ["seat-order", "random", "host", "custom"] }
+      },
+      required: [
+        "startingBudget",
+        "minimumBid",
+        "bidVisibility",
+        "nominationOrder",
+        "tieBreaker"
+      ],
+      additionalProperties: false
+    },
+    customNotes: { type: "string" }
+  },
+  required: [
+    "name",
+    "engine",
+    "description",
+    "playerOrder",
+    "itemPresentation",
+    "selectionTiming",
+    "passing",
+    "visibility",
+    "completion",
+    "supportsExport",
+    "bag",
+    "auction",
+    "customNotes"
+  ],
+  additionalProperties: false
+};
+
+function extractOpenAiResponseText(payload) {
+  if (typeof payload?.output_text === "string") {
+    return payload.output_text;
+  }
+
+  for (const item of payload?.output || []) {
+    for (const content of item.content || []) {
+      if (typeof content.text === "string") {
+        return content.text;
+      }
+    }
+  }
+
+  return "";
+}
+
+async function generateDraftMethod(currentMethod, instructions) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const openAiResponse = await fetch(`${openAiBaseUrl}/responses`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Authorization": `Bearer ${openAiApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: openAiModel,
+        input: [
+          {
+            role: "system",
+            content: [
+              "You configure draft method metadata for FrankenDraftTool.",
+              "Return a concise draft method definition that can be saved by the app.",
+              "Only the bag-pass engine is currently playable in live rooms; other engines are accepted as design definitions.",
+              "Use customNotes for implementation notes, edge cases, and any rules that are not captured by the enum fields."
+            ].join(" ")
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              currentMethod,
+              instructions
+            }, null, 2)
+          }
+        ],
+        reasoning: {
+          effort: "low"
+        },
+        text: {
+          verbosity: "low",
+          format: {
+            type: "json_schema",
+            name: "draft_method",
+            schema: draftMethodResponseSchema,
+            strict: true
+          }
+        }
+      })
+    });
+    const payload = await openAiResponse.json().catch(() => ({}));
+
+    if (!openAiResponse.ok) {
+      const message = payload?.error?.message || "OpenAI request failed.";
+      const error = new Error(message);
+      error.statusCode = openAiResponse.status;
+      throw error;
+    }
+
+    const text = extractOpenAiResponseText(payload);
+
+    if (!text) {
+      throw new Error("empty_model_response");
+    }
+
+    return normalizeDraftMethodPreview(JSON.parse(text));
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function handleGenerateDraftMethod(request, response) {
+  if (!openAiApiKey) {
+    sendJson(response, 503, { error: "openai_api_key_missing" });
+    return;
+  }
+
+  let body;
+
+  try {
+    body = await readJsonBody(request, { maxBytes: 50000 });
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return;
+  }
+
+  const instructions = String(body.instructions || "").trim();
+
+  if (!instructions) {
+    sendJson(response, 400, { error: "instructions_required" });
+    return;
+  }
+
+  const currentMethod = normalizeDraftMethodPreview(body.method || {});
+
+  try {
+    const method = await generateDraftMethod(currentMethod, instructions);
+    sendJson(response, 200, {
+      method,
+      model: openAiModel
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      sendJson(response, 504, { error: "openai_request_timeout" });
+      return;
+    }
+
+    console.warn(`Could not generate draft method: ${error.message}`);
+    sendJson(response, 502, {
+      error: "openai_request_failed",
+      message: error.message
+    });
+  }
 }
 
 async function handleCreateDraftMethod(request, response) {
@@ -1431,6 +1631,11 @@ const server = http.createServer(async (request, response) => {
 
   if (url.pathname === "/api/methods" && request.method === "POST") {
     await handleCreateDraftMethod(request, response);
+    return;
+  }
+
+  if (url.pathname === "/api/methods/generate" && request.method === "POST") {
+    await handleGenerateDraftMethod(request, response);
     return;
   }
 

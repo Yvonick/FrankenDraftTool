@@ -748,11 +748,10 @@
             <textarea id="method-instructions-input" placeholder="Describe the draft method you want. Include table order, hidden or public information, auction budget, passing rules, completion condition, and anything that should become enforceable."></textarea>
           </label>
           <div class="actions">
-            <button id="copy-method-prompt" type="button">Copy GPT Prompt</button>
-            <a id="open-chatgpt" class="button-link secondary" href="https://chatgpt.com" target="_blank" rel="noopener">Open ChatGPT</a>
+            <button id="generate-method" type="button">Generate with GPT</button>
           </div>
           <label>
-            Paste GPT JSON Result
+            JSON Override
             <textarea id="method-gpt-json-input" placeholder="{ ... }"></textarea>
           </label>
           <div class="actions">
@@ -761,10 +760,6 @@
             <button id="delete-method" class="secondary" type="button" hidden>Delete Method</button>
           </div>
         </div>
-      </section>
-      <section class="panel">
-        <h3>Prompt Sent To ChatGPT</h3>
-        <textarea id="method-generated-prompt" readonly></textarea>
       </section>
       <p class="message" id="method-editor-message"></p>
     </main>
@@ -939,13 +934,11 @@
       const methodEngineSelect = document.querySelector("#method-engine-select");
       const methodDescriptionInput = document.querySelector("#method-description-input");
       const methodInstructionsInput = document.querySelector("#method-instructions-input");
-      const copyMethodPrompt = document.querySelector("#copy-method-prompt");
-      const openChatGpt = document.querySelector("#open-chatgpt");
+      const generateMethod = document.querySelector("#generate-method");
       const methodGptJsonInput = document.querySelector("#method-gpt-json-input");
       const applyMethodJson = document.querySelector("#apply-method-json");
       const saveMethod = document.querySelector("#save-method");
       const deleteMethod = document.querySelector("#delete-method");
-      const methodGeneratedPrompt = document.querySelector("#method-generated-prompt");
       const methodEditorMessage = document.querySelector("#method-editor-message");
       const roomNumber = document.querySelector("#room-number");
       const shareRoom = document.querySelector("#share-room");
@@ -1970,52 +1963,6 @@
         deleteMethod.hidden = !currentMethodId;
         methodGptJsonInput.value = "";
         methodEditorMessage.textContent = "";
-        updateMethodPrompt();
-      }
-
-      function buildMethodPrompt(method) {
-        return `You are helping configure a draft method for FrankenDraftTool.
-
-Return only strict JSON. Do not wrap it in markdown.
-
-The JSON shape is:
-{
-  "name": string,
-  "engine": "bag-pass" | "auction" | "snake" | "open-pick" | "custom",
-  "description": string,
-  "playerOrder": "random-table" | "seated-order" | "manual" | "auction-nomination" | "custom",
-  "itemPresentation": "starting-bags" | "shared-market" | "auction-nominations" | "open-packs" | "custom",
-  "selectionTiming": "simultaneous" | "turn-order" | "live-bidding" | "asynchronous" | "custom",
-  "passing": "clockwise-queue" | "counterclockwise-queue" | "snake" | "none" | "custom",
-  "visibility": "private-until-complete" | "live-public" | "host-only" | "custom",
-  "completion": "all-bags-empty" | "fixed-rounds" | "budget-spent" | "all-items-claimed" | "custom",
-  "supportsExport": boolean,
-  "bag": {
-    "usesRoomPicksPerBag": boolean,
-    "usesPoolTypeCounts": boolean,
-    "enforceTypeCaps": boolean,
-    "firstRotationUniqueType": boolean,
-    "discardAfterFullEmptyPass": boolean
-  },
-  "auction": {
-    "startingBudget": integer,
-    "minimumBid": integer,
-    "bidVisibility": "open" | "sealed" | "ascending" | "custom",
-    "nominationOrder": "random" | "table-order" | "snake" | "host" | "custom",
-    "tieBreaker": "seat-order" | "random" | "host" | "custom"
-  },
-  "customNotes": string
-}
-
-Current draft method:
-${JSON.stringify(method, null, 2)}
-
-Natural language instructions:
-${methodInstructionsInput.value || "(none yet)"}`;
-      }
-
-      function updateMethodPrompt() {
-        methodGeneratedPrompt.value = buildMethodPrompt(getEditorMethodPayload());
       }
 
       function mergeMethodJson(result) {
@@ -2066,6 +2013,54 @@ ${methodInstructionsInput.value || "(none yet)"}`;
           methodEditorMessage.textContent = "GPT JSON applied.";
         } catch (error) {
           methodEditorMessage.textContent = "That GPT result is not valid JSON.";
+        }
+      }
+
+      async function generateMethodWithGpt() {
+        const instructions = methodInstructionsInput.value.trim();
+
+        if (!instructions) {
+          methodEditorMessage.textContent = "Add instructions before generating.";
+          return;
+        }
+
+        generateMethod.disabled = true;
+        methodEditorMessage.textContent = "Generating method...";
+
+        try {
+          const response = await fetch(apiUrl("/api/methods/generate"), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              method: getEditorMethodPayload(),
+              instructions
+            })
+          });
+          const data = await response.json();
+
+          if (!response.ok) {
+            if (data.error === "openai_api_key_missing") {
+              methodEditorMessage.textContent = "GPT generation is not configured on the backend yet.";
+            } else if (data.error === "openai_request_timeout") {
+              methodEditorMessage.textContent = "GPT generation timed out.";
+            } else {
+              methodEditorMessage.textContent = data.message || "Could not generate method.";
+            }
+
+            return;
+          }
+
+          setEditorMethod(mergeMethodJson(data.method), {
+            editableId: currentMethodId,
+            isNew: !currentMethodId
+          });
+          methodEditorMessage.textContent = `Generated with ${data.model}.`;
+        } catch (error) {
+          methodEditorMessage.textContent = "Could not reach the backend GPT integration.";
+        } finally {
+          generateMethod.disabled = false;
         }
       }
 
@@ -2958,33 +2953,7 @@ ${methodInstructionsInput.value || "(none yet)"}`;
         }
       });
 
-      methodNameInput.addEventListener("input", updateMethodPrompt);
-      methodEngineSelect.addEventListener("change", updateMethodPrompt);
-      methodDescriptionInput.addEventListener("input", updateMethodPrompt);
-      methodInstructionsInput.addEventListener("input", updateMethodPrompt);
-
-      copyMethodPrompt.addEventListener("click", async () => {
-        updateMethodPrompt();
-
-        try {
-          await navigator.clipboard.writeText(methodGeneratedPrompt.value);
-          methodEditorMessage.textContent = "Prompt copied.";
-        } catch (error) {
-          methodEditorMessage.textContent = "Could not copy prompt.";
-        }
-      });
-
-      openChatGpt.addEventListener("click", async () => {
-        updateMethodPrompt();
-
-        try {
-          await navigator.clipboard.writeText(methodGeneratedPrompt.value);
-          methodEditorMessage.textContent = "Prompt copied. Paste it into ChatGPT.";
-        } catch (error) {
-          methodEditorMessage.textContent = "ChatGPT opened. Copy the prompt manually if needed.";
-        }
-      });
-
+      generateMethod.addEventListener("click", generateMethodWithGpt);
       applyMethodJson.addEventListener("click", applyMethodJsonResult);
       saveMethod.addEventListener("click", saveEditorMethod);
       deleteMethod.addEventListener("click", deleteEditorMethod);

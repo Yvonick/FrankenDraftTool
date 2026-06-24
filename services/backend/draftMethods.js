@@ -229,6 +229,14 @@ function getDraftMethodSummary(method) {
   });
 }
 
+function normalizeDraftMethodPreview(method = {}) {
+  return normalizeMethod(method, {
+    id: method.id || "generated-method",
+    existing: defaultMethod,
+    builtIn: false
+  });
+}
+
 function createDraftMethod(input = {}) {
   const id = uniqueMethodId(input.name || "Draft Method");
   const method = normalizeMethod(input, {
@@ -279,6 +287,7 @@ module.exports = {
   getDraftMethod,
   getDraftMethodSummary,
   listDraftMethods,
+  normalizeDraftMethodPreview,
   removeDraftMethod,
   updateDraftMethod
 };

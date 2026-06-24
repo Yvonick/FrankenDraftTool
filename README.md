@@ -67,3 +67,7 @@ The host can restart an active or completed draft back to setup. Draft views can
 Custom pools can be loaded directly from Tabletop Simulator saved-object JSON files placed in `services/backend/pools/raw`. The backend parses top-level TTS bags as item types and extracts item names plus image URLs from cards, custom tiles, and custom models. The included `Franken Y V69.json` file is loaded this way as the `Franken Y V6.9` pool.
 
 Public saved pools are written to `POOL_STORE_PATH`, defaulting locally to `services/backend/data/public-pools.json`. The Render Blueprint mounts a persistent disk at `/var/data` and sets `POOL_STORE_PATH=/var/data/public-pools.json`, so uploaded/saved public pools survive backend restarts. Render persistent disks require a paid web service instance; without the disk, saved pools fall back to the service's ephemeral filesystem and can disappear after restarts.
+
+Custom draft methods are written to `DRAFT_METHOD_STORE_PATH`, defaulting locally to `services/backend/data/draft-methods.json`. The Render Blueprint stores them at `/var/data/draft-methods.json` on the same persistent disk.
+
+The draft method editor can generate method definitions through the OpenAI API. Set `OPENAI_API_KEY` on the backend service; the browser never receives this key. `OPENAI_METHOD_MODEL` defaults to `gpt-5.5` and can be changed without code changes.
