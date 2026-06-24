@@ -709,16 +709,71 @@ function countDraftedByType(player, type) {
   return player.draftedItems.filter((item) => item.type === type).length;
 }
 
-function canPlayerDraftItem(player, item, settings) {
-  return countDraftedByType(player, item.type) < (settings.itemsPerType[item.type] || 0);
+function getRemainingTypeCapacity(player, type, settings) {
+  return Math.max((settings.itemsPerType[type] || 0) - countDraftedByType(player, type), 0);
+}
+
+function isFirstRotationPick(player, bag, draft) {
+  if (bag.originalPlayerId === player.id && (player.initialBagPickCount || 0) > 0) {
+    return false;
+  }
+
+  return (player.pickCount || 0) < draft.players.length;
+}
+
+function getSelectionTypeLimit(player, bag, type, draft) {
+  const remainingCapacity = getRemainingTypeCapacity(player, type, draft);
+
+  if (remainingCapacity === 0) {
+    return 0;
+  }
+
+  return isFirstRotationPick(player, bag, draft) ? Math.min(remainingCapacity, 1) : remainingCapacity;
+}
+
+function countItemsByType(items) {
+  return items.reduce((counts, item) => {
+    counts[item.type] = (counts[item.type] || 0) + 1;
+    return counts;
+  }, {});
+}
+
+function getSelectableTypeLimits(player, bag, draft) {
+  const bagCounts = countItemsByType(bag.items);
+  const limits = {};
+
+  for (const [type, count] of Object.entries(bagCounts)) {
+    const limit = Math.min(count, getSelectionTypeLimit(player, bag, type, draft));
+
+    if (limit > 0) {
+      limits[type] = limit;
+    }
+  }
+
+  return limits;
 }
 
 function getRequiredPickCount(player, bag, draft) {
-  const eligibleCount = bag.items
-    .filter((item) => canPlayerDraftItem(player, item, draft))
-    .length;
+  const selectableCount = Object.values(getSelectableTypeLimits(player, bag, draft))
+    .reduce((total, count) => total + count, 0);
 
-  return Math.min(draft.picksPerBag, eligibleCount);
+  return Math.min(draft.picksPerBag, selectableCount);
+}
+
+function getSelectionError(player, bag, selectedItems, draft) {
+  const selectedCounts = countItemsByType(selectedItems);
+
+  for (const [type, count] of Object.entries(selectedCounts)) {
+    const limit = getSelectionTypeLimit(player, bag, type, draft);
+
+    if (count > limit) {
+      return isFirstRotationPick(player, bag, draft) && limit === 1
+        ? "first_rotation_type_duplicate"
+        : "type_limit_reached";
+    }
+  }
+
+  return null;
 }
 
 function getTablePlayerSnapshot(player) {
@@ -733,6 +788,7 @@ function getTablePlayerSnapshot(player) {
 
 function getPlayerDraftView(player, draft, includeCurrentBag) {
   const bag = player.queue[0] || null;
+  const typePickLimits = bag ? getSelectableTypeLimits(player, bag, draft) : {};
 
   return {
     playerId: player.id,
@@ -744,9 +800,11 @@ function getPlayerDraftView(player, draft, includeCurrentBag) {
       id: bag.id,
       items: bag.items.map(getItemSnapshot),
       eligibleItemIds: bag.items
-        .filter((item) => canPlayerDraftItem(player, item, draft))
+        .filter((item) => (typePickLimits[item.type] || 0) > 0)
         .map((item) => item.id),
-      requiredPickCount: getRequiredPickCount(player, bag, draft)
+      requiredPickCount: getRequiredPickCount(player, bag, draft),
+      typePickLimits,
+      firstRotation: isFirstRotationPick(player, bag, draft)
     } : null
   };
 }
@@ -871,7 +929,9 @@ function startDraft(room) {
     seat: index + 1,
     queue: [],
     draftedItems: [],
-    draftedGroups: []
+    draftedGroups: [],
+    pickCount: 0,
+    initialBagPickCount: 0
   }));
   const bags = createStartingBags(pool, players, room.draftSettings);
 
@@ -1093,12 +1153,19 @@ async function handleDraftPick(roomNumber, request, response) {
     return;
   }
 
-  if (selectedItems.some((item) => !canPlayerDraftItem(player, item, draft))) {
-    sendJson(response, 400, { error: "type_limit_reached" });
+  const selectionError = getSelectionError(player, bag, selectedItems, draft);
+
+  if (selectionError) {
+    sendJson(response, 400, { error: selectionError });
     return;
   }
 
   player.queue.shift();
+  player.pickCount = (player.pickCount || 0) + 1;
+
+  if (bag.originalPlayerId === player.id) {
+    player.initialBagPickCount = (player.initialBagPickCount || 0) + 1;
+  }
 
   if (selectedItems.length > 0) {
     player.draftedGroups.push({

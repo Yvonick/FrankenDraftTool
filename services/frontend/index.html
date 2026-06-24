@@ -96,6 +96,11 @@
         border: 1px solid #6a6d72;
       }
 
+      button.danger {
+        color: #17191c;
+        background: #f0a69b;
+      }
+
       button:disabled {
         cursor: not-allowed;
         opacity: 0.55;
@@ -722,6 +727,17 @@
       </form>
     </div>
 
+    <div class="modal-backdrop" id="confirm-modal" hidden>
+      <form class="modal" id="confirm-form">
+        <h3 id="confirm-title">Confirm</h3>
+        <p id="confirm-message"></p>
+        <div class="actions">
+          <button id="confirm-accept" class="danger" type="submit">Confirm</button>
+          <button id="confirm-cancel" class="secondary" type="button">Cancel</button>
+        </div>
+      </form>
+    </div>
+
     <script>
       const backendOrigin =
         window.location.hostname === "yvonick-frankendrafttool.onrender.com"
@@ -786,6 +802,12 @@
       const sitForm = document.querySelector("#sit-form");
       const sitName = document.querySelector("#sit-name");
       const cancelSit = document.querySelector("#cancel-sit");
+      const confirmModal = document.querySelector("#confirm-modal");
+      const confirmForm = document.querySelector("#confirm-form");
+      const confirmTitle = document.querySelector("#confirm-title");
+      const confirmMessage = document.querySelector("#confirm-message");
+      const confirmAccept = document.querySelector("#confirm-accept");
+      const confirmCancel = document.querySelector("#confirm-cancel");
       let roomEvents = null;
       let currentRoomNumber = null;
       let currentRole = null;
@@ -795,6 +817,7 @@
       let settingsInitialized = false;
       let selectedItemIds = new Set();
       let currentBagId = null;
+      let pendingConfirmation = null;
 
       function show(view) {
         for (const candidate of [homeView, poolsView, roomView]) {
@@ -1548,6 +1571,19 @@
         lockChoice.disabled = selectedCount !== requiredPickCount;
       }
 
+      function countSelectedTypeInBag(bag, type) {
+        const itemsById = new Map(bag.items.map((item) => [item.id, item]));
+        let count = 0;
+
+        for (const itemId of selectedItemIds) {
+          if (itemsById.get(itemId)?.type === type) {
+            count += 1;
+          }
+        }
+
+        return count;
+      }
+
       function renderCurrentBag(currentPlayer) {
         currentBag.replaceChildren();
 
@@ -1699,6 +1735,29 @@
 
       function closeSitModal() {
         sitModal.hidden = true;
+      }
+
+      function closeConfirmModal(confirmed = false) {
+        confirmModal.hidden = true;
+
+        if (pendingConfirmation) {
+          const resolve = pendingConfirmation;
+          pendingConfirmation = null;
+          resolve(confirmed);
+        }
+      }
+
+      function requestConfirmation({ title, message, acceptLabel = "Confirm" }) {
+        closeConfirmModal(false);
+        confirmTitle.textContent = title;
+        confirmMessage.textContent = message;
+        confirmAccept.textContent = acceptLabel;
+        confirmModal.hidden = false;
+
+        return new Promise((resolve) => {
+          pendingConfirmation = resolve;
+          confirmAccept.focus();
+        });
       }
 
       function connectToRoom(role, name = "") {
@@ -1889,6 +1948,16 @@
       }
 
       async function handleRestartDraft() {
+        const confirmed = await requestConfirmation({
+          title: "Restart Draft",
+          message: "Restart this draft and return the room to setup?",
+          acceptLabel: "Restart"
+        });
+
+        if (!confirmed) {
+          return;
+        }
+
         restartDraft.disabled = true;
         const creatorToken = sessionStorage.getItem(storageKey(currentRoomNumber, "creatorToken"));
         const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/restart`), {
@@ -1995,9 +2064,15 @@
         const data = await response.json();
 
         if (!response.ok) {
-          roomMessage.textContent = data.error === "wrong_pick_count"
-            ? `Select ${data.requiredPickCount} item${data.requiredPickCount === 1 ? "" : "s"}.`
-            : "Could not lock that choice.";
+          if (data.error === "wrong_pick_count") {
+            roomMessage.textContent = `Select ${data.requiredPickCount} item${data.requiredPickCount === 1 ? "" : "s"}.`;
+          } else if (data.error === "first_rotation_type_duplicate") {
+            roomMessage.textContent = "First rotation allows only one item of each type from a bag.";
+          } else if (data.error === "type_limit_reached") {
+            roomMessage.textContent = "That choice exceeds the type limit.";
+          } else {
+            roomMessage.textContent = "Could not lock that choice.";
+          }
           lockChoice.disabled = false;
           return;
         }
@@ -2046,18 +2121,40 @@
         connectToRoom("seated", name);
       });
 
+      confirmForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        closeConfirmModal(true);
+      });
+
+      confirmCancel.addEventListener("click", () => {
+        closeConfirmModal(false);
+      });
+
       currentBag.addEventListener("change", (event) => {
         if (event.target.type !== "checkbox") {
           return;
         }
 
         const itemId = event.target.value;
-        const requiredPickCount = latestRoom.draft.currentPlayer.currentBag.requiredPickCount;
+        const bag = latestRoom.draft.currentPlayer.currentBag;
+        const item = bag.items.find((candidate) => candidate.id === itemId);
+        const requiredPickCount = bag.requiredPickCount;
 
         if (event.target.checked) {
           if (selectedItemIds.size >= requiredPickCount) {
             event.target.checked = false;
             event.target.closest(".item-card")?.classList.remove("selected");
+            return;
+          }
+
+          const typeLimit = bag.typePickLimits?.[item?.type] || 0;
+
+          if (!item || countSelectedTypeInBag(bag, item.type) >= typeLimit) {
+            event.target.checked = false;
+            event.target.closest(".item-card")?.classList.remove("selected");
+            roomMessage.textContent = bag.firstRotation && typeLimit === 1
+              ? "First rotation allows only one item of each type from a bag."
+              : "You cannot pick more items of that type.";
             return;
           }
 
@@ -2121,7 +2218,7 @@
         uploadPublicPoolFile(event.dataTransfer.files?.[0]);
       });
 
-      publicPoolsList.addEventListener("click", (event) => {
+      publicPoolsList.addEventListener("click", async (event) => {
         const button = event.target.closest("button[data-pool-action]");
 
         if (!button) {
@@ -2144,7 +2241,16 @@
         if (button.dataset.poolAction === "save") {
           saveManagedPool(card);
         } else {
-          removeManagedPool(card);
+          const poolName = card.querySelector("input[data-pool-field='name']").value.trim() || "this pool";
+          const confirmed = await requestConfirmation({
+            title: "Remove Pool",
+            message: `Remove "${poolName}" from public pools? This cannot be undone.`,
+            acceptLabel: "Remove"
+          });
+
+          if (confirmed) {
+            removeManagedPool(card);
+          }
         }
       });
 
