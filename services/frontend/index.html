@@ -1166,6 +1166,8 @@
       let selectedItemIds = new Set();
       let auctionSelectionKey = "";
       let auctionSelectedItemId = null;
+      let auctionBidKey = "";
+      let auctionPendingBids = null;
       let currentBagId = null;
       let pendingConfirmation = null;
       let draggedPoolTypeRow = null;
@@ -2463,6 +2465,53 @@
         ].join(":");
       }
 
+      function auctionBiddingKey(auction) {
+        const nomination = auction.currentNomination;
+
+        if (!nomination || !["speaker_order_bidding", "bidding"].includes(auction.stage)) {
+          return "";
+        }
+
+        return [
+          auction.stage,
+          nomination.type,
+          nomination.isSpeakerOrder ? "speaker-order" : "items",
+          nomination.items.map((item) => item.id).join(",")
+        ].join(":");
+      }
+
+      function bidValuesWithDefaults(bids = {}) {
+        const source = bids || {};
+
+        return {
+          first: Number(source.first || 0),
+          second: Number(source.second || 0),
+          tie: Number(source.tie || 0)
+        };
+      }
+
+      function getAuctionBidValues(auction, player) {
+        const key = auctionBiddingKey(auction);
+
+        if (key !== auctionBidKey) {
+          auctionBidKey = key;
+          auctionPendingBids = bidValuesWithDefaults(player.currentBids);
+        }
+
+        if (player.auctionBidLocked && player.currentBids) {
+          auctionPendingBids = bidValuesWithDefaults(player.currentBids);
+        }
+
+        return bidValuesWithDefaults(auctionPendingBids);
+      }
+
+      function updateAuctionPendingBid(name, value) {
+        auctionPendingBids = {
+          ...bidValuesWithDefaults(auctionPendingBids),
+          [name]: Number(value || 0)
+        };
+      }
+
       function updateAuctionSelectionControls() {
         for (const checkbox of auctionItems.querySelectorAll("input[data-auction-selection]")) {
           const selected = checkbox.value === auctionSelectedItemId;
@@ -2666,16 +2715,17 @@
 
         const form = document.createElement("form");
         form.className = "auction-control-form";
+        const values = getAuctionBidValues(auction, player);
         const first = document.createElement("input");
         const second = document.createElement("input");
         const tie = document.createElement("input");
         const fields = [
-          ["First pick", first, player.currentBids?.first ?? 0],
-          ...(auction.players.length >= 5 ? [["Second pick", second, player.currentBids?.second ?? 0]] : []),
-          ["Tie breaker", tie, player.currentBids?.tie ?? 0]
+          ["First pick", "first", first, values.first],
+          ...(auction.players.length >= 5 ? [["Second pick", "second", second, values.second]] : []),
+          ["Tie breaker", "tie", tie, values.tie]
         ];
 
-        for (const [labelText, input, value] of fields) {
+        for (const [labelText, bidName, input, value] of fields) {
           const label = document.createElement("label");
           input.type = "number";
           input.min = "0";
@@ -2683,6 +2733,7 @@
           input.step = "1";
           input.value = value;
           input.disabled = player.auctionBidLocked;
+          input.addEventListener("input", () => updateAuctionPendingBid(bidName, input.value));
           label.append(labelText, input);
           form.append(label);
         }
@@ -2696,6 +2747,9 @@
         form.append(button);
         form.addEventListener("submit", (event) => {
           event.preventDefault();
+          updateAuctionPendingBid("first", first.value);
+          updateAuctionPendingBid("second", second.value || 0);
+          updateAuctionPendingBid("tie", tie.value);
           postAuctionAction("bid", {
             first: Number(first.value),
             second: Number(second.value || 0),
@@ -2806,6 +2860,8 @@
           auctionPlayers.replaceChildren();
           auctionControls.replaceChildren();
           auctionItems.replaceChildren();
+          auctionBidKey = "";
+          auctionPendingBids = null;
           return;
         }
 

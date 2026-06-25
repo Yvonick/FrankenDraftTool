@@ -31,6 +31,10 @@ function loadAssetOverrides() {
 
 const assetOverrides = loadAssetOverrides();
 const speakerOrderType = "Speaker Order";
+const systemTileMeshUrls = new Set([
+  "https://steamusercontent-a.akamaihd.net/ugc/1495712136739988324/528952D008E642AAC461C7B53CFD1CBE16C62F15/",
+  "https://steamusercontent-a.akamaihd.net/ugc/1499090116261708296/E6C28AF3C9C63950CA6BE177DB5AC6E4A6EA8575/"
+]);
 
 function isSpeakerOrderType(type) {
   return /speaker\s*order/i.test(String(type || ""));
@@ -78,7 +82,20 @@ function shouldKeepSecondaryImage(type) {
 }
 
 function shouldCropSystemTileTexture(type, item) {
-  return item.Name === "Custom_Model" && /(?:planet|anomaly|home\s*systems?)/i.test(type);
+  if (item?.Name !== "Custom_Model" || !item.CustomMesh?.DiffuseURL) {
+    return false;
+  }
+
+  const meshUrl = resolveAssetUrl(item.CustomMesh.MeshURL);
+  const systemTileType = /(?:planet|anomaly|home\s*systems?|system|tiles?\b)/i.test(type);
+
+  return systemTileType || systemTileMeshUrls.has(meshUrl);
+}
+
+function getSystemTileImageSheet(type, item) {
+  return shouldCropSystemTileTexture(type, item)
+    ? { columns: 2, rows: 1, index: 0 }
+    : null;
 }
 
 function shouldIncludeImageOptionalItem(type) {
@@ -170,9 +187,7 @@ function extractTtsItem(item, type, poolId, index, options = {}) {
     type,
     imageUrl: resolveAssetUrl(image.imageUrl),
     imageSecondaryUrl: shouldKeepSecondaryImage(type) ? resolveAssetUrl(image.imageSecondaryUrl) : null,
-    imageSheet: shouldCropSystemTileTexture(type, item)
-      ? { columns: 2, rows: 1, index: 0 }
-      : image.imageSheet,
+    imageSheet: getSystemTileImageSheet(type, item) || image.imageSheet,
     sourceObjectType: item.Name || "Unknown",
     ttsObject: cloneJson(item)
   };
@@ -359,9 +374,28 @@ function normalizePoolTypes(types = []) {
   return [...contentTypes, speakerOrderType];
 }
 
+function normalizePoolItem(item) {
+  if (!item) {
+    return item;
+  }
+
+  const imageSheet = getSystemTileImageSheet(item.type, item.ttsObject) || item.imageSheet || null;
+  const linkedItems = Array.isArray(item.linkedItems)
+    ? item.linkedItems.map(normalizePoolItem)
+    : item.linkedItems;
+
+  return {
+    ...item,
+    imageSheet,
+    linkedItems
+  };
+}
+
 function normalizePoolItems(items = []) {
   return Array.isArray(items)
-    ? items.filter((item) => item && !isSpeakerOrderType(item.type))
+    ? items
+      .filter((item) => item && !isSpeakerOrderType(item.type))
+      .map(normalizePoolItem)
     : [];
 }
 
