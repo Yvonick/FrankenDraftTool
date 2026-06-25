@@ -217,7 +217,6 @@
 
       .settings-grid label,
       .pool-admin-card label,
-      .method-admin-card label,
       .modal label {
         display: grid;
         gap: 0.4rem;
@@ -534,10 +533,6 @@
         display: flex;
       }
 
-      .method-admin-card label.toggle-row {
-        display: flex;
-      }
-
       .toggle-row input {
         width: auto;
         min-height: auto;
@@ -590,17 +585,29 @@
         text-align: left;
       }
 
-      .method-field-grid {
+      .method-section-list {
         width: 100%;
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(min(100%, 13rem), 1fr));
-        gap: 0.75rem;
+        gap: 0.9rem;
       }
 
-      .method-editor-layout {
-        width: 100%;
-        display: grid;
-        gap: 1rem;
+      .method-section {
+        text-align: left;
+      }
+
+      .method-section h4 {
+        margin: 0 0 0.35rem;
+        color: #f7e7a1;
+      }
+
+      .method-section ul {
+        margin: 0;
+        padding-left: 1.2rem;
+      }
+
+      .method-section li {
+        margin: 0.25rem 0;
+        line-height: 1.45;
       }
 
       .pool-type-list {
@@ -714,54 +721,10 @@
       <div class="actions">
         <a class="button-link secondary" href="/">Home</a>
         <a class="button-link secondary" href="/pools">Manage Pools</a>
-        <a class="button-link" href="/methods/new">Create New Method</a>
       </div>
+      <p>Current and planned draft methods. Only playable methods can launch from a room.</p>
       <div class="method-admin-list" id="methods-list"></div>
       <p class="message" id="methods-message"></p>
-    </main>
-
-    <main id="method-editor-view" hidden>
-      <h1>FrankenDraftTool</h1>
-      <h2 id="method-editor-title">Draft Method</h2>
-      <div class="actions">
-        <a class="button-link secondary" href="/methods">All Methods</a>
-        <a class="button-link secondary" href="/">Home</a>
-      </div>
-      <section class="panel">
-        <div class="method-editor-layout">
-          <div class="method-field-grid">
-            <label>
-              Name
-              <input id="method-name-input" maxlength="80">
-            </label>
-            <label>
-              Engine
-              <select id="method-engine-select"></select>
-            </label>
-          </div>
-          <label>
-            Short Description
-            <textarea id="method-description-input"></textarea>
-          </label>
-          <label>
-            Natural Language Instructions
-            <textarea id="method-instructions-input" placeholder="Describe the draft method you want. Include table order, hidden or public information, auction budget, passing rules, completion condition, and anything that should become enforceable."></textarea>
-          </label>
-          <div class="actions">
-            <button id="generate-method" type="button">Generate with GPT</button>
-          </div>
-          <label>
-            JSON Override
-            <textarea id="method-gpt-json-input" placeholder="{ ... }"></textarea>
-          </label>
-          <div class="actions">
-            <button id="apply-method-json" class="secondary" type="button">Apply JSON</button>
-            <button id="save-method" type="button">Save Method</button>
-            <button id="delete-method" class="secondary" type="button" hidden>Delete Method</button>
-          </div>
-        </div>
-      </section>
-      <p class="message" id="method-editor-message"></p>
     </main>
 
     <main id="room-view" hidden>
@@ -918,7 +881,6 @@
       const homeView = document.querySelector("#home-view");
       const poolsView = document.querySelector("#pools-view");
       const methodsView = document.querySelector("#methods-view");
-      const methodEditorView = document.querySelector("#method-editor-view");
       const roomView = document.querySelector("#room-view");
       const openPages = document.querySelector("#open-pages");
       const createRoom = document.querySelector("#create-room");
@@ -929,17 +891,6 @@
       const poolsMessage = document.querySelector("#pools-message");
       const methodsList = document.querySelector("#methods-list");
       const methodsMessage = document.querySelector("#methods-message");
-      const methodEditorTitle = document.querySelector("#method-editor-title");
-      const methodNameInput = document.querySelector("#method-name-input");
-      const methodEngineSelect = document.querySelector("#method-engine-select");
-      const methodDescriptionInput = document.querySelector("#method-description-input");
-      const methodInstructionsInput = document.querySelector("#method-instructions-input");
-      const generateMethod = document.querySelector("#generate-method");
-      const methodGptJsonInput = document.querySelector("#method-gpt-json-input");
-      const applyMethodJson = document.querySelector("#apply-method-json");
-      const saveMethod = document.querySelector("#save-method");
-      const deleteMethod = document.querySelector("#delete-method");
-      const methodEditorMessage = document.querySelector("#method-editor-message");
       const roomNumber = document.querySelector("#room-number");
       const shareRoom = document.querySelector("#share-room");
       const sitDown = document.querySelector("#sit-down");
@@ -1006,11 +957,9 @@
       let currentBagId = null;
       let pendingConfirmation = null;
       let draggedPoolTypeRow = null;
-      let currentMethodDraft = null;
-      let currentMethodId = null;
 
       function show(view) {
-        for (const candidate of [homeView, poolsView, methodsView, methodEditorView, roomView]) {
+        for (const candidate of [homeView, poolsView, methodsView, roomView]) {
           candidate.hidden = view !== candidate;
         }
       }
@@ -1845,17 +1794,6 @@
         }
       };
 
-      function appendSelectOptions(select, options, selectedValue) {
-        for (const [value, label] of Object.entries(options)) {
-          const option = document.createElement("option");
-          option.value = value;
-          option.textContent = label;
-          select.append(option);
-        }
-
-        select.value = selectedValue;
-      }
-
       function renderMethodsPage() {
         methodsList.replaceChildren();
 
@@ -1877,289 +1815,29 @@
             methodOptionLabels.itemPresentation[method.itemPresentation] || method.itemPresentation,
             methodOptionLabels.completion[method.completion] || method.completion
           ].join(" / ");
-          const actions = document.createElement("div");
-          actions.className = "actions";
-          const editLink = document.createElement("a");
-          editLink.className = "button-link secondary";
-          editLink.href = `/methods/${encodeURIComponent(method.id)}`;
-          editLink.textContent = "Edit Method";
-          actions.append(editLink);
-          card.append(header, description, details, actions);
-          methodsList.append(card);
-        }
-      }
+          const sections = document.createElement("div");
+          sections.className = "method-section-list";
 
-      function cloneJson(value) {
-        return JSON.parse(JSON.stringify(value));
-      }
+          for (const section of method.sections || []) {
+            const sectionElement = document.createElement("section");
+            sectionElement.className = "method-section";
+            const sectionTitle = document.createElement("h4");
+            sectionTitle.textContent = section.title;
+            const list = document.createElement("ul");
 
-      function createMethodTemplate() {
-        return {
-          name: "New Draft Method",
-          engine: "custom",
-          description: "",
-          playerOrder: "custom",
-          itemPresentation: "custom",
-          selectionTiming: "custom",
-          passing: "custom",
-          visibility: "custom",
-          completion: "custom",
-          supportsExport: false,
-          bag: {
-            usesRoomPicksPerBag: false,
-            usesPoolTypeCounts: false,
-            enforceTypeCaps: false,
-            firstRotationUniqueType: false,
-            discardAfterFullEmptyPass: false
-          },
-          auction: {
-            startingBudget: 100,
-            minimumBid: 1,
-            bidVisibility: "open",
-            nominationOrder: "table-order",
-            tieBreaker: "seat-order"
-          },
-          customNotes: ""
-        };
-      }
-
-      function getEditorMethodPayload() {
-        return {
-          ...currentMethodDraft,
-          name: methodNameInput.value,
-          engine: methodEngineSelect.value,
-          description: methodDescriptionInput.value,
-          customNotes: methodInstructionsInput.value,
-          bag: {
-            ...currentMethodDraft.bag
-          },
-          auction: {
-            ...currentMethodDraft.auction
-          }
-        };
-      }
-
-      function setEditorMethod(method, options = {}) {
-        currentMethodDraft = {
-          ...createMethodTemplate(),
-          ...cloneJson(method),
-          bag: {
-            ...createMethodTemplate().bag,
-            ...cloneJson(method.bag || {})
-          },
-          auction: {
-            ...createMethodTemplate().auction,
-            ...cloneJson(method.auction || {})
-          }
-        };
-        currentMethodId = options.editableId || null;
-        methodEditorTitle.textContent = options.isNew ? "Create Draft Method" : `Edit ${currentMethodDraft.name}`;
-        methodNameInput.value = currentMethodDraft.name;
-        methodDescriptionInput.value = currentMethodDraft.description || "";
-        methodInstructionsInput.value = currentMethodDraft.customNotes || "";
-        methodEngineSelect.replaceChildren();
-        appendSelectOptions(methodEngineSelect, methodOptionLabels.engine, currentMethodDraft.engine);
-        saveMethod.textContent = currentMethodId ? "Save Method" : "Save New Method";
-        deleteMethod.hidden = !currentMethodId;
-        methodGptJsonInput.value = "";
-        methodEditorMessage.textContent = "";
-      }
-
-      function mergeMethodJson(result) {
-        const base = getEditorMethodPayload();
-
-        return {
-          ...base,
-          ...result,
-          bag: {
-            ...base.bag,
-            ...(result.bag || {})
-          },
-          auction: {
-            ...base.auction,
-            ...(result.auction || {})
-          }
-        };
-      }
-
-      function parseMethodJsonResult(value) {
-        const text = value.trim();
-
-        if (!text) {
-          throw new Error("empty_json");
-        }
-
-        try {
-          return JSON.parse(text);
-        } catch (error) {
-          const start = text.indexOf("{");
-          const end = text.lastIndexOf("}");
-
-          if (start < 0 || end <= start) {
-            throw error;
-          }
-
-          return JSON.parse(text.slice(start, end + 1));
-        }
-      }
-
-      function applyMethodJsonResult() {
-        try {
-          const parsed = parseMethodJsonResult(methodGptJsonInput.value);
-          setEditorMethod(mergeMethodJson(parsed), {
-            editableId: currentMethodId,
-            isNew: !currentMethodId
-          });
-          methodEditorMessage.textContent = "GPT JSON applied.";
-        } catch (error) {
-          methodEditorMessage.textContent = "That GPT result is not valid JSON.";
-        }
-      }
-
-      async function loadMethodGenerationStatus() {
-        try {
-          const response = await fetch(apiUrl("/api/methods/generate/status"));
-          const data = await response.json();
-
-          if (!response.ok) {
-            return;
-          }
-
-          if (!data.configured) {
-            methodEditorMessage.textContent = "Backend GPT generation needs OPENAI_API_KEY on the backend service.";
-          }
-        } catch (error) {
-          // The generate action will surface backend reachability errors if needed.
-        }
-      }
-
-      async function generateMethodWithGpt() {
-        const instructions = methodInstructionsInput.value.trim();
-
-        if (!instructions) {
-          methodEditorMessage.textContent = "Add instructions before generating.";
-          return;
-        }
-
-        generateMethod.disabled = true;
-        methodEditorMessage.textContent = "Generating method...";
-
-        try {
-          const response = await fetch(apiUrl("/api/methods/generate"), {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              method: getEditorMethodPayload(),
-              instructions
-            })
-          });
-          const data = await response.json();
-
-          if (!response.ok) {
-            if (data.error === "openai_api_key_missing") {
-              methodEditorMessage.textContent = "Backend GPT generation needs OPENAI_API_KEY on the backend service.";
-            } else if (data.error === "openai_request_timeout") {
-              methodEditorMessage.textContent = "GPT generation timed out.";
-            } else {
-              methodEditorMessage.textContent = data.message || "Could not generate method.";
+            for (const item of section.items || []) {
+              const listItem = document.createElement("li");
+              listItem.textContent = item;
+              list.append(listItem);
             }
 
-            return;
+            sectionElement.append(sectionTitle, list);
+            sections.append(sectionElement);
           }
 
-          setEditorMethod(mergeMethodJson(data.method), {
-            editableId: currentMethodId,
-            isNew: !currentMethodId
-          });
-          methodEditorMessage.textContent = `Generated with ${data.model}.`;
-        } catch (error) {
-          methodEditorMessage.textContent = "Could not reach the backend GPT integration.";
-        } finally {
-          generateMethod.disabled = false;
+          card.append(header, description, details, sections);
+          methodsList.append(card);
         }
-      }
-
-      async function saveEditorMethod() {
-        saveMethod.disabled = true;
-
-        try {
-          const payload = getEditorMethodPayload();
-          const url = currentMethodId
-            ? `/api/methods/${encodeURIComponent(currentMethodId)}`
-            : "/api/methods";
-          const response = await fetch(apiUrl(url), {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify(payload)
-          });
-          const data = await response.json();
-
-          if (!response.ok) {
-            methodEditorMessage.textContent = "Could not save method.";
-            return;
-          }
-
-          draftMethods = data.methods;
-          setEditorMethod(data.method, {
-            editableId: data.method.builtIn ? null : data.method.id
-          });
-          window.history.replaceState(null, "", `/methods/${encodeURIComponent(data.method.id)}`);
-          methodEditorMessage.textContent = "Method saved.";
-        } finally {
-          saveMethod.disabled = false;
-        }
-      }
-
-      async function deleteEditorMethod() {
-        if (!currentMethodId) {
-          return;
-        }
-
-        const confirmed = await requestConfirmation({
-          title: "Remove Method",
-          message: `Remove "${methodNameInput.value || "this method"}" from draft methods? This cannot be undone.`,
-          acceptLabel: "Remove"
-        });
-
-        if (!confirmed) {
-          return;
-        }
-
-        const response = await fetch(apiUrl(`/api/methods/${encodeURIComponent(currentMethodId)}/delete`), {
-          method: "POST"
-        });
-        const data = await response.json();
-
-        if (!response.ok) {
-          methodEditorMessage.textContent = "Could not remove method.";
-          return;
-        }
-
-        draftMethods = data.methods;
-        window.location.href = "/methods";
-      }
-
-      async function loadMethodEditor(methodId) {
-        await fetchDraftMethods({ force: true });
-        const source = methodId === "new" ? createMethodTemplate() : draftMethodById(methodId);
-
-        if (!source) {
-          setEditorMethod(createMethodTemplate(), { isNew: true });
-          methodEditorMessage.textContent = "Method not found.";
-          show(methodEditorView);
-          return;
-        }
-
-        setEditorMethod(source, {
-          editableId: source.builtIn ? null : source.id,
-          isNew: methodId === "new"
-        });
-        loadMethodGenerationStatus();
-        show(methodEditorView);
       }
 
       async function loadMethodsPage() {
@@ -2971,11 +2649,6 @@
         }
       });
 
-      generateMethod.addEventListener("click", generateMethodWithGpt);
-      applyMethodJson.addEventListener("click", applyMethodJsonResult);
-      saveMethod.addEventListener("click", saveEditorMethod);
-      deleteMethod.addEventListener("click", deleteEditorMethod);
-
       namedSpectators.addEventListener("click", (event) => {
         const button = event.target.closest("button[data-participant-id]");
 
@@ -3000,7 +2673,6 @@
       lockChoice.addEventListener("click", lockCurrentChoice);
 
       const roomMatch = window.location.pathname.match(/^\/rooms\/(\d{6})$/);
-      const methodEditorMatch = window.location.pathname.match(/^\/methods\/([^/]+)$/);
 
       if (roomMatch) {
         enterRoom(roomMatch[1]);
@@ -3008,8 +2680,6 @@
         loadPoolsPage();
       } else if (window.location.pathname === "/methods") {
         loadMethodsPage();
-      } else if (methodEditorMatch) {
-        loadMethodEditor(decodeURIComponent(methodEditorMatch[1]));
       } else {
         show(homeView);
         startHomePresence();

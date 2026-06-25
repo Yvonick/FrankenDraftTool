@@ -1,9 +1,3 @@
-const fs = require("node:fs");
-const path = require("node:path");
-
-const methodStorePath = process.env.DRAFT_METHOD_STORE_PATH
-  || path.join(__dirname, "data", "draft-methods.json");
-
 const defaultMethodId = "bag-passing-default";
 
 const methodEngines = new Set([
@@ -54,15 +48,135 @@ const defaultMethod = {
     nominationOrder: "table-order",
     tieBreaker: "seat-order"
   },
+  sections: [
+    {
+      title: "Setup",
+      items: [
+        "The host selects a pool and this draft method, players sit down until the room reaches the pool's player count, and the host starts the draft.",
+        "Players are randomly arranged around the table.",
+        "Each player is dealt one starting bag built from the pool's item-type counts."
+      ]
+    },
+    {
+      title: "Pick And Pass",
+      items: [
+        "Players privately view their current bag, select the required number of legal items, lock choices, and add those items to their drafted area.",
+        "Remaining items in the bag pass clockwise to the back of the next player's queue.",
+        "Each player repeatedly takes the first bag from their own queue until all bags are empty or discarded."
+      ]
+    },
+    {
+      title: "Legality",
+      items: [
+        "Players cannot draft more than the pool maximum for any item type.",
+        "During the first rotation, a player cannot pick two items of the same type.",
+        "If a player cannot make the usual number of picks, they may lock the maximum number of legal picks available, including zero."
+      ]
+    },
+    {
+      title: "Visibility And Finish",
+      items: [
+        "Current bags and drafted items are private to their owners during the draft, except for super spectators.",
+        "Once all bags are empty, every player's drafted area is revealed and TTS export becomes available."
+      ]
+    }
+  ],
   customNotes: "This is the method currently implemented by the live draft room."
 };
 
-function slugify(value) {
-  return String(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
+const nominationAuctionMethod = {
+  id: "nomination-auction",
+  name: "Nomination Auction",
+  engine: "auction",
+  builtIn: true,
+  playable: false,
+  description: "Players spend credits through rotating item-type nominations, mulligans, bans, hidden bids, and public pick-order resolution.",
+  playerOrder: "auction-nomination",
+  itemPresentation: "auction-nominations",
+  selectionTiming: "live-bidding",
+  passing: "none",
+  visibility: "live-public",
+  completion: "all-items-claimed",
+  supportsExport: true,
+  bag: {
+    usesRoomPicksPerBag: false,
+    usesPoolTypeCounts: true,
+    enforceTypeCaps: true,
+    firstRotationUniqueType: false,
+    discardAfterFullEmptyPass: false
+  },
+  auction: {
+    startingBudget: 40,
+    minimumBid: 0,
+    bidVisibility: "sealed",
+    nominationOrder: "table-order",
+    tieBreaker: "random"
+  },
+  sections: [
+    {
+      title: "Setup",
+      items: [
+        "The room starts like a normal draft: the host selects a pool and method, the required number of players sit down, and the host starts the draft.",
+        "Each player starts with 40 credits, 2 mulligan tokens, and 1 ban token.",
+        "Players first bid on speaker order. The resulting order becomes the nomination order, and the first player becomes the first speaker."
+      ]
+    },
+    {
+      title: "Nomination Cycle",
+      items: [
+        "The current speaker nominates the next item type to bid on.",
+        "An item type cannot be nominated once it has already been nominated the maximum number of times for that type.",
+        "After each nomination resolves, speaker passes to the next player in speaker order, looping back to the first player after the last."
+      ]
+    },
+    {
+      title: "Draws, Mulligans, And Bans",
+      items: [
+        "When an item type is nominated, the draft randomly draws player count plus one items of that type from the pool.",
+        "If the speaker has mulligan tokens, they may spend one to move the whole drawn set into a temporary bin and draw a fresh set of the same size. The speaker may mulligan again while they still have tokens.",
+        "Players then get ban windows in speaker order. A player with a ban token chooses either one displayed item to ban or no ban. A banned item enters the temporary bin and is replaced by a fresh draw from the same type.",
+        "Players can preset no-ban to speed up the ban phase, and they may change that preset at any time. The ban phase ends once every eligible player has declined to ban.",
+        "Items in the temporary bin cannot be drawn again during the current nomination."
+      ]
+    },
+    {
+      title: "Hidden Bids",
+      items: [
+        "Each player privately enters a first-pick bid and a tie-breaker bid. With 5 or more players, each player also enters a second-pick bid.",
+        "Players cannot bid more total credits than they have available.",
+        "Once a player locks bids, those bid fields stay hidden until all players have locked."
+      ]
+    },
+    {
+      title: "Bid Resolution",
+      items: [
+        "All bids are revealed together. The highest first-pick bid gets first pick and spends that bid.",
+        "With 5 or more players, the highest second-pick bid among players who did not get first pick gets second pick and spends that bid.",
+        "All remaining players are ordered by tie-breaker bid and spend their tie-breaker bid.",
+        "Any tied choice is resolved randomly. If the tie decides first or second pick, only the winner spends that pick bid and the losing tied bids for that pick are voided. If the tie is for tie-breaker ordering, every tied player spends their tie-breaker bid."
+      ]
+    },
+    {
+      title: "Picks, Bins, And Finish",
+      items: [
+        "After pick order is decided, players pick one item each from the nominated pool in that order.",
+        "The one remaining displayed item goes to a permanent bin.",
+        "Temporary-bin items from mulligans and bans are shuffled back into the pool after the nomination resolves.",
+        "The draft ends once every item type has reached its maximum number of nominations. Export becomes available at that point, with each player exported as one TTS bag."
+      ]
+    },
+    {
+      title: "Visibility",
+      items: [
+        "Everything is public to players and spectators except each player's hidden bid fields before reveal.",
+        "The draft view should show players, speaker, current pick order and revealed bids when relevant, the nominated items, temporary/permanent bin icons with hover lists, and each player's credits, tokens, picked items, and credit spent per pick."
+      ]
+    }
+  ],
+  customNotes: "Definition only. The live auction engine is not implemented yet."
+};
+
+const builtInMethods = [defaultMethod, nominationAuctionMethod];
 
 function cleanName(value, fallback = "Untitled Method") {
   const cleaned = String(value || "").trim().replace(/\s+/g, " ").slice(0, 80);
@@ -72,6 +186,20 @@ function cleanName(value, fallback = "Untitled Method") {
 function cleanText(value, fallback = "", limit = 1200) {
   const cleaned = String(value || "").trim().replace(/\r\n/g, "\n").slice(0, limit);
   return cleaned || fallback;
+}
+
+function cleanSections(value, fallback = []) {
+  const sections = Array.isArray(value) ? value : (Array.isArray(fallback) ? fallback : []);
+
+  return sections
+    .map((section) => ({
+      title: cleanText(section?.title, "", 80),
+      items: Array.isArray(section?.items)
+        ? section.items.map((item) => cleanText(item, "", 500)).filter(Boolean)
+        : []
+    }))
+    .filter((section) => section.title && section.items.length > 0)
+    .slice(0, 12);
 }
 
 function cleanEnum(value, allowedValues, fallback) {
@@ -120,91 +248,18 @@ function normalizeMethod(rawMethod = {}, options = {}) {
       nominationOrder: cleanEnum(rawMethod.auction?.nominationOrder, optionSets.nominationOrder, existing.auction?.nominationOrder || "table-order"),
       tieBreaker: cleanEnum(rawMethod.auction?.tieBreaker, optionSets.tieBreaker, existing.auction?.tieBreaker || "seat-order")
     },
+    sections: cleanSections(rawMethod.sections, existing.sections),
     customNotes: cleanText(rawMethod.customNotes, existing.customNotes, 1500)
   };
 }
 
-function serializeMethod(method) {
-  return normalizeMethod(method, {
+const draftMethods = new Map([
+  ...builtInMethods.map((method) => [method.id, normalizeMethod(method, {
     id: method.id,
     existing: method,
-    builtIn: false
-  });
-}
-
-function loadStoredMethods() {
-  if (!fs.existsSync(methodStorePath)) {
-    return [];
-  }
-
-  try {
-    const stored = JSON.parse(fs.readFileSync(methodStorePath, "utf8"));
-    const storedMethods = Array.isArray(stored) ? stored : stored.methods;
-
-    if (!Array.isArray(storedMethods)) {
-      return [];
-    }
-
-    return storedMethods
-      .filter((method) => method?.id && method.id !== defaultMethodId)
-      .map((method) => normalizeMethod(method, {
-        id: method.id,
-        existing: defaultMethod,
-        builtIn: false
-      }));
-  } catch (error) {
-    console.warn(`Could not load draft method store at ${methodStorePath}: ${error.message}`);
-    return [];
-  }
-}
-
-const draftMethods = new Map([
-  [defaultMethod.id, normalizeMethod(defaultMethod, {
-    id: defaultMethod.id,
-    existing: defaultMethod,
     builtIn: true
-  })],
-  ...loadStoredMethods().map((method) => [method.id, method])
+  })])
 ]);
-
-function listCustomMethods() {
-  return [...draftMethods.values()].filter((method) => !method.builtIn);
-}
-
-function persistDraftMethods() {
-  const directory = path.dirname(methodStorePath);
-  const temporaryPath = `${methodStorePath}.${process.pid}.tmp`;
-
-  try {
-    fs.mkdirSync(directory, { recursive: true });
-    fs.writeFileSync(temporaryPath, JSON.stringify({
-      version: 1,
-      updatedAt: new Date().toISOString(),
-      methods: listCustomMethods().map(serializeMethod)
-    }, null, 2));
-    fs.renameSync(temporaryPath, methodStorePath);
-    return true;
-  } catch (error) {
-    console.warn(`Could not persist draft method store at ${methodStorePath}: ${error.message}`);
-    return false;
-  }
-}
-
-function uniqueMethodId(name) {
-  const base = slugify(name) || "draft-method";
-
-  if (!draftMethods.has(base)) {
-    return base;
-  }
-
-  let suffix = 2;
-
-  while (draftMethods.has(`${base}-${suffix}`)) {
-    suffix += 1;
-  }
-
-  return `${base}-${suffix}`;
-}
 
 function getDraftMethod(methodId) {
   return draftMethods.get(methodId) || null;
@@ -215,10 +270,9 @@ function getDefaultDraftMethod() {
 }
 
 function listDraftMethods() {
-  return [
-    getDefaultDraftMethod(),
-    ...listCustomMethods().sort((left, right) => left.name.localeCompare(right.name))
-  ].filter(Boolean);
+  return builtInMethods
+    .map((method) => getDraftMethod(method.id))
+    .filter(Boolean);
 }
 
 function getDraftMethodSummary(method) {
@@ -229,65 +283,10 @@ function getDraftMethodSummary(method) {
   });
 }
 
-function normalizeDraftMethodPreview(method = {}) {
-  return normalizeMethod(method, {
-    id: method.id || "generated-method",
-    existing: defaultMethod,
-    builtIn: false
-  });
-}
-
-function createDraftMethod(input = {}) {
-  const id = uniqueMethodId(input.name || "Draft Method");
-  const method = normalizeMethod(input, {
-    id,
-    existing: defaultMethod,
-    builtIn: false
-  });
-
-  draftMethods.set(method.id, method);
-  persistDraftMethods();
-  return method;
-}
-
-function updateDraftMethod(methodId, input = {}) {
-  const existing = getDraftMethod(methodId);
-
-  if (!existing || existing.builtIn) {
-    return null;
-  }
-
-  const method = normalizeMethod(input, {
-    id: existing.id,
-    existing,
-    builtIn: false
-  });
-
-  draftMethods.set(method.id, method);
-  persistDraftMethods();
-  return method;
-}
-
-function removeDraftMethod(methodId) {
-  const method = getDraftMethod(methodId);
-
-  if (!method || method.builtIn) {
-    return false;
-  }
-
-  draftMethods.delete(method.id);
-  persistDraftMethods();
-  return true;
-}
-
 module.exports = {
-  createDraftMethod,
   defaultMethodId,
   getDefaultDraftMethod,
   getDraftMethod,
   getDraftMethodSummary,
-  listDraftMethods,
-  normalizeDraftMethodPreview,
-  removeDraftMethod,
-  updateDraftMethod
+  listDraftMethods
 };
