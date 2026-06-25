@@ -928,10 +928,6 @@ function getAuctionPlayerSnapshot(player, draft, viewerId) {
     isSpeaker: getAuctionSpeaker(draft)?.id === player.id,
     draftedItems: player.draftedItems.map(getItemSnapshot),
     draftedGroups: player.draftedGroups.map(getDraftGroupSnapshot),
-    speakerOrderBidLocked: Boolean(player.speakerOrderBidLocked),
-    speakerOrderBid: isViewer || draft.auction.stage !== "speaker_order_bidding"
-      ? player.speakerOrderBid
-      : null,
     auctionBidLocked: Boolean(player.auctionBidLocked),
     currentBids: isViewer || ["picking"].includes(draft.auction.stage)
       ? (player.currentBids || null)
@@ -959,7 +955,10 @@ function getAuctionSnapshot(draft, viewerId) {
       return {
         playerId,
         name: player?.name || "Unknown",
-        bid: result?.bid ?? null
+        order: result?.order ?? null,
+        bidKind: result?.bidKind ?? null,
+        bid: result?.bid ?? null,
+        cost: result?.cost ?? null
       };
     }),
     eligibleTypes: getEligibleNominationTypes(draft),
@@ -969,6 +968,7 @@ function getAuctionSnapshot(draft, viewerId) {
     players: draft.players.map((player) => getAuctionPlayerSnapshot(player, draft, viewerId)),
     currentNomination: nomination ? {
       type: nomination.type,
+      isSpeakerOrder: Boolean(nomination.isSpeakerOrder),
       items: nomination.items.map(getItemSnapshot),
       temporaryBinCount: nomination.temporaryBin.length,
       temporaryBinItems: nomination.temporaryBin.map(getItemSnapshot),
@@ -992,8 +992,6 @@ function getAuctionSnapshot(draft, viewerId) {
       mulliganTokens: viewerPlayer.mulliganTokens,
       banTokens: viewerPlayer.banTokens,
       noBanPreset: Boolean(viewerPlayer.noBanPreset),
-      speakerOrderBid: viewerPlayer.speakerOrderBid,
-      speakerOrderBidLocked: Boolean(viewerPlayer.speakerOrderBidLocked),
       currentBids: viewerPlayer.currentBids,
       auctionBidLocked: Boolean(viewerPlayer.auctionBidLocked)
     } : null
@@ -1201,8 +1199,6 @@ function createAuctionPlayers(seated) {
     mulliganTokens: nominationAuctionMulligans,
     banTokens: nominationAuctionBans,
     noBanPreset: false,
-    speakerOrderBid: null,
-    speakerOrderBidLocked: false,
     currentBids: null,
     auctionBidLocked: false
   }));
@@ -1253,6 +1249,22 @@ function canDrawAuctionItems(draft, type, count) {
   return (draft.auction.itemSources[type] || []).length >= count;
 }
 
+function createAuctionNomination(type, items, options = {}) {
+  return {
+    type,
+    isSpeakerOrder: Boolean(options.isSpeakerOrder),
+    items,
+    temporaryBin: [],
+    banDeclines: [],
+    banCursor: options.banCursor ?? 0,
+    banPlayerId: null,
+    bids: {},
+    pickOrder: [],
+    pickCursor: 0,
+    revealedBids: []
+  };
+}
+
 function orderPlayersByBid(players, getBid) {
   const bidGroups = new Map();
 
@@ -1271,27 +1283,6 @@ function orderPlayersByBid(players, getBid) {
     .flatMap(([, group]) => shuffle(group));
 }
 
-function resolveSpeakerOrderBids(draft) {
-  const orderedPlayers = orderPlayersByBid(draft.players, (player) => player.speakerOrderBid || 0);
-
-  for (const player of orderedPlayers) {
-    const bid = player.speakerOrderBid || 0;
-    player.credits = Math.max(player.credits - bid, 0);
-  }
-
-  draft.players = orderedPlayers.map((player, index) => ({
-    ...player,
-    seat: index + 1
-  }));
-  draft.auction.speakerOrder = draft.players.map((player) => player.id);
-  draft.auction.speakerIndex = 0;
-  draft.auction.speakerOrderResults = draft.players.map((player) => ({
-    playerId: player.id,
-    bid: player.speakerOrderBid || 0
-  }));
-  draft.auction.stage = "nomination";
-}
-
 function completeAuctionIfDone(draft) {
   if (getEligibleNominationTypes(draft).length > 0) {
     return false;
@@ -1302,18 +1293,28 @@ function completeAuctionIfDone(draft) {
   return true;
 }
 
-function startAuctionBidding(draft) {
+function startAuctionBidding(draft, stage = "bidding") {
   const nomination = draft.auction.currentNomination;
   nomination.bids = {};
   nomination.pickOrder = [];
   nomination.pickCursor = 0;
+  nomination.revealedBids = [];
 
   for (const player of draft.players) {
     player.currentBids = null;
     player.auctionBidLocked = false;
   }
 
-  draft.auction.stage = "bidding";
+  draft.auction.stage = stage;
+}
+
+function startSpeakerOrderBidding(draft) {
+  draft.auction.currentNomination = createAuctionNomination(
+    speakerOrderType,
+    createSpeakerOrderItems(draft.players),
+    { isSpeakerOrder: true }
+  );
+  startAuctionBidding(draft, "speaker_order_bidding");
 }
 
 function advanceAuctionBanWindow(draft) {
@@ -1436,6 +1437,31 @@ function resolveAuctionBids(draft) {
 function finishAuctionNomination(draft) {
   const nomination = draft.auction.currentNomination;
 
+  if (nomination.isSpeakerOrder) {
+    const playerById = new Map(draft.players.map((player) => [player.id, player]));
+    const orderedRecords = [...nomination.pickOrder]
+      .filter((record) => playerById.has(record.playerId))
+      .sort((left, right) => (left.itemOrder || 999) - (right.itemOrder || 999));
+
+    draft.players = orderedRecords.map((record, index) => {
+      const player = playerById.get(record.playerId);
+      player.seat = index + 1;
+      return player;
+    });
+    draft.auction.speakerOrder = draft.players.map((player) => player.id);
+    draft.auction.speakerIndex = 0;
+    draft.auction.speakerOrderResults = orderedRecords.map((record) => ({
+      playerId: record.playerId,
+      order: record.itemOrder || null,
+      bidKind: record.bidKind,
+      bid: record.bid,
+      cost: record.cost
+    }));
+    draft.auction.currentNomination = null;
+    draft.auction.stage = "nomination";
+    return;
+  }
+
   if (nomination.items.length > 0) {
     draft.auction.permanentBin.push(...nomination.items);
   }
@@ -1515,6 +1541,8 @@ function startNominationAuctionDraft(room, pool, method) {
       permanentBin: []
     }
   };
+
+  startSpeakerOrderBidding(room.draft);
 }
 
 function startDraft(room) {
@@ -1818,54 +1846,6 @@ function sendAuctionSnapshot(roomNumber, room, response, viewerId) {
   sendJson(response, 200, getRoomSnapshot(roomNumber, viewerId));
 }
 
-async function handleAuctionSpeakerBid(roomNumber, request, response) {
-  const active = getActiveAuctionDraft(roomNumber, response);
-
-  if (!active) {
-    return;
-  }
-
-  const body = await readAuctionBody(request, response);
-
-  if (!body) {
-    return;
-  }
-
-  const { room, draft } = active;
-  const player = getAuctionPlayer(draft, body.playerId);
-
-  if (!player) {
-    sendJson(response, 403, { error: "player_not_in_draft" });
-    return;
-  }
-
-  if (draft.auction.stage !== "speaker_order_bidding") {
-    sendJson(response, 409, { error: "wrong_auction_stage" });
-    return;
-  }
-
-  if (player.speakerOrderBidLocked) {
-    sendJson(response, 409, { error: "bid_already_locked" });
-    return;
-  }
-
-  const bid = cleanNonnegativeInteger(body.bid, player.credits);
-
-  if (bid === null) {
-    sendJson(response, 400, { error: "invalid_bid" });
-    return;
-  }
-
-  player.speakerOrderBid = bid;
-  player.speakerOrderBidLocked = true;
-
-  if (draft.players.every((candidate) => candidate.speakerOrderBidLocked)) {
-    resolveSpeakerOrderBids(draft);
-  }
-
-  sendAuctionSnapshot(roomNumber, room, response, player.id);
-}
-
 async function handleAuctionNominate(roomNumber, request, response) {
   const active = getActiveAuctionDraft(roomNumber, response);
 
@@ -1906,18 +1886,11 @@ async function handleAuctionNominate(roomNumber, request, response) {
     return;
   }
 
-  draft.auction.currentNomination = {
+  draft.auction.currentNomination = createAuctionNomination(
     type,
-    items: drawAuctionItems(draft, type, drawCount),
-    temporaryBin: [],
-    banDeclines: [],
-    banCursor: draft.auction.speakerIndex,
-    banPlayerId: null,
-    bids: {},
-    pickOrder: [],
-    pickCursor: 0,
-    revealedBids: []
-  };
+    drawAuctionItems(draft, type, drawCount),
+    { banCursor: draft.auction.speakerIndex }
+  );
 
   moveAuctionToPostDrawStage(draft);
   sendAuctionSnapshot(roomNumber, room, response, speaker.id);
@@ -2097,7 +2070,7 @@ async function handleAuctionBid(roomNumber, request, response) {
     return;
   }
 
-  if (draft.auction.stage !== "bidding" || !nomination) {
+  if (!["speaker_order_bidding", "bidding"].includes(draft.auction.stage) || !nomination) {
     sendJson(response, 409, { error: "wrong_auction_stage" });
     return;
   }
@@ -2171,12 +2144,15 @@ async function handleAuctionPick(roomNumber, request, response) {
   player.draftedGroups.push({
     id: crypto.randomUUID(),
     pickNumber: player.draftedGroups.length + 1,
-    label: `${nomination.type} - ${pickRecord.bidKind} pick`,
+    label: `${nomination.isSpeakerOrder ? "Speaker order" : nomination.type} - ${pickRecord.bidKind} pick`,
     nominationType: nomination.type,
     cost: pickRecord.cost,
     bidKind: pickRecord.bidKind,
     items: [item]
   });
+  pickRecord.itemId = item.id;
+  pickRecord.itemName = item.name;
+  pickRecord.itemOrder = item.order || null;
   nomination.pickCursor += 1;
 
   if (nomination.pickCursor >= nomination.pickOrder.length) {
@@ -2266,11 +2242,6 @@ const server = http.createServer(async (request, response) => {
 
   if (auctionActionMatch && request.method === "POST") {
     const [, roomNumber, action] = auctionActionMatch;
-
-    if (action === "speaker-bid") {
-      await handleAuctionSpeakerBid(roomNumber, request, response);
-      return;
-    }
 
     if (action === "nominate") {
       await handleAuctionNominate(roomNumber, request, response);

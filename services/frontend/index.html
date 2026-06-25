@@ -653,6 +653,38 @@
         text-align: left;
       }
 
+      .auction-drafted-list {
+        display: grid;
+        gap: 0.4rem;
+        max-height: 18rem;
+        overflow: auto;
+      }
+
+      .auction-drafted-item {
+        display: grid;
+        grid-template-columns: 3.2rem minmax(0, 1fr);
+        gap: 0.55rem;
+        align-items: center;
+        padding: 0.4rem;
+        border: 1px solid #33373d;
+        border-radius: 0.4rem;
+        background: #111316;
+      }
+
+      .auction-drafted-item .item-image-frame {
+        aspect-ratio: 1;
+        padding: 0.1rem;
+      }
+
+      .auction-drafted-item strong {
+        min-height: 0;
+      }
+
+      .auction-drafted-item span {
+        color: #d8cfbd;
+        font-size: 0.85rem;
+      }
+
       .pool-type-list {
         width: 100%;
         display: grid;
@@ -1016,6 +1048,8 @@
       let draftMethods = [];
       let settingsInitialized = false;
       let selectedItemIds = new Set();
+      let auctionSelectionKey = "";
+      let auctionSelectedItemId = null;
       let currentBagId = null;
       let pendingConfirmation = null;
       let draggedPoolTypeRow = null;
@@ -1214,7 +1248,7 @@
 
       function renderItemCard(item, options = {}) {
         const card = document.createElement("label");
-        const selected = selectedItemIds.has(item.id);
+        const selected = options.selected ?? selectedItemIds.has(item.id);
         card.className = [
           "item-card",
           options.checkable ? "checkable" : "",
@@ -1230,6 +1264,12 @@
           checkbox.value = item.id;
           checkbox.disabled = options.available === false;
           checkbox.checked = selected;
+          if (options.auctionSelection) {
+            checkbox.dataset.auctionSelection = "true";
+          }
+          if (options.selectionName) {
+            checkbox.name = options.selectionName;
+          }
           control.append(checkbox);
           card.append(control);
         }
@@ -2077,7 +2117,7 @@
         return data;
       }
 
-      function auctionStageLabel(stage) {
+      function auctionStageLabel(auction) {
         const labels = {
           speaker_order_bidding: "Speaker order bidding",
           nomination: "Nomination",
@@ -2087,7 +2127,55 @@
           picking: "Picking"
         };
 
-        return labels[stage] || stage;
+        if (auction.stage === "picking" && auction.currentNomination?.isSpeakerOrder) {
+          return "Speaker order picking";
+        }
+
+        return labels[auction.stage] || auction.stage;
+      }
+
+      function renderAuctionDraftedItem(item, group) {
+        const row = document.createElement("div");
+        row.className = "auction-drafted-item";
+
+        if (item.imageUrl) {
+          row.append(renderItemImage(item));
+        } else {
+          const placeholder = document.createElement("div");
+          placeholder.className = "item-image-frame square";
+          placeholder.textContent = "";
+          row.append(placeholder);
+        }
+
+        const details = document.createElement("div");
+        const name = document.createElement("strong");
+        name.textContent = item.name;
+        const meta = document.createElement("span");
+        const cost = group.cost ?? 0;
+        meta.textContent = `${item.type} - ${cost} credit${cost === 1 ? "" : "s"}`;
+        details.append(name, meta);
+        row.append(details);
+        return row;
+      }
+
+      function renderAuctionDraftedList(player) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "auction-drafted-list";
+
+        if (player.draftedGroups.length === 0) {
+          const empty = document.createElement("span");
+          empty.textContent = "No picks yet";
+          wrapper.append(empty);
+          return wrapper;
+        }
+
+        for (const group of player.draftedGroups) {
+          for (const item of group.items) {
+            wrapper.append(renderAuctionDraftedItem(item, group));
+          }
+        }
+
+        return wrapper;
       }
 
       function renderAuctionPlayers(auction) {
@@ -2105,7 +2193,7 @@
           const locks = document.createElement("span");
 
           if (auction.stage === "speaker_order_bidding") {
-            locks.textContent = player.speakerOrderBidLocked ? "Speaker bid locked" : "Speaker bid pending";
+            locks.textContent = player.auctionBidLocked ? "Speaker bids locked" : "Speaker bids pending";
           } else if (auction.stage === "bidding") {
             locks.textContent = player.auctionBidLocked ? "Bids locked" : "Bids pending";
           } else if (player.pickRecord) {
@@ -2118,6 +2206,7 @@
             card.append(locks);
           }
 
+          card.append(renderAuctionDraftedList(player));
           auctionPlayers.append(card);
         }
       }
@@ -2132,9 +2221,45 @@
         auctionPermanentBin.title = permanentItems.map((item) => item.name).join("\n") || "Empty";
       }
 
+      function auctionItemSelectionKey(auction, action) {
+        const nomination = auction.currentNomination;
+
+        if (!action || !nomination) {
+          return "";
+        }
+
+        return [
+          action.kind,
+          nomination.type,
+          nomination.pickCursor,
+          nomination.banPlayerId || "",
+          nomination.items.map((item) => item.id).join(",")
+        ].join(":");
+      }
+
+      function updateAuctionSelectionControls() {
+        for (const checkbox of auctionItems.querySelectorAll("input[data-auction-selection]")) {
+          const selected = checkbox.value === auctionSelectedItemId;
+          checkbox.checked = selected;
+          checkbox.closest(".item-card")?.classList.toggle("selected", selected);
+        }
+
+        const confirm = auctionControls.querySelector("[data-auction-confirm]");
+
+        if (confirm) {
+          confirm.disabled = !auctionSelectedItemId;
+        }
+      }
+
       function renderAuctionItems(auction, action = null) {
         auctionItems.replaceChildren();
         const items = auction.currentNomination?.items || [];
+        const selectionKey = auctionItemSelectionKey(auction, action);
+
+        if (auctionSelectionKey !== selectionKey) {
+          auctionSelectionKey = selectionKey;
+          auctionSelectedItemId = null;
+        }
 
         if (items.length === 0) {
           const empty = document.createElement("p");
@@ -2144,7 +2269,15 @@
         }
 
         renderTypeSections(auctionItems, items, {
-          typeOrder: latestRoom?.draft.typeOrder
+          typeOrder: latestRoom?.draft.typeOrder,
+          itemOptions: action
+            ? (item) => ({
+              checkable: true,
+              auctionSelection: true,
+              selectionName: "auction-item",
+              selected: auctionSelectedItemId === item.id
+            })
+            : null
         });
 
         if (!action) {
@@ -2154,46 +2287,29 @@
         const actionRow = document.createElement("div");
         actionRow.className = "actions";
 
-        for (const item of items) {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "secondary";
-          button.textContent = `${action.label} ${item.name}`;
-          button.addEventListener("click", () => action.onChoose(item));
-          actionRow.append(button);
+        if (action.skipLabel) {
+          const skip = document.createElement("button");
+          skip.type = "button";
+          skip.className = "secondary";
+          skip.textContent = action.skipLabel;
+          skip.addEventListener("click", action.onSkip);
+          actionRow.append(skip);
         }
 
-        auctionItems.append(actionRow);
-      }
-
-      function renderAuctionSpeakerBid(auction) {
-        const player = auction.player;
-
-        if (!player) {
-          return;
-        }
-
-        const form = document.createElement("form");
-        form.className = "auction-control-form";
-        const label = document.createElement("label");
-        const input = document.createElement("input");
-        input.type = "number";
-        input.min = "0";
-        input.max = String(player.credits);
-        input.step = "1";
-        input.value = player.speakerOrderBid ?? 0;
-        input.disabled = player.speakerOrderBidLocked;
         const button = document.createElement("button");
-        button.type = "submit";
-        button.textContent = player.speakerOrderBidLocked ? "Speaker Bid Locked" : "Lock Speaker Bid";
-        button.disabled = player.speakerOrderBidLocked;
-        label.append("Speaker order bid", input);
-        form.append(label, button);
-        form.addEventListener("submit", (event) => {
-          event.preventDefault();
-          postAuctionAction("speaker-bid", { bid: Number(input.value) });
+        button.type = "button";
+        button.dataset.auctionConfirm = "true";
+        button.textContent = action.confirmLabel;
+        button.disabled = !auctionSelectedItemId;
+        button.addEventListener("click", () => {
+          const item = items.find((candidate) => candidate.id === auctionSelectedItemId);
+
+          if (item) {
+            action.onConfirm(item);
+          }
         });
-        auctionControls.append(form);
+        actionRow.append(button);
+        auctionControls.append(actionRow);
       }
 
       function renderAuctionNominationControls(auction) {
@@ -2273,15 +2389,12 @@
           return;
         }
 
-        const noBan = document.createElement("button");
-        noBan.type = "button";
-        noBan.className = "secondary";
-        noBan.textContent = "No Ban";
-        noBan.addEventListener("click", () => postAuctionAction("ban", { itemId: null }));
-        auctionControls.append(noBan);
         renderAuctionItems(auction, {
-          label: "Ban",
-          onChoose: (item) => postAuctionAction("ban", { itemId: item.id })
+          kind: "ban",
+          confirmLabel: "Confirm Ban",
+          skipLabel: "No Ban",
+          onConfirm: (item) => postAuctionAction("ban", { itemId: item.id }),
+          onSkip: () => postAuctionAction("ban", { itemId: null })
         });
       }
 
@@ -2317,7 +2430,9 @@
 
         const button = document.createElement("button");
         button.type = "submit";
-        button.textContent = player.auctionBidLocked ? "Bids Locked" : "Lock Bids";
+        button.textContent = player.auctionBidLocked
+          ? "Bids Locked"
+          : (auction.stage === "speaker_order_bidding" ? "Lock Speaker Order Bids" : "Lock Bids");
         button.disabled = player.auctionBidLocked;
         form.append(button);
         form.addEventListener("submit", (event) => {
@@ -2362,8 +2477,9 @@
         }
 
         renderAuctionItems(auction, {
-          label: "Pick",
-          onChoose: (item) => postAuctionAction("pick", { itemId: item.id })
+          kind: "pick",
+          confirmLabel: "Confirm Pick",
+          onConfirm: (item) => postAuctionAction("pick", { itemId: item.id })
         });
       }
 
@@ -2378,7 +2494,7 @@
           return;
         }
 
-        auctionStage.textContent = `${auctionStageLabel(auction.stage)}${auction.speakerName ? ` - Speaker: ${auction.speakerName}` : ""}`;
+        auctionStage.textContent = `${auctionStageLabel(auction)}${auction.speakerName ? ` - Speaker: ${auction.speakerName}` : ""}`;
         auctionControls.replaceChildren();
         renderAuctionPlayers(auction);
         renderAuctionBins(auction);
@@ -2387,7 +2503,7 @@
         renderAuctionNoBanPresetControl(auction);
 
         if (auction.stage === "speaker_order_bidding") {
-          renderAuctionSpeakerBid(auction);
+          renderAuctionBidControls(auction);
         } else if (auction.stage === "nomination") {
           renderAuctionNominationControls(auction);
         } else if (auction.stage === "mulligan") {
@@ -2959,6 +3075,15 @@
 
         event.target.closest(".item-card")?.classList.toggle("selected", event.target.checked);
         updateLockButton(requiredPickCount);
+      });
+
+      auctionItems.addEventListener("change", (event) => {
+        if (event.target.type !== "checkbox" || !event.target.dataset.auctionSelection) {
+          return;
+        }
+
+        auctionSelectedItemId = event.target.checked ? event.target.value : null;
+        updateAuctionSelectionControls();
       });
 
       poolSelect.addEventListener("change", () => {
