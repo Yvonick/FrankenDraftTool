@@ -85,6 +85,25 @@ function shouldIncludeImageOptionalItem(type) {
   return /speaker\s*order\s*choice/i.test(type);
 }
 
+function objectDisplayName(item) {
+  return String(item?.Nickname || item?.Description || item?.Name || "").trim();
+}
+
+function normalizeReferenceName(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function isNonDraftBagName(name) {
+  return /non[-\s]*draft/i.test(String(name || ""));
+}
+
+function isBaseUnitBagName(name) {
+  return /base\s*units?/i.test(String(name || ""));
+}
+
 function getDeckForCard(item) {
   const customDeck = item.CustomDeck || {};
   const deckId = item.CardID === undefined ? null : String(Math.floor(Number(item.CardID) / 100));
@@ -134,15 +153,15 @@ function getImageData(item) {
   };
 }
 
-function extractTtsItem(item, type, poolId, index) {
+function extractTtsItem(item, type, poolId, index, options = {}) {
   const image = getImageData(item);
 
-  if (!image.imageUrl && !shouldIncludeImageOptionalItem(type)) {
+  if (!image.imageUrl && !shouldIncludeImageOptionalItem(type) && !options.allowMissingImage) {
     return null;
   }
 
-  const typeSlug = slugify(type);
-  const name = item.Nickname || item.Description || `${type} ${index + 1}`;
+  const typeSlug = options.idPrefix || slugify(type);
+  const name = objectDisplayName(item) || `${type} ${index + 1}`;
 
   return {
     id: `${poolId}-${typeSlug}-${String(index + 1).padStart(3, "0")}`,
@@ -159,13 +178,115 @@ function extractTtsItem(item, type, poolId, index) {
   };
 }
 
+function parseLinkedItemReferences(description) {
+  const references = [];
+  const pattern = /(?:^|\n)\s*(Non-draft|Base Unit)\s*:\s*([^\n]+)/gi;
+  let match;
+
+  while ((match = pattern.exec(description || "")) !== null) {
+    const kind = /^non/i.test(match[1]) ? "nonDraft" : "baseUnit";
+    const names = match[2]
+      .split(/[,;]/)
+      .map((name) => name.trim())
+      .filter(Boolean);
+
+    for (const name of names) {
+      references.push({ kind, name });
+    }
+  }
+
+  return references;
+}
+
+function addLinkedItemToIndex(index, kind, poolId, item, counter) {
+  const name = objectDisplayName(item);
+
+  if (!name) {
+    return counter;
+  }
+
+  const parsed = extractTtsItem(item, kind === "baseUnit" ? "Base Unit" : "Non-draft", poolId, counter, {
+    allowMissingImage: true,
+    idPrefix: kind === "baseUnit" ? "base-unit" : "non-draft"
+  });
+
+  if (!parsed) {
+    return counter;
+  }
+
+  const key = normalizeReferenceName(name);
+
+  if (!index[kind].has(key)) {
+    index[kind].set(key, []);
+  }
+
+  index[kind].get(key).push(parsed);
+  return counter + 1;
+}
+
+function collectLinkedItems(item, index, kind, poolId, counter) {
+  let nextCounter = addLinkedItemToIndex(index, kind, poolId, item, counter);
+
+  for (const child of item.ContainedObjects || []) {
+    nextCounter = collectLinkedItems(child, index, kind, poolId, nextCounter);
+  }
+
+  return nextCounter;
+}
+
+function createLinkedItemIndex(root, poolId) {
+  const index = {
+    nonDraft: new Map(),
+    baseUnit: new Map()
+  };
+  let counter = 1;
+
+  for (const bag of root.ContainedObjects || []) {
+    const name = bag.Nickname || bag.Name || "";
+    const kind = isNonDraftBagName(name)
+      ? "nonDraft"
+      : (isBaseUnitBagName(name) ? "baseUnit" : null);
+
+    if (!kind || bag.Name !== "Bag" || !Array.isArray(bag.ContainedObjects)) {
+      continue;
+    }
+
+    for (const item of bag.ContainedObjects) {
+      counter = collectLinkedItems(item, index, kind, poolId, counter);
+    }
+  }
+
+  return index;
+}
+
+function getLinkedItemsForTtsItem(item, linkedItemIndex) {
+  const linkedItems = [];
+  const seenIds = new Set();
+
+  for (const reference of parseLinkedItemReferences(item.Description || "")) {
+    const matches = linkedItemIndex[reference.kind].get(normalizeReferenceName(reference.name)) || [];
+
+    for (const match of matches) {
+      if (seenIds.has(match.id)) {
+        continue;
+      }
+
+      seenIds.add(match.id);
+      linkedItems.push(match);
+    }
+  }
+
+  return linkedItems;
+}
+
 function shouldUseTtsBag(bag) {
   const name = bag.Nickname || bag.Name || "";
 
   return bag.Name === "Bag"
     && Array.isArray(bag.ContainedObjects)
     && bag.ContainedObjects.length > 0
-    && !/non\s*draft/i.test(name);
+    && !isNonDraftBagName(name)
+    && !isBaseUnitBagName(name);
 }
 
 function parseTtsPool(rawJson, fallbackName) {
@@ -179,6 +300,7 @@ function parseTtsPool(rawJson, fallbackName) {
   const poolId = slugify(poolName || fallbackName);
   const types = [];
   const items = [];
+  const linkedItemIndex = createLinkedItemIndex(root, poolId);
 
   for (const bag of root.ContainedObjects.filter(shouldUseTtsBag)) {
     const type = bag.Nickname || bag.Name;
@@ -188,7 +310,18 @@ function parseTtsPool(rawJson, fallbackName) {
     }
 
     const parsedItems = bag.ContainedObjects
-      .map((item, index) => extractTtsItem(item, type, poolId, index))
+      .map((item, index) => {
+        const parsed = extractTtsItem(item, type, poolId, index);
+
+        if (!parsed) {
+          return null;
+        }
+
+        return {
+          ...parsed,
+          linkedItems: getLinkedItemsForTtsItem(item, linkedItemIndex)
+        };
+      })
       .filter(Boolean);
 
     if (parsedItems.length === 0) {

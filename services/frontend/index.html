@@ -350,6 +350,49 @@
         transition: opacity 0.15s ease 1.1s, visibility 0s linear 1.1s;
       }
 
+      .item-preview.with-linked {
+        width: min(92vw, 58rem);
+        display: flex;
+        gap: 0.75rem;
+        align-items: start;
+        padding: 0.75rem;
+        overflow: auto;
+        aspect-ratio: auto;
+      }
+
+      .item-preview-main {
+        flex: 1 1 28rem;
+        min-width: min(18rem, 72vw);
+      }
+
+      .item-preview.with-linked .item-preview-crop {
+        height: auto;
+      }
+
+      .item-linked-preview-list {
+        flex: 1 1 18rem;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+        gap: 0.65rem;
+        min-width: min(18rem, 72vw);
+      }
+
+      .item-linked-preview {
+        display: grid;
+        gap: 0.35rem;
+        align-content: start;
+      }
+
+      .item-linked-preview .item-image-frame {
+        aspect-ratio: 1;
+        padding: 0.15rem;
+      }
+
+      .item-linked-preview strong {
+        min-height: 0;
+        font-size: 0.85rem;
+      }
+
       .item-image-frame:hover .item-preview,
       .item-image-frame:focus-within .item-preview {
         opacity: 1;
@@ -1264,6 +1307,36 @@
         return crop;
       }
 
+      function renderLinkedPreviewItem(item) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "item-linked-preview";
+
+        if (item.imageUrl) {
+          const frame = document.createElement("div");
+          frame.className = `item-image-frame ${getImageShape(item)}`;
+          frame.style.setProperty("--image-aspect", getImageAspect(item));
+          const crop = createImageCrop(item, frame);
+          crop.className = "item-preview-crop";
+          const unavailable = document.createElement("div");
+          unavailable.className = "image-unavailable";
+          unavailable.textContent = "Image unavailable";
+
+          for (const image of crop.querySelectorAll("img")) {
+            image.addEventListener("error", () => {
+              frame.classList.add("failed");
+            });
+          }
+
+          frame.append(crop, unavailable);
+          wrapper.append(frame);
+        }
+
+        const name = document.createElement("strong");
+        name.textContent = item.name;
+        wrapper.append(name);
+        return wrapper;
+      }
+
       function getImageAspect(item) {
         if (item.sourceObjectType === "Card" || item.sourceObjectType === "CardCustom") {
           return "3 / 4";
@@ -1302,6 +1375,7 @@
         preview.className = "item-preview";
         const previewCrop = createImageCrop(item, frame);
         previewCrop.className = "item-preview-crop";
+        const linkedItems = item.linkedItems || [];
         const unavailable = document.createElement("div");
         unavailable.className = "image-unavailable";
         unavailable.textContent = "Image unavailable";
@@ -1312,7 +1386,23 @@
           });
         }
 
-        preview.append(previewCrop);
+        if (linkedItems.length > 0) {
+          preview.classList.add("with-linked");
+          const main = document.createElement("div");
+          main.className = "item-preview-main";
+          const linkedList = document.createElement("div");
+          linkedList.className = "item-linked-preview-list";
+
+          for (const linkedItem of linkedItems) {
+            linkedList.append(renderLinkedPreviewItem(linkedItem));
+          }
+
+          main.append(previewCrop);
+          preview.append(main, linkedList);
+        } else {
+          preview.append(previewCrop);
+        }
+
         frame.append(crop, preview, unavailable);
         return frame;
       }

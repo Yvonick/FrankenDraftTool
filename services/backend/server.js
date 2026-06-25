@@ -323,7 +323,10 @@ function cloneItem(item) {
     sourceObjectType: item.sourceObjectType,
     metaType: item.metaType,
     order: item.order,
-    ttsObject: item.ttsObject
+    ttsObject: item.ttsObject,
+    linkedItems: Array.isArray(item.linkedItems)
+      ? item.linkedItems.map(cloneItem)
+      : []
   };
 }
 
@@ -343,7 +346,10 @@ function getItemSnapshot(item) {
     sourceObjectType: item.sourceObjectType,
     metaType: item.metaType,
     order: item.order,
-    isWildcard: isWildcardItem(item)
+    isWildcard: isWildcardItem(item),
+    linkedItems: Array.isArray(item.linkedItems)
+      ? item.linkedItems.map(getItemSnapshot)
+      : []
   };
 }
 
@@ -373,6 +379,13 @@ function createTtsGuid(usedGuids) {
 
 function isExportableDraftItem(item) {
   return Boolean(item.ttsObject) || item.metaType === "speaker-order";
+}
+
+function getDraftItemExportItems(item) {
+  return [
+    item,
+    ...(Array.isArray(item.linkedItems) ? item.linkedItems : [])
+  ];
 }
 
 function createTtsSpeakerOrderNotecard(item, usedGuids) {
@@ -407,9 +420,35 @@ function createTtsSpeakerOrderNotecard(item, usedGuids) {
   };
 }
 
+function uniquifyTtsObjectGuids(value, usedGuids) {
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  if (typeof value.GUID === "string") {
+    if (usedGuids.has(value.GUID)) {
+      value.GUID = createTtsGuid(usedGuids);
+    } else {
+      usedGuids.add(value.GUID);
+    }
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    if (key !== "GUID") {
+      uniquifyTtsObjectGuids(child, usedGuids);
+    }
+  }
+}
+
+function cloneTtsObjectForExport(item, usedGuids) {
+  const object = cloneJson(item.ttsObject);
+  uniquifyTtsObjectGuids(object, usedGuids);
+  return object;
+}
+
 function createTtsDraftItem(item, usedGuids) {
   if (item.ttsObject) {
-    return cloneJson(item.ttsObject);
+    return cloneTtsObjectForExport(item, usedGuids);
   }
 
   if (item.metaType === "speaker-order") {
@@ -460,14 +499,17 @@ function createTtsBag(player, index, usedGuids) {
     LuaScriptState: "",
     XmlUI: "",
     ContainedObjects: player.draftedItems
-      .map((item) => createTtsDraftItem(item, usedGuids))
+      .flatMap((item) => getDraftItemExportItems(item)
+        .map((exportItem) => createTtsDraftItem(exportItem, usedGuids)))
       .filter(Boolean)
   };
 }
 
 function createTtsDraftExport(roomNumber, draft) {
   const missingItemCount = draft.players.reduce((count, player) => (
-    count + player.draftedItems.filter((item) => !isExportableDraftItem(item)).length
+    count + player.draftedItems
+      .flatMap(getDraftItemExportItems)
+      .filter((item) => !isExportableDraftItem(item)).length
   ), 0);
 
   if (missingItemCount > 0) {
@@ -477,11 +519,7 @@ function createTtsDraftExport(roomNumber, draft) {
     };
   }
 
-  const usedGuids = new Set(draft.players.flatMap((player) => (
-    player.draftedItems
-      .map((item) => item.ttsObject?.GUID)
-      .filter(Boolean)
-  )));
+  const usedGuids = new Set();
 
   return {
     SaveName: `Franken Draft ${roomNumber}`,
