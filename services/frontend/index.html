@@ -185,7 +185,15 @@
 
       .reveal-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 32rem), 1fr));
+      }
+
+      .final-draft-card {
+        align-content: start;
+      }
+
+      .final-draft-card > .item-grid {
+        align-items: stretch;
       }
 
       .item-grid > .group-section {
@@ -628,8 +636,71 @@
         text-align: left;
       }
 
-      .auction-player-card.current {
-        border-color: #8fd4cf;
+      .auction-player-card.waiting {
+        border-color: #f7e7a1;
+        box-shadow: inset 0 0 0 1px #f7e7a1;
+      }
+
+      .auction-player-card.speaker {
+        background: linear-gradient(180deg, #1d2526, #191c20);
+      }
+
+      .auction-stage-meta {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.5rem;
+      }
+
+      #auction-stage {
+        display: grid;
+        gap: 0.45rem;
+        justify-items: center;
+      }
+
+      .auction-speaker-badge,
+      .auction-waiting-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        width: fit-content;
+        padding: 0.15rem 0.45rem;
+        border-radius: 0.35rem;
+        font-size: 0.8rem;
+        font-weight: 800;
+      }
+
+      .auction-speaker-badge {
+        margin-left: 0.45rem;
+        background: #8fd4cf;
+        color: #111316;
+      }
+
+      .auction-stage-meta .auction-speaker-badge {
+        margin-left: 0;
+      }
+
+      .auction-waiting-badge {
+        background: #f7e7a1;
+        color: #111316;
+      }
+
+      .auction-bid-recap {
+        width: 100%;
+        overflow-x: auto;
+      }
+
+      .auction-bid-recap table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92rem;
+      }
+
+      .auction-bid-recap th,
+      .auction-bid-recap td {
+        padding: 0.35rem 0.45rem;
+        border-bottom: 1px solid #33373d;
+        text-align: left;
       }
 
       .auction-bin-row {
@@ -2134,6 +2205,55 @@
         return labels[auction.stage] || auction.stage;
       }
 
+      function getAuctionWaitingPlayerIds(auction) {
+        if (["speaker_order_bidding", "bidding"].includes(auction.stage)) {
+          return new Set(auction.players
+            .filter((player) => !player.auctionBidLocked)
+            .map((player) => player.playerId));
+        }
+
+        if (["nomination", "mulligan"].includes(auction.stage)) {
+          return new Set(auction.speakerId ? [auction.speakerId] : []);
+        }
+
+        if (auction.stage === "ban") {
+          return new Set(auction.currentNomination?.banPlayerId ? [auction.currentNomination.banPlayerId] : []);
+        }
+
+        if (auction.stage === "picking") {
+          return new Set(auction.currentNomination?.currentPickPlayerId ? [auction.currentNomination.currentPickPlayerId] : []);
+        }
+
+        return new Set();
+      }
+
+      function renderAuctionStage(auction) {
+        const waitingIds = getAuctionWaitingPlayerIds(auction);
+        const waitingNames = auction.players
+          .filter((player) => waitingIds.has(player.playerId))
+          .map((player) => player.name);
+        const title = document.createElement("strong");
+        title.textContent = auctionStageLabel(auction);
+        const meta = document.createElement("span");
+        meta.className = "auction-stage-meta";
+
+        if (auction.speakerName) {
+          const speaker = document.createElement("span");
+          speaker.className = "auction-speaker-badge";
+          speaker.textContent = `Speaker: ${auction.speakerName}`;
+          meta.append(speaker);
+        }
+
+        if (waitingNames.length > 0) {
+          const waiting = document.createElement("span");
+          waiting.className = "auction-waiting-badge";
+          waiting.textContent = `Waiting: ${waitingNames.join(", ")}`;
+          meta.append(waiting);
+        }
+
+        auctionStage.replaceChildren(title, meta);
+      }
+
       function renderAuctionDraftedItem(item, group) {
         const row = document.createElement("div");
         row.className = "auction-drafted-item";
@@ -2180,12 +2300,25 @@
 
       function renderAuctionPlayers(auction) {
         auctionPlayers.replaceChildren();
+        const waitingIds = getAuctionWaitingPlayerIds(auction);
 
         for (const player of auction.players) {
           const card = document.createElement("section");
-          card.className = `auction-player-card${player.isSpeaker ? " current" : ""}`;
+          card.className = [
+            "auction-player-card",
+            player.isSpeaker ? "speaker" : "",
+            waitingIds.has(player.playerId) ? "waiting" : ""
+          ].filter(Boolean).join(" ");
           const name = document.createElement("strong");
-          name.textContent = `${player.name}${player.isSpeaker ? " - Speaker" : ""}`;
+          name.append(player.name);
+
+          if (player.isSpeaker) {
+            const speakerBadge = document.createElement("span");
+            speakerBadge.className = "auction-speaker-badge";
+            speakerBadge.textContent = "Speaker";
+            name.append(speakerBadge);
+          }
+
           const resources = document.createElement("span");
           resources.textContent = `${player.credits} credits / ${player.mulliganTokens} mulligan / ${player.banTokens} ban`;
           const picks = document.createElement("span");
@@ -2469,6 +2602,62 @@
         auctionControls.append(wrapper);
       }
 
+      function renderAuctionBidRecap(auction) {
+        const nomination = auction.currentNomination;
+        const bids = nomination?.revealedBids || [];
+
+        if (bids.length === 0) {
+          return;
+        }
+
+        const pickByPlayer = new Map((nomination.pickOrder || []).map((record) => [record.playerId, record]));
+        const showSecond = auction.players.length >= 5;
+        const wrapper = document.createElement("div");
+        wrapper.className = "auction-player-card auction-bid-recap";
+        const title = document.createElement("strong");
+        title.textContent = "Bids recap";
+        const table = document.createElement("table");
+        const thead = document.createElement("thead");
+        const headRow = document.createElement("tr");
+        const headers = ["Player", "First", ...(showSecond ? ["Second"] : []), "Tie", "Result"];
+
+        for (const header of headers) {
+          const cell = document.createElement("th");
+          cell.scope = "col";
+          cell.textContent = header;
+          headRow.append(cell);
+        }
+
+        thead.append(headRow);
+        table.append(thead);
+
+        const tbody = document.createElement("tbody");
+
+        for (const record of bids) {
+          const row = document.createElement("tr");
+          const pick = pickByPlayer.get(record.playerId);
+          const values = [
+            record.playerName || "Unknown",
+            record.bids?.first ?? 0,
+            ...(showSecond ? [record.bids?.second ?? 0] : []),
+            record.bids?.tie ?? 0,
+            pick ? `${pick.bidKind} pick, ${pick.cost} credits` : "-"
+          ];
+
+          for (const value of values) {
+            const cell = document.createElement("td");
+            cell.textContent = value;
+            row.append(cell);
+          }
+
+          tbody.append(row);
+        }
+
+        table.append(tbody);
+        wrapper.append(title, table);
+        auctionControls.append(wrapper);
+      }
+
       function renderAuctionPickControls(auction) {
         const nomination = auction.currentNomination;
 
@@ -2494,11 +2683,12 @@
           return;
         }
 
-        auctionStage.textContent = `${auctionStageLabel(auction)}${auction.speakerName ? ` - Speaker: ${auction.speakerName}` : ""}`;
+        renderAuctionStage(auction);
         auctionControls.replaceChildren();
         renderAuctionPlayers(auction);
         renderAuctionBins(auction);
         renderAuctionItems(auction);
+        renderAuctionBidRecap(auction);
         renderAuctionPickOrder(auction);
         renderAuctionNoBanPresetControl(auction);
 
@@ -2569,11 +2759,11 @@
 
         for (const player of draft.revealedDrafts) {
           const section = document.createElement("section");
-          section.className = "item-card";
+          section.className = "item-card final-draft-card";
           const title = document.createElement("h4");
           title.textContent = player.name;
           const items = document.createElement("div");
-          items.className = "type-section-list";
+          items.className = "item-grid";
           section.append(title, items);
           renderGroupedItems(items, player.items, player.groups);
           revealedDrafts.append(section);

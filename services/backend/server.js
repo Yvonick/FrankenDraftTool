@@ -942,6 +942,10 @@ function getAuctionSnapshot(draft, viewerId) {
   const nomination = draft.auction.currentNomination;
   const viewerPlayer = getAuctionPlayer(draft, viewerId);
   const currentPick = nomination?.pickOrder?.[nomination.pickCursor] || null;
+  const revealedBids = (nomination?.revealedBids || []).map((record) => ({
+    ...record,
+    playerName: getAuctionPlayer(draft, record.playerId)?.name || "Unknown"
+  }));
 
   return {
     stage: draft.auction.stage,
@@ -984,7 +988,7 @@ function getAuctionSnapshot(draft, viewerId) {
       pickCursor: nomination.pickCursor || 0,
       currentPickPlayerId: currentPick?.playerId || null,
       currentPickPlayerName: getAuctionPlayer(draft, currentPick?.playerId)?.name || null,
-      revealedBids: nomination.revealedBids || []
+      revealedBids
     } : null,
     player: viewerPlayer ? {
       playerId: viewerPlayer.id,
@@ -1997,11 +2001,12 @@ async function handleAuctionBan(roomNumber, request, response) {
     }
 
     const [bannedItem] = nomination.items.splice(itemIndex, 1);
-    nomination.temporaryBin.push(bannedItem);
+    draft.auction.permanentBin.push(bannedItem);
     nomination.items.push(...drawAuctionItems(draft, nomination.type, 1));
-    nomination.banDeclines = [];
-    nomination.banCursor = draft.auction.speakerIndex;
     player.banTokens -= 1;
+    moveAuctionToPostDrawStage(draft);
+    sendAuctionSnapshot(roomNumber, room, response, player.id);
+    return;
   } else {
     if (!nomination.banDeclines.includes(player.id)) {
       nomination.banDeclines.push(player.id);
