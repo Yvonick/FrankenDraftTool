@@ -89,7 +89,7 @@ const nominationAuctionMethod = {
   name: "Nomination Auction",
   engine: "auction",
   builtIn: true,
-  playable: false,
+  playable: true,
   description: "Players spend credits through rotating item-type nominations, mulligans, bans, hidden bids, and public pick-order resolution.",
   playerOrder: "auction-nomination",
   itemPresentation: "auction-nominations",
@@ -173,7 +173,7 @@ const nominationAuctionMethod = {
       ]
     }
   ],
-  customNotes: "Definition only. The live auction engine is not implemented yet."
+  customNotes: "Live auction engine."
 };
 
 const builtInMethods = [defaultMethod, nominationAuctionMethod];
@@ -225,7 +225,7 @@ function normalizeMethod(rawMethod = {}, options = {}) {
     name: cleanName(rawMethod.name, existing.name),
     engine,
     builtIn: Boolean(options.builtIn ?? existing.builtIn),
-    playable: engine === "bag-pass",
+    playable: Boolean(rawMethod.playable ?? existing.playable ?? engine === "bag-pass"),
     description: cleanText(rawMethod.description, existing.description, 1500),
     playerOrder: cleanEnum(rawMethod.playerOrder, optionSets.playerOrder, existing.playerOrder || "custom"),
     itemPresentation: cleanEnum(rawMethod.itemPresentation, optionSets.itemPresentation, existing.itemPresentation || "custom"),

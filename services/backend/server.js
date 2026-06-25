@@ -27,6 +27,9 @@ const rooms = new Map();
 const defaultSeatLimit = 6;
 const defaultJsonBodyLimit = 10000;
 const poolUploadJsonBodyLimit = 25 * 1024 * 1024;
+const nominationAuctionStartingCredits = 40;
+const nominationAuctionMulligans = 2;
+const nominationAuctionBans = 1;
 
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, {
@@ -244,6 +247,16 @@ function cleanPicksPerBag(picksPerBag) {
   return Math.min(Math.max(parsed, 1), 8);
 }
 
+function cleanNonnegativeInteger(value, max = 9999) {
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed)) {
+    return null;
+  }
+
+  return Math.min(Math.max(parsed, 0), max);
+}
+
 function cleanItemsPerType(pool, itemsPerType) {
   const cleaned = {};
 
@@ -334,6 +347,10 @@ function getDraftGroupSnapshot(group) {
     id: group.id,
     pickNumber: group.pickNumber,
     bagId: group.bagId,
+    label: group.label,
+    cost: group.cost,
+    bidKind: group.bidKind,
+    nominationType: group.nominationType,
     items: group.items.map(getItemSnapshot)
   };
 }
@@ -864,7 +881,10 @@ function getTablePlayerSnapshot(player) {
     name: player.name,
     seat: player.seat,
     queueLength: player.queue.length,
-    lookingAtBag: Boolean(player.queue[0])
+    lookingAtBag: Boolean(player.queue[0]),
+    credits: player.credits,
+    mulliganTokens: player.mulliganTokens,
+    banTokens: player.banTokens
   };
 }
 
@@ -887,6 +907,95 @@ function getPlayerDraftView(player, draft, includeCurrentBag) {
       requiredPickCount: getRequiredPickCount(player, bag, draft),
       typePickLimits,
       firstRotation: isFirstRotationPick(player, bag, draft)
+    } : null
+  };
+}
+
+function getAuctionPlayerSnapshot(player, draft, viewerId) {
+  const nomination = draft.auction.currentNomination;
+  const pickRecord = nomination?.pickOrder?.find((record) => record.playerId === player.id);
+  const revealedBids = nomination?.revealedBids?.find((record) => record.playerId === player.id);
+  const isViewer = player.id === viewerId;
+
+  return {
+    playerId: player.id,
+    name: player.name,
+    seat: player.seat,
+    credits: player.credits,
+    mulliganTokens: player.mulliganTokens,
+    banTokens: player.banTokens,
+    noBanPreset: Boolean(player.noBanPreset),
+    isSpeaker: getAuctionSpeaker(draft)?.id === player.id,
+    draftedItems: player.draftedItems.map(getItemSnapshot),
+    draftedGroups: player.draftedGroups.map(getDraftGroupSnapshot),
+    speakerOrderBidLocked: Boolean(player.speakerOrderBidLocked),
+    speakerOrderBid: isViewer || draft.auction.stage !== "speaker_order_bidding"
+      ? player.speakerOrderBid
+      : null,
+    auctionBidLocked: Boolean(player.auctionBidLocked),
+    currentBids: isViewer || ["picking"].includes(draft.auction.stage)
+      ? (player.currentBids || null)
+      : null,
+    revealedBids: revealedBids?.bids || null,
+    pickRecord: pickRecord || null
+  };
+}
+
+function getAuctionSnapshot(draft, viewerId) {
+  const speaker = getAuctionSpeaker(draft);
+  const nomination = draft.auction.currentNomination;
+  const viewerPlayer = getAuctionPlayer(draft, viewerId);
+  const currentPick = nomination?.pickOrder?.[nomination.pickCursor] || null;
+
+  return {
+    stage: draft.auction.stage,
+    speakerId: speaker?.id || null,
+    speakerName: speaker?.name || null,
+    speakerIndex: draft.auction.speakerIndex,
+    speakerOrder: draft.auction.speakerOrder.map((playerId) => {
+      const player = getAuctionPlayer(draft, playerId);
+      const result = draft.auction.speakerOrderResults.find((entry) => entry.playerId === playerId);
+
+      return {
+        playerId,
+        name: player?.name || "Unknown",
+        bid: result?.bid ?? null
+      };
+    }),
+    eligibleTypes: getEligibleNominationTypes(draft),
+    nominationsByType: draft.auction.nominationsByType,
+    permanentBinCount: draft.auction.permanentBin.length,
+    permanentBinItems: draft.auction.permanentBin.map(getItemSnapshot),
+    players: draft.players.map((player) => getAuctionPlayerSnapshot(player, draft, viewerId)),
+    currentNomination: nomination ? {
+      type: nomination.type,
+      items: nomination.items.map(getItemSnapshot),
+      temporaryBinCount: nomination.temporaryBin.length,
+      temporaryBinItems: nomination.temporaryBin.map(getItemSnapshot),
+      permanentBinCount: draft.auction.permanentBin.length,
+      permanentBinItems: draft.auction.permanentBin.map(getItemSnapshot),
+      banPlayerId: nomination.banPlayerId || null,
+      banPlayerName: getAuctionPlayer(draft, nomination.banPlayerId)?.name || null,
+      pickOrder: (nomination.pickOrder || []).map((record, index) => ({
+        ...record,
+        order: index + 1,
+        playerName: getAuctionPlayer(draft, record.playerId)?.name || "Unknown"
+      })),
+      pickCursor: nomination.pickCursor || 0,
+      currentPickPlayerId: currentPick?.playerId || null,
+      currentPickPlayerName: getAuctionPlayer(draft, currentPick?.playerId)?.name || null,
+      revealedBids: nomination.revealedBids || []
+    } : null,
+    player: viewerPlayer ? {
+      playerId: viewerPlayer.id,
+      credits: viewerPlayer.credits,
+      mulliganTokens: viewerPlayer.mulliganTokens,
+      banTokens: viewerPlayer.banTokens,
+      noBanPreset: Boolean(viewerPlayer.noBanPreset),
+      speakerOrderBid: viewerPlayer.speakerOrderBid,
+      speakerOrderBidLocked: Boolean(viewerPlayer.speakerOrderBidLocked),
+      currentBids: viewerPlayer.currentBids,
+      auctionBidLocked: Boolean(viewerPlayer.auctionBidLocked)
     } : null
   };
 }
@@ -916,6 +1025,7 @@ function getDraftSnapshot(room, viewerId) {
   if (draft.status === "complete") {
     return {
       status: "complete",
+      engine: draft.engine || method.engine,
       poolId: draft.poolId,
       methodId: method.id,
       method: getDraftMethodSummary(method),
@@ -936,6 +1046,7 @@ function getDraftSnapshot(room, viewerId) {
 
   return {
     status: "active",
+    engine: draft.engine || method.engine,
     poolId: draft.poolId,
     methodId: method.id,
     method: getDraftMethodSummary(method),
@@ -943,10 +1054,13 @@ function getDraftSnapshot(room, viewerId) {
     typeOrder: draft.typeOrder,
     itemsPerType: draft.itemsPerType,
     table,
-    currentPlayer: player ? getPlayerDraftView(player, draft, true) : null,
+    currentPlayer: draft.engine === "auction" ? null : (player ? getPlayerDraftView(player, draft, true) : null),
     superSpectator: isSuperSpectator ? {
-      players: draft.players.map((candidate) => getPlayerDraftView(candidate, draft, true))
-    } : null
+      players: draft.engine === "auction"
+        ? draft.players.map((candidate) => getAuctionPlayerSnapshot(candidate, draft, viewerId))
+        : draft.players.map((candidate) => getPlayerDraftView(candidate, draft, true))
+    } : null,
+    auction: draft.engine === "auction" ? getAuctionSnapshot(draft, viewerId) : null
   };
 }
 
@@ -977,7 +1091,7 @@ function validateDraftCanStart(room) {
     return "invalid_draft_method";
   }
 
-  if (!method.playable || method.engine !== "bag-pass") {
+  if (!method.playable || !["bag-pass", "auction"].includes(method.engine)) {
     return "unsupported_draft_method";
   }
 
@@ -986,12 +1100,18 @@ function validateDraftCanStart(room) {
       continue;
     }
 
-    const requested = (room.draftSettings.itemsPerType[type] || 0) * seated.length;
+    const requested = method.engine === "auction"
+      ? (room.draftSettings.itemsPerType[type] || 0) * (seated.length + 1)
+      : (room.draftSettings.itemsPerType[type] || 0) * seated.length;
     const available = pool.items.filter((item) => item.type === type).length;
 
     if (requested > available) {
       return "not_enough_pool_items";
     }
+  }
+
+  if (method.engine === "auction" && getAuctionTypeOrder(room.draftSettings, pool).length === 0) {
+    return "no_nomination_types";
   }
 
   return null;
@@ -1050,8 +1170,292 @@ function createStartingBags(pool, players, settings) {
   });
 }
 
-function startDraft(room) {
-  const pool = getPool(room.draftSettings.poolId);
+function getAuctionTypeOrder(draftOrSettings, pool = null) {
+  const typeOrder = pool
+    ? cleanTypeOrder(pool, draftOrSettings.typeOrder)
+    : draftOrSettings.typeOrder;
+  const itemsPerType = draftOrSettings.itemsPerType || {};
+
+  return typeOrder.filter((type) => !isSpeakerOrderType(type) && (itemsPerType[type] || 0) > 0);
+}
+
+function createAuctionItemSources(pool, settings) {
+  const sources = {};
+
+  for (const type of getAuctionTypeOrder(settings, pool)) {
+    sources[type] = shuffle(pool.items.filter((item) => item.type === type).map(cloneItem));
+  }
+
+  return sources;
+}
+
+function createAuctionPlayers(seated) {
+  return shuffle(seated).map((participant, index) => ({
+    id: participant.id,
+    name: participant.name,
+    seat: index + 1,
+    queue: [],
+    draftedItems: [],
+    draftedGroups: [],
+    credits: nominationAuctionStartingCredits,
+    mulliganTokens: nominationAuctionMulligans,
+    banTokens: nominationAuctionBans,
+    noBanPreset: false,
+    speakerOrderBid: null,
+    speakerOrderBidLocked: false,
+    currentBids: null,
+    auctionBidLocked: false
+  }));
+}
+
+function getAuctionPlayer(draft, playerId) {
+  return draft.players.find((player) => player.id === playerId) || null;
+}
+
+function getAuctionSpeaker(draft) {
+  if (!draft.auction.speakerOrder.length) {
+    return null;
+  }
+
+  return getAuctionPlayer(draft, draft.auction.speakerOrder[draft.auction.speakerIndex]);
+}
+
+function getEligibleNominationTypes(draft) {
+  return getAuctionTypeOrder(draft).filter((type) => (
+    (draft.auction.nominationsByType[type] || 0) < (draft.itemsPerType[type] || 0)
+  ));
+}
+
+function drawAuctionItems(draft, type, count) {
+  const source = draft.auction.itemSources[type] || [];
+  const items = [];
+
+  for (let index = 0; index < count; index += 1) {
+    const item = source.pop();
+
+    if (item) {
+      items.push(item);
+    }
+  }
+
+  return items;
+}
+
+function returnAuctionItems(draft, type, items) {
+  if (!draft.auction.itemSources[type]) {
+    draft.auction.itemSources[type] = [];
+  }
+
+  draft.auction.itemSources[type].push(...shuffle(items));
+}
+
+function canDrawAuctionItems(draft, type, count) {
+  return (draft.auction.itemSources[type] || []).length >= count;
+}
+
+function orderPlayersByBid(players, getBid) {
+  const bidGroups = new Map();
+
+  for (const player of players) {
+    const bid = getBid(player);
+
+    if (!bidGroups.has(bid)) {
+      bidGroups.set(bid, []);
+    }
+
+    bidGroups.get(bid).push(player);
+  }
+
+  return [...bidGroups.entries()]
+    .sort(([left], [right]) => right - left)
+    .flatMap(([, group]) => shuffle(group));
+}
+
+function resolveSpeakerOrderBids(draft) {
+  const orderedPlayers = orderPlayersByBid(draft.players, (player) => player.speakerOrderBid || 0);
+
+  for (const player of orderedPlayers) {
+    const bid = player.speakerOrderBid || 0;
+    player.credits = Math.max(player.credits - bid, 0);
+  }
+
+  draft.players = orderedPlayers.map((player, index) => ({
+    ...player,
+    seat: index + 1
+  }));
+  draft.auction.speakerOrder = draft.players.map((player) => player.id);
+  draft.auction.speakerIndex = 0;
+  draft.auction.speakerOrderResults = draft.players.map((player) => ({
+    playerId: player.id,
+    bid: player.speakerOrderBid || 0
+  }));
+  draft.auction.stage = "nomination";
+}
+
+function completeAuctionIfDone(draft) {
+  if (getEligibleNominationTypes(draft).length > 0) {
+    return false;
+  }
+
+  draft.status = "complete";
+  draft.completedAt = new Date().toISOString();
+  return true;
+}
+
+function startAuctionBidding(draft) {
+  const nomination = draft.auction.currentNomination;
+  nomination.bids = {};
+  nomination.pickOrder = [];
+  nomination.pickCursor = 0;
+
+  for (const player of draft.players) {
+    player.currentBids = null;
+    player.auctionBidLocked = false;
+  }
+
+  draft.auction.stage = "bidding";
+}
+
+function advanceAuctionBanWindow(draft) {
+  const nomination = draft.auction.currentNomination;
+
+  if (!nomination) {
+    return;
+  }
+
+  if (!canDrawAuctionItems(draft, nomination.type, 1)) {
+    nomination.banPlayerId = null;
+    startAuctionBidding(draft);
+    return;
+  }
+
+  nomination.banDeclines = nomination.banDeclines || [];
+
+  for (let attempts = 0; attempts < draft.players.length * 2; attempts += 1) {
+    const eligiblePlayers = draft.players.filter((player) => player.banTokens > 0);
+
+    if (eligiblePlayers.length === 0 || eligiblePlayers.every((player) => nomination.banDeclines.includes(player.id))) {
+      nomination.banPlayerId = null;
+      startAuctionBidding(draft);
+      return;
+    }
+
+    const index = nomination.banCursor ?? draft.auction.speakerIndex;
+    const player = draft.players[index % draft.players.length];
+    nomination.banCursor = (index + 1) % draft.players.length;
+
+    if (!player || player.banTokens <= 0 || nomination.banDeclines.includes(player.id)) {
+      continue;
+    }
+
+    if (player.noBanPreset) {
+      nomination.banDeclines.push(player.id);
+      continue;
+    }
+
+    nomination.banPlayerId = player.id;
+    draft.auction.stage = "ban";
+    return;
+  }
+
+  nomination.banPlayerId = null;
+  startAuctionBidding(draft);
+}
+
+function moveAuctionToPostDrawStage(draft) {
+  const speaker = getAuctionSpeaker(draft);
+  const nomination = draft.auction.currentNomination;
+  const drawCount = draft.players.length + 1;
+
+  if (speaker?.mulliganTokens > 0 && canDrawAuctionItems(draft, nomination.type, drawCount)) {
+    draft.auction.stage = "mulligan";
+    return;
+  }
+
+  nomination.banCursor = draft.auction.speakerIndex;
+  nomination.banDeclines = [];
+  advanceAuctionBanWindow(draft);
+}
+
+function resolveAuctionBids(draft) {
+  const nomination = draft.auction.currentNomination;
+  const playerCount = draft.players.length;
+  const records = [];
+  const firstWinner = orderPlayersByBid(draft.players, (player) => nomination.bids[player.id]?.first || 0)[0];
+
+  records.push({
+    playerId: firstWinner.id,
+    bidKind: "first",
+    bid: nomination.bids[firstWinner.id]?.first || 0,
+    cost: nomination.bids[firstWinner.id]?.first || 0
+  });
+
+  if (playerCount >= 5) {
+    const secondWinner = orderPlayersByBid(
+      draft.players.filter((player) => player.id !== firstWinner.id),
+      (player) => nomination.bids[player.id]?.second || 0
+    )[0];
+
+    records.push({
+      playerId: secondWinner.id,
+      bidKind: "second",
+      bid: nomination.bids[secondWinner.id]?.second || 0,
+      cost: nomination.bids[secondWinner.id]?.second || 0
+    });
+  }
+
+  const alreadyPicked = new Set(records.map((record) => record.playerId));
+  const tieBreakerPlayers = orderPlayersByBid(
+    draft.players.filter((player) => !alreadyPicked.has(player.id)),
+    (player) => nomination.bids[player.id]?.tie || 0
+  );
+
+  for (const player of tieBreakerPlayers) {
+    records.push({
+      playerId: player.id,
+      bidKind: "tie",
+      bid: nomination.bids[player.id]?.tie || 0,
+      cost: nomination.bids[player.id]?.tie || 0
+    });
+  }
+
+  for (const record of records) {
+    const player = getAuctionPlayer(draft, record.playerId);
+    player.credits = Math.max(player.credits - record.cost, 0);
+  }
+
+  nomination.pickOrder = records;
+  nomination.pickCursor = 0;
+  nomination.revealedBids = draft.players.map((player) => ({
+    playerId: player.id,
+    bids: nomination.bids[player.id]
+  }));
+  draft.auction.stage = "picking";
+}
+
+function finishAuctionNomination(draft) {
+  const nomination = draft.auction.currentNomination;
+
+  if (nomination.items.length > 0) {
+    draft.auction.permanentBin.push(...nomination.items);
+  }
+
+  if (nomination.temporaryBin.length > 0) {
+    returnAuctionItems(draft, nomination.type, nomination.temporaryBin);
+  }
+
+  draft.auction.nominationsByType[nomination.type] = (draft.auction.nominationsByType[nomination.type] || 0) + 1;
+  draft.auction.currentNomination = null;
+
+  if (completeAuctionIfDone(draft)) {
+    return;
+  }
+
+  draft.auction.speakerIndex = (draft.auction.speakerIndex + 1) % draft.auction.speakerOrder.length;
+  draft.auction.stage = "nomination";
+}
+
+function startBagPassingDraft(room, pool, method) {
   const players = shuffle(getSeatedParticipants(room)).map((participant, index) => ({
     id: participant.id,
     name: participant.name,
@@ -1070,14 +1474,58 @@ function startDraft(room) {
 
   room.draft = {
     status: "active",
+    engine: "bag-pass",
     poolId: pool.id,
-    methodId: room.draftSettings.methodId,
+    methodId: method.id,
     picksPerBag: room.draftSettings.picksPerBag,
     typeOrder: cleanTypeOrder(pool, room.draftSettings.typeOrder),
     itemsPerType: room.draftSettings.itemsPerType,
     players,
     discardedItems: []
   };
+}
+
+function startNominationAuctionDraft(room, pool, method) {
+  const players = createAuctionPlayers(getSeatedParticipants(room));
+  const typeOrder = cleanTypeOrder(pool, room.draftSettings.typeOrder);
+  const nominationsByType = {};
+
+  for (const type of typeOrder) {
+    nominationsByType[type] = 0;
+  }
+
+  room.draft = {
+    status: "active",
+    engine: "auction",
+    poolId: pool.id,
+    methodId: method.id,
+    picksPerBag: room.draftSettings.picksPerBag,
+    typeOrder,
+    itemsPerType: room.draftSettings.itemsPerType,
+    players,
+    discardedItems: [],
+    auction: {
+      stage: "speaker_order_bidding",
+      speakerOrder: [],
+      speakerIndex: 0,
+      speakerOrderResults: [],
+      nominationsByType,
+      itemSources: createAuctionItemSources(pool, room.draftSettings),
+      currentNomination: null,
+      permanentBin: []
+    }
+  };
+}
+
+function startDraft(room) {
+  const pool = getPool(room.draftSettings.poolId);
+  const method = getDraftMethod(room.draftSettings.methodId) || getDefaultDraftMethod();
+
+  if (method.engine === "auction") {
+    startNominationAuctionDraft(room, pool, method);
+  } else {
+    startBagPassingDraft(room, pool, method);
+  }
 }
 
 async function handleStartDraft(roomNumber, request, response) {
@@ -1250,6 +1698,12 @@ async function handleDraftPick(roomNumber, request, response) {
   }
 
   const draft = room.draft;
+
+  if (draft.engine === "auction") {
+    sendJson(response, 409, { error: "wrong_draft_engine" });
+    return;
+  }
+
   const player = draft.players.find((candidate) => candidate.id === body.playerId);
 
   if (!player) {
@@ -1329,6 +1783,409 @@ async function handleDraftPick(roomNumber, request, response) {
   sendJson(response, 200, getRoomSnapshot(roomNumber, player.id));
 }
 
+async function readAuctionBody(request, response) {
+  try {
+    return await readJsonBody(request);
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return null;
+  }
+}
+
+function getActiveAuctionDraft(roomNumber, response) {
+  const room = rooms.get(roomNumber);
+
+  if (!room) {
+    sendJson(response, 404, { error: "room_not_found" });
+    return null;
+  }
+
+  if (!room.draft || room.draft.status !== "active") {
+    sendJson(response, 409, { error: "draft_not_active" });
+    return null;
+  }
+
+  if (room.draft.engine !== "auction") {
+    sendJson(response, 409, { error: "wrong_draft_engine" });
+    return null;
+  }
+
+  return { room, draft: room.draft };
+}
+
+function sendAuctionSnapshot(roomNumber, room, response, viewerId) {
+  broadcastRoom(roomNumber);
+  sendJson(response, 200, getRoomSnapshot(roomNumber, viewerId));
+}
+
+async function handleAuctionSpeakerBid(roomNumber, request, response) {
+  const active = getActiveAuctionDraft(roomNumber, response);
+
+  if (!active) {
+    return;
+  }
+
+  const body = await readAuctionBody(request, response);
+
+  if (!body) {
+    return;
+  }
+
+  const { room, draft } = active;
+  const player = getAuctionPlayer(draft, body.playerId);
+
+  if (!player) {
+    sendJson(response, 403, { error: "player_not_in_draft" });
+    return;
+  }
+
+  if (draft.auction.stage !== "speaker_order_bidding") {
+    sendJson(response, 409, { error: "wrong_auction_stage" });
+    return;
+  }
+
+  if (player.speakerOrderBidLocked) {
+    sendJson(response, 409, { error: "bid_already_locked" });
+    return;
+  }
+
+  const bid = cleanNonnegativeInteger(body.bid, player.credits);
+
+  if (bid === null) {
+    sendJson(response, 400, { error: "invalid_bid" });
+    return;
+  }
+
+  player.speakerOrderBid = bid;
+  player.speakerOrderBidLocked = true;
+
+  if (draft.players.every((candidate) => candidate.speakerOrderBidLocked)) {
+    resolveSpeakerOrderBids(draft);
+  }
+
+  sendAuctionSnapshot(roomNumber, room, response, player.id);
+}
+
+async function handleAuctionNominate(roomNumber, request, response) {
+  const active = getActiveAuctionDraft(roomNumber, response);
+
+  if (!active) {
+    return;
+  }
+
+  const body = await readAuctionBody(request, response);
+
+  if (!body) {
+    return;
+  }
+
+  const { room, draft } = active;
+  const speaker = getAuctionSpeaker(draft);
+
+  if (!speaker || speaker.id !== body.playerId) {
+    sendJson(response, 403, { error: "speaker_required" });
+    return;
+  }
+
+  if (draft.auction.stage !== "nomination") {
+    sendJson(response, 409, { error: "wrong_auction_stage" });
+    return;
+  }
+
+  const type = String(body.type || "");
+
+  if (!getEligibleNominationTypes(draft).includes(type)) {
+    sendJson(response, 400, { error: "invalid_nomination_type" });
+    return;
+  }
+
+  const drawCount = draft.players.length + 1;
+
+  if (!canDrawAuctionItems(draft, type, drawCount)) {
+    sendJson(response, 409, { error: "not_enough_pool_items" });
+    return;
+  }
+
+  draft.auction.currentNomination = {
+    type,
+    items: drawAuctionItems(draft, type, drawCount),
+    temporaryBin: [],
+    banDeclines: [],
+    banCursor: draft.auction.speakerIndex,
+    banPlayerId: null,
+    bids: {},
+    pickOrder: [],
+    pickCursor: 0,
+    revealedBids: []
+  };
+
+  moveAuctionToPostDrawStage(draft);
+  sendAuctionSnapshot(roomNumber, room, response, speaker.id);
+}
+
+async function handleAuctionMulligan(roomNumber, request, response) {
+  const active = getActiveAuctionDraft(roomNumber, response);
+
+  if (!active) {
+    return;
+  }
+
+  const body = await readAuctionBody(request, response);
+
+  if (!body) {
+    return;
+  }
+
+  const { room, draft } = active;
+  const speaker = getAuctionSpeaker(draft);
+  const nomination = draft.auction.currentNomination;
+
+  if (!speaker || speaker.id !== body.playerId) {
+    sendJson(response, 403, { error: "speaker_required" });
+    return;
+  }
+
+  if (draft.auction.stage !== "mulligan" || !nomination) {
+    sendJson(response, 409, { error: "wrong_auction_stage" });
+    return;
+  }
+
+  if (body.mulligan) {
+    const drawCount = draft.players.length + 1;
+
+    if (speaker.mulliganTokens <= 0) {
+      sendJson(response, 409, { error: "no_mulligan_tokens" });
+      return;
+    }
+
+    if (!canDrawAuctionItems(draft, nomination.type, drawCount)) {
+      sendJson(response, 409, { error: "not_enough_pool_items" });
+      return;
+    }
+
+    speaker.mulliganTokens -= 1;
+    nomination.temporaryBin.push(...nomination.items);
+    nomination.items = drawAuctionItems(draft, nomination.type, drawCount);
+    moveAuctionToPostDrawStage(draft);
+  } else {
+    nomination.banCursor = draft.auction.speakerIndex;
+    nomination.banDeclines = [];
+    advanceAuctionBanWindow(draft);
+  }
+
+  sendAuctionSnapshot(roomNumber, room, response, speaker.id);
+}
+
+async function handleAuctionBan(roomNumber, request, response) {
+  const active = getActiveAuctionDraft(roomNumber, response);
+
+  if (!active) {
+    return;
+  }
+
+  const body = await readAuctionBody(request, response);
+
+  if (!body) {
+    return;
+  }
+
+  const { room, draft } = active;
+  const nomination = draft.auction.currentNomination;
+  const player = getAuctionPlayer(draft, body.playerId);
+
+  if (!player) {
+    sendJson(response, 403, { error: "player_not_in_draft" });
+    return;
+  }
+
+  if (draft.auction.stage !== "ban" || !nomination || nomination.banPlayerId !== player.id) {
+    sendJson(response, 409, { error: "wrong_auction_stage" });
+    return;
+  }
+
+  const itemId = body.itemId ? String(body.itemId) : null;
+
+  if (itemId) {
+    if (player.banTokens <= 0) {
+      sendJson(response, 409, { error: "no_ban_tokens" });
+      return;
+    }
+
+    if (!canDrawAuctionItems(draft, nomination.type, 1)) {
+      sendJson(response, 409, { error: "no_replacement_available" });
+      return;
+    }
+
+    const itemIndex = nomination.items.findIndex((item) => item.id === itemId);
+
+    if (itemIndex < 0) {
+      sendJson(response, 400, { error: "item_not_in_nomination" });
+      return;
+    }
+
+    const [bannedItem] = nomination.items.splice(itemIndex, 1);
+    nomination.temporaryBin.push(bannedItem);
+    nomination.items.push(...drawAuctionItems(draft, nomination.type, 1));
+    nomination.banDeclines = [];
+    nomination.banCursor = draft.auction.speakerIndex;
+    player.banTokens -= 1;
+  } else {
+    if (!nomination.banDeclines.includes(player.id)) {
+      nomination.banDeclines.push(player.id);
+    }
+  }
+
+  advanceAuctionBanWindow(draft);
+  sendAuctionSnapshot(roomNumber, room, response, player.id);
+}
+
+async function handleAuctionNoBanPreset(roomNumber, request, response) {
+  const active = getActiveAuctionDraft(roomNumber, response);
+
+  if (!active) {
+    return;
+  }
+
+  const body = await readAuctionBody(request, response);
+
+  if (!body) {
+    return;
+  }
+
+  const { room, draft } = active;
+  const player = getAuctionPlayer(draft, body.playerId);
+
+  if (!player) {
+    sendJson(response, 403, { error: "player_not_in_draft" });
+    return;
+  }
+
+  player.noBanPreset = Boolean(body.noBanPreset);
+
+  if (player.noBanPreset && draft.auction.stage === "ban" && draft.auction.currentNomination?.banPlayerId === player.id) {
+    const nomination = draft.auction.currentNomination;
+
+    if (!nomination.banDeclines.includes(player.id)) {
+      nomination.banDeclines.push(player.id);
+    }
+
+    advanceAuctionBanWindow(draft);
+  }
+
+  sendAuctionSnapshot(roomNumber, room, response, player.id);
+}
+
+async function handleAuctionBid(roomNumber, request, response) {
+  const active = getActiveAuctionDraft(roomNumber, response);
+
+  if (!active) {
+    return;
+  }
+
+  const body = await readAuctionBody(request, response);
+
+  if (!body) {
+    return;
+  }
+
+  const { room, draft } = active;
+  const nomination = draft.auction.currentNomination;
+  const player = getAuctionPlayer(draft, body.playerId);
+
+  if (!player) {
+    sendJson(response, 403, { error: "player_not_in_draft" });
+    return;
+  }
+
+  if (draft.auction.stage !== "bidding" || !nomination) {
+    sendJson(response, 409, { error: "wrong_auction_stage" });
+    return;
+  }
+
+  if (player.auctionBidLocked) {
+    sendJson(response, 409, { error: "bid_already_locked" });
+    return;
+  }
+
+  const first = cleanNonnegativeInteger(body.first, player.credits);
+  const second = draft.players.length >= 5
+    ? cleanNonnegativeInteger(body.second, player.credits)
+    : 0;
+  const tie = cleanNonnegativeInteger(body.tie, player.credits);
+
+  if (first === null || second === null || tie === null) {
+    sendJson(response, 400, { error: "invalid_bid" });
+    return;
+  }
+
+  const bids = { first, second, tie };
+  player.currentBids = bids;
+  player.auctionBidLocked = true;
+  nomination.bids[player.id] = bids;
+
+  if (draft.players.every((candidate) => candidate.auctionBidLocked)) {
+    resolveAuctionBids(draft);
+  }
+
+  sendAuctionSnapshot(roomNumber, room, response, player.id);
+}
+
+async function handleAuctionPick(roomNumber, request, response) {
+  const active = getActiveAuctionDraft(roomNumber, response);
+
+  if (!active) {
+    return;
+  }
+
+  const body = await readAuctionBody(request, response);
+
+  if (!body) {
+    return;
+  }
+
+  const { room, draft } = active;
+  const nomination = draft.auction.currentNomination;
+  const pickRecord = nomination?.pickOrder?.[nomination.pickCursor];
+  const player = getAuctionPlayer(draft, body.playerId);
+
+  if (!player) {
+    sendJson(response, 403, { error: "player_not_in_draft" });
+    return;
+  }
+
+  if (draft.auction.stage !== "picking" || !nomination || !pickRecord || pickRecord.playerId !== player.id) {
+    sendJson(response, 409, { error: "wrong_auction_stage" });
+    return;
+  }
+
+  const itemId = String(body.itemId || "");
+  const itemIndex = nomination.items.findIndex((item) => item.id === itemId);
+
+  if (itemIndex < 0) {
+    sendJson(response, 400, { error: "item_not_in_nomination" });
+    return;
+  }
+
+  const [item] = nomination.items.splice(itemIndex, 1);
+  player.draftedItems.push(item);
+  player.draftedGroups.push({
+    id: crypto.randomUUID(),
+    pickNumber: player.draftedGroups.length + 1,
+    label: `${nomination.type} - ${pickRecord.bidKind} pick`,
+    nominationType: nomination.type,
+    cost: pickRecord.cost,
+    bidKind: pickRecord.bidKind,
+    items: [item]
+  });
+  nomination.pickCursor += 1;
+
+  if (nomination.pickCursor >= nomination.pickOrder.length) {
+    finishAuctionNomination(draft);
+  }
+
+  sendAuctionSnapshot(roomNumber, room, response, player.id);
+}
+
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, `http://${request.headers.host}`);
 
@@ -1402,6 +2259,50 @@ const server = http.createServer(async (request, response) => {
 
   if (restartDraftMatch && request.method === "POST") {
     await handleRestartDraft(restartDraftMatch[1], request, response);
+    return;
+  }
+
+  const auctionActionMatch = url.pathname.match(/^\/api\/rooms\/(\d{6})\/draft\/auction\/([a-z-]+)$/);
+
+  if (auctionActionMatch && request.method === "POST") {
+    const [, roomNumber, action] = auctionActionMatch;
+
+    if (action === "speaker-bid") {
+      await handleAuctionSpeakerBid(roomNumber, request, response);
+      return;
+    }
+
+    if (action === "nominate") {
+      await handleAuctionNominate(roomNumber, request, response);
+      return;
+    }
+
+    if (action === "mulligan") {
+      await handleAuctionMulligan(roomNumber, request, response);
+      return;
+    }
+
+    if (action === "ban") {
+      await handleAuctionBan(roomNumber, request, response);
+      return;
+    }
+
+    if (action === "no-ban-preset") {
+      await handleAuctionNoBanPreset(roomNumber, request, response);
+      return;
+    }
+
+    if (action === "bid") {
+      await handleAuctionBid(roomNumber, request, response);
+      return;
+    }
+
+    if (action === "pick") {
+      await handleAuctionPick(roomNumber, request, response);
+      return;
+    }
+
+    sendJson(response, 404, { error: "auction_action_not_found" });
     return;
   }
 
