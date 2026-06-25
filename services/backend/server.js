@@ -1121,10 +1121,6 @@ function validateDraftCanStart(room) {
 
   const seated = getSeatedParticipants(room);
 
-  if (seated.length !== room.maxSeats) {
-    return "room_not_full";
-  }
-
   if (seated.length === 0) {
     return "no_players";
   }

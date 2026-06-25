@@ -193,7 +193,7 @@
       }
 
       .final-draft-card > .item-grid {
-        align-items: stretch;
+        align-items: start;
       }
 
       .item-grid > .group-section {
@@ -220,6 +220,7 @@
       }
 
       .item-stack > .item-card {
+        align-self: start;
         flex: 0 1 13rem;
       }
 
@@ -232,7 +233,7 @@
       }
 
       .item-card {
-        height: 100%;
+        height: auto;
         min-width: 0;
         position: relative;
         display: grid;
@@ -259,7 +260,7 @@
         position: relative;
         display: grid;
         place-items: center;
-        aspect-ratio: 1;
+        aspect-ratio: var(--crop-aspect, var(--image-aspect, 1 / 1));
         padding: 0.3rem;
         overflow: hidden;
         border: 1px solid #3f4248;
@@ -384,7 +385,7 @@
       }
 
       .item-linked-preview .item-image-frame {
-        aspect-ratio: 1;
+        aspect-ratio: var(--crop-aspect, var(--image-aspect, 1 / 1));
         padding: 0.15rem;
       }
 
@@ -454,14 +455,15 @@
       }
 
       #player-draft-panel {
-        padding-bottom: 5.5rem;
+        padding-bottom: 6.5rem;
       }
 
       #lock-choice {
         min-width: min(16rem, calc(100vw - 2rem));
+        max-width: calc(100vw - 2rem);
         position: fixed;
         left: 50%;
-        bottom: 1rem;
+        bottom: 0.75rem;
         z-index: 25;
         transform: translateX(-50%);
         box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 0.45);
@@ -2924,12 +2926,11 @@
           renderDraftSettings(data.draft.settings);
         }
 
-        const roomIsFull = data.seated.length === data.maxSeats;
         const draftNotStarted = data.draft.status === "not_started";
         creatorPanel.hidden = !isCreator() || !draftNotStarted;
         restartDraft.hidden = !isCreator() || draftNotStarted;
         seatingPanel.hidden = !draftNotStarted;
-        startDraft.disabled = !roomIsFull;
+        startDraft.disabled = data.seated.length === 0;
         sitDown.hidden = currentRole !== "spectator" || !draftNotStarted;
         spectateRoom.hidden = currentRole !== "seated" || !draftNotStarted;
         renderDraft(data.draft);
@@ -3156,6 +3157,8 @@
         if (!response.ok) {
           if (data.error === "room_not_full") {
             roomMessage.textContent = "The room must be full before starting.";
+          } else if (data.error === "no_players") {
+            roomMessage.textContent = "Seat at least one player before starting.";
           } else if (data.error === "unsupported_draft_method") {
             roomMessage.textContent = "That draft method is a definition only. The live engine is not implemented yet.";
           } else if (data.error === "no_nomination_types") {
