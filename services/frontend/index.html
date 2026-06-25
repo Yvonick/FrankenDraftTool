@@ -2192,6 +2192,7 @@
         const labels = {
           speaker_order_bidding: "Speaker order bidding",
           nomination: "Nomination",
+          wildcard: "Wild Card choice",
           mulligan: "Mulligan window",
           ban: "Ban window",
           bidding: "Hidden bidding",
@@ -2212,7 +2213,7 @@
             .map((player) => player.playerId));
         }
 
-        if (["nomination", "mulligan"].includes(auction.stage)) {
+        if (["nomination", "wildcard", "mulligan"].includes(auction.stage)) {
           return new Set(auction.speakerId ? [auction.speakerId] : []);
         }
 
@@ -2492,6 +2493,39 @@
         auctionControls.append(accept, decline);
       }
 
+      function renderAuctionWildcardControls(auction) {
+        const nomination = auction.currentNomination;
+
+        if (auction.speakerId !== currentViewerId || !nomination?.wildcardItem) {
+          return;
+        }
+
+        const choices = nomination.wildcardChoiceItems || [];
+        const form = document.createElement("form");
+        form.className = "auction-control-form";
+        const label = document.createElement("label");
+        const select = document.createElement("select");
+
+        for (const item of choices) {
+          const option = document.createElement("option");
+          option.value = item.id;
+          option.textContent = item.name;
+          select.append(option);
+        }
+
+        const button = document.createElement("button");
+        button.type = "submit";
+        button.textContent = "Replace Wild Card";
+        button.disabled = choices.length === 0;
+        label.append(`${nomination.wildcardItem.name}: choose replacement`, select);
+        form.append(label, button);
+        form.addEventListener("submit", (event) => {
+          event.preventDefault();
+          postAuctionAction("wildcard", { itemId: select.value });
+        });
+        auctionControls.append(form);
+      }
+
       function renderAuctionNoBanPresetControl(auction) {
         const player = auction.player;
 
@@ -2696,6 +2730,8 @@
           renderAuctionBidControls(auction);
         } else if (auction.stage === "nomination") {
           renderAuctionNominationControls(auction);
+        } else if (auction.stage === "wildcard") {
+          renderAuctionWildcardControls(auction);
         } else if (auction.stage === "mulligan") {
           renderAuctionMulliganControls(auction);
         } else if (auction.stage === "ban") {

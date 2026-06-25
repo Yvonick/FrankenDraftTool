@@ -307,6 +307,10 @@ function shuffle(values) {
   return copy;
 }
 
+function isWildcardItem(item) {
+  return /^wild\s*cards?\b/i.test(String(item?.name || "").trim());
+}
+
 function cloneItem(item) {
   return {
     id: item.id,
@@ -338,7 +342,8 @@ function getItemSnapshot(item) {
     imageSheet: item.imageSheet,
     sourceObjectType: item.sourceObjectType,
     metaType: item.metaType,
-    order: item.order
+    order: item.order,
+    isWildcard: isWildcardItem(item)
   };
 }
 
@@ -942,6 +947,7 @@ function getAuctionSnapshot(draft, viewerId) {
   const nomination = draft.auction.currentNomination;
   const viewerPlayer = getAuctionPlayer(draft, viewerId);
   const currentPick = nomination?.pickOrder?.[nomination.pickCursor] || null;
+  const wildcardItem = getAuctionWildcardItem(nomination);
   const revealedBids = (nomination?.revealedBids || []).map((record) => ({
     ...record,
     playerName: getAuctionPlayer(draft, record.playerId)?.name || "Unknown"
@@ -974,6 +980,10 @@ function getAuctionSnapshot(draft, viewerId) {
       type: nomination.type,
       isSpeakerOrder: Boolean(nomination.isSpeakerOrder),
       items: nomination.items.map(getItemSnapshot),
+      wildcardItem: wildcardItem ? getItemSnapshot(wildcardItem) : null,
+      wildcardChoiceItems: wildcardItem
+        ? getAuctionWildcardChoices(draft, nomination.type).map(getItemSnapshot)
+        : [],
       temporaryBinCount: nomination.temporaryBin.length,
       temporaryBinItems: nomination.temporaryBin.map(getItemSnapshot),
       permanentBinCount: draft.auction.permanentBin.length,
@@ -1105,7 +1115,7 @@ function validateDraftCanStart(room) {
     const requested = method.engine === "auction"
       ? (room.draftSettings.itemsPerType[type] || 0) * (seated.length + 1)
       : (room.draftSettings.itemsPerType[type] || 0) * seated.length;
-    const available = pool.items.filter((item) => item.type === type).length;
+    const available = pool.items.filter((item) => item.type === type && !isWildcardItem(item)).length;
 
     if (requested > available) {
       return "not_enough_pool_items";
@@ -1144,7 +1154,7 @@ function createStartingBags(pool, players, settings) {
     type,
     isSpeakerOrderType(type)
       ? shuffle(createSpeakerOrderItems(players))
-      : shuffle(pool.items.filter((item) => item.type === type))
+      : shuffle(pool.items.filter((item) => item.type === type && !isWildcardItem(item)))
   ]));
 
   return players.map((player) => {
@@ -1249,8 +1259,16 @@ function returnAuctionItems(draft, type, items) {
   draft.auction.itemSources[type].push(...shuffle(items));
 }
 
+function getAuctionWildcardItem(nomination) {
+  return nomination?.items.find(isWildcardItem) || null;
+}
+
+function getAuctionWildcardChoices(draft, type) {
+  return (draft.auction.itemSources[type] || []).filter((item) => !isWildcardItem(item));
+}
+
 function canDrawAuctionItems(draft, type, count) {
-  return (draft.auction.itemSources[type] || []).length >= count;
+  return getAuctionWildcardChoices(draft, type).length >= count;
 }
 
 function createAuctionNomination(type, items, options = {}) {
@@ -1371,6 +1389,11 @@ function moveAuctionToPostDrawStage(draft) {
   const speaker = getAuctionSpeaker(draft);
   const nomination = draft.auction.currentNomination;
   const drawCount = draft.players.length + 1;
+
+  if (getAuctionWildcardItem(nomination)) {
+    draft.auction.stage = "wildcard";
+    return;
+  }
 
   if (speaker?.mulliganTokens > 0 && canDrawAuctionItems(draft, nomination.type, drawCount)) {
     draft.auction.stage = "mulligan";
@@ -1953,6 +1976,55 @@ async function handleAuctionMulligan(roomNumber, request, response) {
   sendAuctionSnapshot(roomNumber, room, response, speaker.id);
 }
 
+async function handleAuctionWildcard(roomNumber, request, response) {
+  const active = getActiveAuctionDraft(roomNumber, response);
+
+  if (!active) {
+    return;
+  }
+
+  const body = await readAuctionBody(request, response);
+
+  if (!body) {
+    return;
+  }
+
+  const { room, draft } = active;
+  const speaker = getAuctionSpeaker(draft);
+  const nomination = draft.auction.currentNomination;
+
+  if (!speaker || speaker.id !== body.playerId) {
+    sendJson(response, 403, { error: "speaker_required" });
+    return;
+  }
+
+  if (draft.auction.stage !== "wildcard" || !nomination) {
+    sendJson(response, 409, { error: "wrong_auction_stage" });
+    return;
+  }
+
+  const wildcardIndex = nomination.items.findIndex(isWildcardItem);
+
+  if (wildcardIndex < 0) {
+    sendJson(response, 409, { error: "no_wildcard_pending" });
+    return;
+  }
+
+  const itemId = String(body.itemId || "");
+  const source = draft.auction.itemSources[nomination.type] || [];
+  const choiceIndex = source.findIndex((item) => item.id === itemId && !isWildcardItem(item));
+
+  if (choiceIndex < 0) {
+    sendJson(response, 400, { error: "invalid_wildcard_choice" });
+    return;
+  }
+
+  const [chosenItem] = source.splice(choiceIndex, 1);
+  nomination.items.splice(wildcardIndex, 1, chosenItem);
+  moveAuctionToPostDrawStage(draft);
+  sendAuctionSnapshot(roomNumber, room, response, speaker.id);
+}
+
 async function handleAuctionBan(roomNumber, request, response) {
   const active = getActiveAuctionDraft(roomNumber, response);
 
@@ -2255,6 +2327,11 @@ const server = http.createServer(async (request, response) => {
 
     if (action === "mulligan") {
       await handleAuctionMulligan(roomNumber, request, response);
+      return;
+    }
+
+    if (action === "wildcard") {
+      await handleAuctionWildcard(roomNumber, request, response);
       return;
     }
 

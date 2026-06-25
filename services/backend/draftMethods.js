@@ -133,8 +133,9 @@ const nominationAuctionMethod = {
       title: "Draws, Mulligans, And Bans",
       items: [
         "When an item type is nominated, the draft randomly draws player count plus one items of that type from the pool.",
+        "If a drawn item is a Wild Card, the speaker replaces it with any remaining item from the nominated type before the draft continues.",
         "If the speaker has mulligan tokens, they may spend one to move the whole drawn set into a temporary bin and draw a fresh set of the same size. The speaker may mulligan again while they still have tokens.",
-        "Players then get ban windows in speaker order. A player with a ban token chooses either one displayed item to ban or no ban. A banned item enters the temporary bin and is replaced by a fresh draw from the same type.",
+        "Players then get ban windows in speaker order. A player with a ban token chooses either one displayed item to ban or no ban. A banned item enters the permanent bin and is replaced by a fresh draw from the same type.",
         "Players can preset no-ban to speed up the ban phase, and they may change that preset at any time. The ban phase ends once every eligible player has declined to ban.",
         "Items in the temporary bin cannot be drawn again during the current nomination."
       ]
@@ -161,7 +162,7 @@ const nominationAuctionMethod = {
       items: [
         "After pick order is decided, players pick one item each from the nominated pool in that order.",
         "The one remaining displayed item goes to a permanent bin.",
-        "Temporary-bin items from mulligans and bans are shuffled back into the pool after the nomination resolves.",
+        "Temporary-bin items from mulligans are shuffled back into the pool after the nomination resolves.",
         "The draft ends once every item type has reached its maximum number of nominations. Export becomes available at that point, with each player exported as one TTS bag."
       ]
     },
