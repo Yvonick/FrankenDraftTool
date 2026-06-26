@@ -30,6 +30,7 @@ const poolUploadJsonBodyLimit = 25 * 1024 * 1024;
 const nominationAuctionStartingCredits = 40;
 const nominationAuctionMulligans = 2;
 const nominationAuctionBans = 1;
+const auctionUndoLimit = 30;
 
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, {
@@ -170,8 +171,40 @@ function getSeatedParticipants(room) {
     .filter((participant) => participant.role === "seated")
     .map((participant) => ({
       id: participant.id,
-      name: participant.name
+      name: participant.name,
+      admin: Boolean(participant.admin)
     }));
+}
+
+function getRoomViewerSnapshot(room, viewerId) {
+  const viewer = room.participants.get(String(viewerId || ""));
+
+  if (!viewer) {
+    return null;
+  }
+
+  return {
+    id: viewer.id,
+    role: viewer.role,
+    name: viewer.name,
+    admin: Boolean(viewer.admin),
+    superSpectator: viewer.role === "spectator" && Boolean(viewer.superSpectator)
+  };
+}
+
+function hasRoomAdminRights(room, body = {}) {
+  if (body.creatorToken === room.creatorToken) {
+    return true;
+  }
+
+  const actorId = String(body.actorId || body.viewerId || body.participantId || "");
+  const actor = room.participants.get(actorId);
+
+  return Boolean(actor?.admin);
+}
+
+function sendAdminRequired(response) {
+  sendJson(response, 403, { error: "admin_required" });
 }
 
 function getRoomSnapshot(roomNumber, viewerId = null) {
@@ -193,8 +226,10 @@ function getRoomSnapshot(roomNumber, viewerId = null) {
       .map((participant) => ({
         id: participant.id,
         name: participant.name,
-        superSpectator: Boolean(participant.superSpectator)
+        superSpectator: Boolean(participant.superSpectator),
+        admin: Boolean(participant.admin)
       })),
+    viewer: getRoomViewerSnapshot(room, viewerId),
     draft: getDraftSnapshot(room, viewerId)
   };
 }
@@ -695,8 +730,8 @@ async function handleRoomSettings(roomNumber, request, response) {
     return;
   }
 
-  if (body.creatorToken !== room.creatorToken) {
-    sendJson(response, 403, { error: "creator_token_required" });
+  if (!hasRoomAdminRights(room, body)) {
+    sendAdminRequired(response);
     return;
   }
 
@@ -767,7 +802,7 @@ async function handleRoomSettings(roomNumber, request, response) {
   };
 
   broadcastRoom(roomNumber);
-  sendJson(response, 200, getRoomSnapshot(roomNumber));
+  sendJson(response, 200, getRoomSnapshot(roomNumber, body.viewerId || body.actorId || body.participantId));
 }
 
 function handleRoomDetails(roomNumber, request, response) {
@@ -822,6 +857,7 @@ function handleRoomStream(roomNumber, url, request, response) {
     role,
     name,
     superSpectator: role === "spectator" && Boolean(existingParticipant?.superSpectator),
+    admin: Boolean(existingParticipant?.admin),
     connectionToken
   });
   room.clients.set(response, { participantId });
@@ -831,7 +867,8 @@ function handleRoomStream(roomNumber, url, request, response) {
     role,
     name,
     seatDenied,
-    superSpectator: role === "spectator" && Boolean(existingParticipant?.superSpectator)
+    superSpectator: role === "spectator" && Boolean(existingParticipant?.superSpectator),
+    admin: Boolean(existingParticipant?.admin)
   })}\n\n`);
   broadcastRoom(roomNumber);
 
@@ -918,11 +955,14 @@ function getSelectionError(player, bag, selectedItems, draft) {
   return null;
 }
 
-function getTablePlayerSnapshot(player) {
+function getTablePlayerSnapshot(player, room) {
+  const participant = room.participants.get(player.id);
+
   return {
     id: player.id,
     name: player.name,
     seat: player.seat,
+    admin: Boolean(participant?.admin),
     queueLength: player.queue.length,
     lookingAtBag: Boolean(player.queue[0]),
     credits: player.credits,
@@ -993,6 +1033,7 @@ function getAuctionSnapshot(draft, viewerId) {
 
   return {
     stage: draft.auction.stage,
+    undoAvailable: Boolean(draft.undoStack?.length),
     speakerId: speaker?.id || null,
     speakerName: speaker?.name || null,
     speakerIndex: draft.auction.speakerIndex,
@@ -1070,7 +1111,7 @@ function getDraftSnapshot(room, viewerId) {
   const method = getDraftMethod(draft.methodId) || getDefaultDraftMethod();
   const viewer = room.participants.get(viewerId);
   const isSuperSpectator = viewer?.role === "spectator" && viewer.superSpectator;
-  const table = draft.players.map(getTablePlayerSnapshot);
+  const table = draft.players.map((player) => getTablePlayerSnapshot(player, room));
 
   if (draft.status === "complete") {
     return {
@@ -1082,6 +1123,7 @@ function getDraftSnapshot(room, viewerId) {
       picksPerBag: draft.picksPerBag,
       typeOrder: draft.typeOrder,
       itemsPerType: draft.itemsPerType,
+      undoAvailable: draft.engine === "auction" && Boolean(draft.undoStack?.length),
       table,
       revealedDrafts: draft.players.map((player) => ({
         playerId: player.id,
@@ -1250,6 +1292,27 @@ function createAuctionPlayers(seated) {
     currentBids: null,
     auctionBidLocked: false
   }));
+}
+
+function cloneDraftForUndo(draft) {
+  const snapshot = cloneJson(draft);
+  delete snapshot.undoStack;
+  return snapshot;
+}
+
+function pushAuctionUndo(draft) {
+  if (!draft || draft.engine !== "auction") {
+    return;
+  }
+
+  const undoStack = Array.isArray(draft.undoStack) ? draft.undoStack : [];
+  undoStack.push(cloneDraftForUndo(draft));
+
+  while (undoStack.length > auctionUndoLimit) {
+    undoStack.shift();
+  }
+
+  draft.undoStack = undoStack;
 }
 
 function getAuctionPlayer(draft, playerId) {
@@ -1591,6 +1654,7 @@ function startNominationAuctionDraft(room, pool, method) {
     itemsPerType: room.draftSettings.itemsPerType,
     players,
     discardedItems: [],
+    undoStack: [],
     auction: {
       stage: "speaker_order_bidding",
       speakerOrder: [],
@@ -1634,8 +1698,8 @@ async function handleStartDraft(roomNumber, request, response) {
     return;
   }
 
-  if (body.creatorToken !== room.creatorToken) {
-    sendJson(response, 403, { error: "creator_token_required" });
+  if (!hasRoomAdminRights(room, body)) {
+    sendAdminRequired(response);
     return;
   }
 
@@ -1711,8 +1775,8 @@ async function handleRestartDraft(roomNumber, request, response) {
     return;
   }
 
-  if (body.creatorToken !== room.creatorToken) {
-    sendJson(response, 403, { error: "creator_token_required" });
+  if (!hasRoomAdminRights(room, body)) {
+    sendAdminRequired(response);
     return;
   }
 
@@ -1738,8 +1802,8 @@ async function handlePromoteSpectator(roomNumber, request, response) {
     return;
   }
 
-  if (body.creatorToken !== room.creatorToken) {
-    sendJson(response, 403, { error: "creator_token_required" });
+  if (!hasRoomAdminRights(room, body)) {
+    sendAdminRequired(response);
     return;
   }
 
@@ -1753,6 +1817,40 @@ async function handlePromoteSpectator(roomNumber, request, response) {
   spectator.superSpectator = Boolean(body.superSpectator);
   broadcastRoom(roomNumber);
   sendJson(response, 200, getRoomSnapshot(roomNumber, body.viewerId));
+}
+
+async function handleParticipantAdmin(roomNumber, request, response) {
+  const room = rooms.get(roomNumber);
+
+  if (!room) {
+    sendJson(response, 404, { error: "room_not_found" });
+    return;
+  }
+
+  let body;
+
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return;
+  }
+
+  if (!hasRoomAdminRights(room, body)) {
+    sendAdminRequired(response);
+    return;
+  }
+
+  const participant = room.participants.get(String(body.participantId || ""));
+
+  if (!participant) {
+    sendJson(response, 404, { error: "participant_not_found" });
+    return;
+  }
+
+  participant.admin = Boolean(body.admin);
+  broadcastRoom(roomNumber);
+  sendJson(response, 200, getRoomSnapshot(roomNumber, body.viewerId || body.actorId));
 }
 
 function completeDraftIfDone(draft) {
@@ -1947,6 +2045,7 @@ async function handleAuctionNominate(roomNumber, request, response) {
     return;
   }
 
+  pushAuctionUndo(draft);
   draft.auction.currentNomination = createAuctionNomination(
     type,
     drawAuctionItems(draft, type, drawCount),
@@ -1997,11 +2096,13 @@ async function handleAuctionMulligan(roomNumber, request, response) {
       return;
     }
 
+    pushAuctionUndo(draft);
     speaker.mulliganTokens -= 1;
     nomination.temporaryBin.push(...nomination.items);
     nomination.items = drawAuctionItems(draft, nomination.type, drawCount);
     moveAuctionToPostDrawStage(draft);
   } else {
+    pushAuctionUndo(draft);
     nomination.banCursor = draft.auction.speakerIndex;
     nomination.banDeclines = [];
     advanceAuctionBanWindow(draft);
@@ -2053,6 +2154,7 @@ async function handleAuctionWildcard(roomNumber, request, response) {
     return;
   }
 
+  pushAuctionUndo(draft);
   const [chosenItem] = source.splice(choiceIndex, 1);
   nomination.items.splice(wildcardIndex, 1, chosenItem);
   moveAuctionToPostDrawStage(draft);
@@ -2106,6 +2208,7 @@ async function handleAuctionBan(roomNumber, request, response) {
       return;
     }
 
+    pushAuctionUndo(draft);
     const [bannedItem] = nomination.items.splice(itemIndex, 1);
     draft.auction.permanentBin.push(bannedItem);
     nomination.items.push(...drawAuctionItems(draft, nomination.type, 1));
@@ -2114,6 +2217,8 @@ async function handleAuctionBan(roomNumber, request, response) {
     sendAuctionSnapshot(roomNumber, room, response, player.id);
     return;
   } else {
+    pushAuctionUndo(draft);
+
     if (!nomination.banDeclines.includes(player.id)) {
       nomination.banDeclines.push(player.id);
     }
@@ -2157,6 +2262,49 @@ async function handleAuctionNoBanPreset(roomNumber, request, response) {
   }
 
   sendAuctionSnapshot(roomNumber, room, response, player.id);
+}
+
+async function handleAuctionUndo(roomNumber, request, response) {
+  const room = rooms.get(roomNumber);
+
+  if (!room) {
+    sendJson(response, 404, { error: "room_not_found" });
+    return;
+  }
+
+  let body;
+
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return;
+  }
+
+  if (!hasRoomAdminRights(room, body)) {
+    sendAdminRequired(response);
+    return;
+  }
+
+  if (!room.draft || room.draft.engine !== "auction") {
+    sendJson(response, 409, { error: "wrong_draft_engine" });
+    return;
+  }
+
+  const undoStack = Array.isArray(room.draft.undoStack) ? room.draft.undoStack : [];
+  const previousDraft = undoStack.pop();
+
+  if (!previousDraft) {
+    sendJson(response, 409, { error: "nothing_to_undo" });
+    return;
+  }
+
+  room.draft = {
+    ...previousDraft,
+    undoStack
+  };
+  broadcastRoom(roomNumber);
+  sendJson(response, 200, getRoomSnapshot(roomNumber, body.viewerId || body.actorId || body.participantId));
 }
 
 async function handleAuctionBid(roomNumber, request, response) {
@@ -2203,6 +2351,7 @@ async function handleAuctionBid(roomNumber, request, response) {
   }
 
   const bids = { first, second, tie };
+  pushAuctionUndo(draft);
   player.currentBids = bids;
   player.auctionBidLocked = true;
   nomination.bids[player.id] = bids;
@@ -2250,6 +2399,7 @@ async function handleAuctionPick(roomNumber, request, response) {
     return;
   }
 
+  pushAuctionUndo(draft);
   const [item] = nomination.items.splice(itemIndex, 1);
   player.draftedItems.push(item);
   player.draftedGroups.push({
@@ -2379,6 +2529,11 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (action === "undo") {
+      await handleAuctionUndo(roomNumber, request, response);
+      return;
+    }
+
     if (action === "bid") {
       await handleAuctionBid(roomNumber, request, response);
       return;
@@ -2411,6 +2566,13 @@ const server = http.createServer(async (request, response) => {
 
   if (promoteSpectatorMatch && request.method === "POST") {
     await handlePromoteSpectator(promoteSpectatorMatch[1], request, response);
+    return;
+  }
+
+  const participantAdminMatch = url.pathname.match(/^\/api\/rooms\/(\d{6})\/participants\/admin$/);
+
+  if (participantAdminMatch && request.method === "POST") {
+    await handleParticipantAdmin(participantAdminMatch[1], request, response);
     return;
   }
 
