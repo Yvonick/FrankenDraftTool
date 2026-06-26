@@ -1058,6 +1058,7 @@ function getAuctionPlayerSnapshot(player, draft, viewerId, room = null) {
 function getAuctionSnapshot(draft, viewerId, room = null) {
   const speaker = getAuctionSpeaker(draft);
   const nomination = draft.auction.currentNomination;
+  const lastBidRecap = draft.auction.lastBidRecap || null;
   const viewerPlayer = getAuctionPlayer(draft, viewerId);
   const currentPick = nomination?.pickOrder?.[nomination.pickCursor] || null;
   const wildcardItem = getAuctionWildcardItem(nomination);
@@ -1091,6 +1092,19 @@ function getAuctionSnapshot(draft, viewerId, room = null) {
     permanentBinCount: draft.auction.permanentBin.length,
     permanentBinItems: draft.auction.permanentBin.map(getItemSnapshot),
     players: draft.players.map((player) => getAuctionPlayerSnapshot(player, draft, viewerId, room)),
+    lastBidRecap: lastBidRecap ? {
+      type: lastBidRecap.type,
+      isSpeakerOrder: Boolean(lastBidRecap.isSpeakerOrder),
+      pickOrder: (lastBidRecap.pickOrder || []).map((record, index) => ({
+        ...record,
+        order: index + 1,
+        playerName: getAuctionPlayer(draft, record.playerId)?.name || "Unknown"
+      })),
+      revealedBids: (lastBidRecap.revealedBids || []).map((record) => ({
+        ...record,
+        playerName: getAuctionPlayer(draft, record.playerId)?.name || "Unknown"
+      }))
+    } : null,
     currentNomination: nomination ? {
       type: nomination.type,
       isSpeakerOrder: Boolean(nomination.isSpeakerOrder),
@@ -1641,9 +1655,22 @@ function resolveAuctionBids(draft) {
       ...record,
       itemOrder: index + 1
     }));
+    draft.auction.lastBidRecap = {
+      type: nomination.type,
+      isSpeakerOrder: true,
+      pickOrder: nomination.pickOrder,
+      revealedBids: nomination.revealedBids
+    };
     finishAuctionSpeakerOrder(draft, nomination.pickOrder);
     return;
   }
+
+  draft.auction.lastBidRecap = {
+    type: nomination.type,
+    isSpeakerOrder: Boolean(nomination.isSpeakerOrder),
+    pickOrder: nomination.pickOrder,
+    revealedBids: nomination.revealedBids
+  };
 
   draft.auction.stage = "picking";
 }
@@ -2129,6 +2156,7 @@ async function handleAuctionNominate(roomNumber, request, response) {
   }
 
   pushAuctionUndo(draft);
+  draft.auction.lastBidRecap = null;
   draft.auction.currentNomination = createAuctionNomination(
     type,
     drawAuctionItems(draft, type, drawCount),

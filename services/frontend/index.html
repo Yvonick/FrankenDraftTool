@@ -170,6 +170,22 @@
         align-items: stretch;
       }
 
+      .settings-sections {
+        display: grid;
+        gap: 1rem;
+      }
+
+      .settings-section {
+        display: grid;
+        gap: 0.6rem;
+      }
+
+      .settings-section h4 {
+        margin: 0;
+        color: #b7d7c0;
+        font-size: 0.95rem;
+      }
+
       .item-grid,
       .reveal-grid {
         width: 100%;
@@ -998,49 +1014,70 @@
 
       <section class="panel" id="creator-panel" hidden>
         <h3>Room Settings</h3>
-        <div class="settings-grid">
-          <label>
-            Seat limit
-            <input id="seat-limit-input" type="number" min="1" max="12" step="1">
-          </label>
-          <label>
-            Draft pool
-            <select id="pool-select"></select>
-          </label>
-          <label>
-            Draft method
-            <select id="draft-method-select"></select>
-          </label>
-          <label>
-            Picks per bag
-            <input id="picks-per-bag-input" type="number" min="1" max="8" step="1">
-          </label>
-          <label id="auction-speaker-mode-label">
-            Speaker order
-            <select id="auction-speaker-mode-select">
-              <option value="none">No speaker bid</option>
-              <option value="autopick">Autopick speaker</option>
-              <option value="bid-and-pick">Bid and pick speaker</option>
-            </select>
-          </label>
+        <div class="settings-sections">
+          <section class="settings-section">
+            <h4>Draft</h4>
+            <div class="settings-grid">
+              <label>
+                Draft method
+                <select id="draft-method-select"></select>
+              </label>
+              <label>
+                Draft pool
+                <select id="pool-select"></select>
+              </label>
+              <label>
+                Seat limit
+                <input id="seat-limit-input" type="number" min="1" max="12" step="1">
+              </label>
+            </div>
+          </section>
+          <section class="settings-section" id="bag-settings-section">
+            <h4>Bag Draft</h4>
+            <div class="settings-grid">
+              <label>
+                Picks per bag
+                <input id="picks-per-bag-input" type="number" min="1" max="8" step="1">
+              </label>
+            </div>
+          </section>
+          <section class="settings-section" id="auction-settings-section">
+            <h4>Nomination Auction</h4>
+            <div class="settings-grid">
+              <label id="auction-speaker-mode-label">
+                Speaker order
+                <select id="auction-speaker-mode-select">
+                  <option value="none">No speaker bid</option>
+                  <option value="autopick">Autopick speaker</option>
+                  <option value="bid-and-pick">Bid and pick speaker</option>
+                </select>
+              </label>
+            </div>
+          </section>
+          <section class="settings-section">
+            <h4>Pool</h4>
+            <div class="pool-upload">
+              <label class="pool-upload-drop" id="pool-upload-drop">
+                <span id="pool-upload-label">Drop JSON or choose file</span>
+                <input id="pool-upload-input" type="file" accept=".json,application/json">
+              </label>
+            </div>
+            <div class="settings-grid">
+              <label class="toggle-row">
+                <input id="pool-save-input" type="checkbox">
+                Save this pool
+              </label>
+              <label id="pool-save-name-label">
+                Pool name
+                <input id="pool-save-name-input" maxlength="80">
+              </label>
+            </div>
+          </section>
+          <section class="settings-section">
+            <h4>Item Counts</h4>
+            <div class="settings-grid" id="item-type-settings"></div>
+          </section>
         </div>
-        <div class="pool-upload">
-          <label class="pool-upload-drop" id="pool-upload-drop">
-            <span id="pool-upload-label">Drop JSON or choose file</span>
-            <input id="pool-upload-input" type="file" accept=".json,application/json">
-          </label>
-        </div>
-        <div class="settings-grid">
-          <label class="toggle-row">
-            <input id="pool-save-input" type="checkbox">
-            Save this pool
-          </label>
-          <label>
-            Pool name
-            <input id="pool-save-name-input" maxlength="80">
-          </label>
-        </div>
-        <div class="settings-grid" id="item-type-settings"></div>
         <div class="actions">
           <button id="save-room-settings" type="button">Save Settings</button>
           <button id="start-draft" type="button">Start Draft</button>
@@ -1194,8 +1231,11 @@
       const poolUploadInput = document.querySelector("#pool-upload-input");
       const poolUploadLabel = document.querySelector("#pool-upload-label");
       const poolSaveInput = document.querySelector("#pool-save-input");
+      const poolSaveNameLabel = document.querySelector("#pool-save-name-label");
       const poolSaveNameInput = document.querySelector("#pool-save-name-input");
       const picksPerBagInput = document.querySelector("#picks-per-bag-input");
+      const bagSettingsSection = document.querySelector("#bag-settings-section");
+      const auctionSettingsSection = document.querySelector("#auction-settings-section");
       const auctionSpeakerModeLabel = document.querySelector("#auction-speaker-mode-label");
       const auctionSpeakerModeSelect = document.querySelector("#auction-speaker-mode-select");
       const itemTypeSettings = document.querySelector("#item-type-settings");
@@ -1701,8 +1741,12 @@
         return ["none", "autopick", "bid-and-pick"].includes(value) ? value : "bid-and-pick";
       }
 
-      function updateAuctionSpeakerModeVisibility() {
-        auctionSpeakerModeLabel.hidden = !selectedMethodIsAuction();
+      function updateDraftSettingsVisibility() {
+        const isAuction = selectedMethodIsAuction();
+        bagSettingsSection.hidden = isAuction;
+        auctionSettingsSection.hidden = !isAuction;
+        auctionSpeakerModeLabel.hidden = !isAuction;
+        poolSaveNameLabel.hidden = !poolSaveInput.checked;
       }
 
       function renderTypeInputs(pool, values) {
@@ -1749,10 +1793,10 @@
           renderDraftMethodOptions(method?.id || null);
           picksPerBagInput.value = settings.picksPerBag;
           auctionSpeakerModeSelect.value = auctionSpeakerModeValue(settings.auctionSpeakerMode);
-          updateAuctionSpeakerModeVisibility();
           itemTypeSettings.replaceChildren();
           poolSaveInput.checked = false;
           poolSaveNameInput.value = "";
+          updateDraftSettingsVisibility();
           settingsInitialized = true;
           return;
         }
@@ -1764,10 +1808,10 @@
         seatLimitInput.value = settings.maxSeats ?? pool.defaultParameters.maxSeats;
         picksPerBagInput.value = settings.picksPerBag;
         auctionSpeakerModeSelect.value = auctionSpeakerModeValue(settings.auctionSpeakerMode ?? pool.defaultParameters.auctionSpeakerMode);
-        updateAuctionSpeakerModeVisibility();
         poolSaveInput.checked = false;
         poolSaveNameInput.value = pool.name;
         renderTypeInputs(pool, settings.itemsPerType);
+        updateDraftSettingsVisibility();
         settingsInitialized = true;
       }
 
@@ -1841,10 +1885,10 @@
           seatLimitInput.value = data.pool.defaultParameters.maxSeats;
           picksPerBagInput.value = data.pool.defaultParameters.picksPerBag;
           auctionSpeakerModeSelect.value = auctionSpeakerModeValue(data.pool.defaultParameters.auctionSpeakerMode);
-          updateAuctionSpeakerModeVisibility();
           poolSaveInput.checked = false;
           poolSaveNameInput.value = data.pool.name;
           renderTypeInputs(data.pool, data.pool.defaultParameters.itemsPerType);
+          updateDraftSettingsVisibility();
           poolUploadLabel.textContent = `${data.pool.name} uploaded`;
           roomMessage.textContent = "Pool uploaded and selected. Save settings to use it for this room.";
         } catch (error) {
@@ -3002,19 +3046,21 @@
       }
 
       function renderAuctionBidRecap(auction) {
-        const nomination = auction.currentNomination;
-        const bids = nomination?.revealedBids || [];
+        const recap = auction.currentNomination?.revealedBids?.length
+          ? auction.currentNomination
+          : auction.lastBidRecap;
+        const bids = recap?.revealedBids || [];
 
         if (bids.length === 0) {
           return;
         }
 
-        const pickByPlayer = new Map((nomination.pickOrder || []).map((record) => [record.playerId, record]));
+        const pickByPlayer = new Map((recap.pickOrder || []).map((record) => [record.playerId, record]));
         const showSecond = auction.players.length >= 5;
         const wrapper = document.createElement("div");
         wrapper.className = "auction-player-card auction-bid-recap";
         const title = document.createElement("strong");
-        title.textContent = "Bids recap";
+        title.textContent = `${recap.isSpeakerOrder ? "Speaker order" : recap.type} bids recap`;
         const table = document.createElement("table");
         const thead = document.createElement("thead");
         const headRow = document.createElement("tr");
@@ -3772,15 +3818,16 @@
         seatLimitInput.value = pool.defaultParameters.maxSeats;
         picksPerBagInput.value = pool.defaultParameters.picksPerBag;
         auctionSpeakerModeSelect.value = auctionSpeakerModeValue(pool.defaultParameters.auctionSpeakerMode);
-        updateAuctionSpeakerModeVisibility();
         poolSaveNameInput.value = pool.name;
         renderTypeInputs(pool, pool.defaultParameters.itemsPerType);
+        updateDraftSettingsVisibility();
       });
 
       draftMethodSelect.addEventListener("change", () => {
         const pool = poolById(poolSelect.value);
 
         if (!pool) {
+          updateDraftSettingsVisibility();
           return;
         }
 
@@ -3791,8 +3838,10 @@
         }
 
         renderTypeInputs(pool, currentValues);
-        updateAuctionSpeakerModeVisibility();
+        updateDraftSettingsVisibility();
       });
+
+      poolSaveInput.addEventListener("change", updateDraftSettingsVisibility);
 
       poolUploadInput.addEventListener("change", () => {
         uploadPoolFile(poolUploadInput.files?.[0]);
