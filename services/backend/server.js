@@ -156,6 +156,7 @@ function createRoom() {
 
   rooms.set(roomNumber, {
     creatorToken: crypto.randomUUID(),
+    creatorId: null,
     maxSeats: draftSettings.maxSeats,
     draftSettings,
     draft: null,
@@ -166,13 +167,18 @@ function createRoom() {
   return roomNumber;
 }
 
+function isRoomHost(room, participantId) {
+  return Boolean(room.creatorId && String(participantId || "") === room.creatorId);
+}
+
 function getSeatedParticipants(room) {
   return [...room.participants.values()]
     .filter((participant) => participant.role === "seated")
     .map((participant) => ({
       id: participant.id,
       name: participant.name,
-      admin: Boolean(participant.admin)
+      admin: Boolean(participant.admin),
+      host: isRoomHost(room, participant.id)
     }));
 }
 
@@ -188,6 +194,7 @@ function getRoomViewerSnapshot(room, viewerId) {
     role: viewer.role,
     name: viewer.name,
     admin: Boolean(viewer.admin),
+    host: isRoomHost(room, viewer.id),
     superSpectator: viewer.role === "spectator" && Boolean(viewer.superSpectator)
   };
 }
@@ -227,7 +234,8 @@ function getRoomSnapshot(roomNumber, viewerId = null) {
         id: participant.id,
         name: participant.name,
         superSpectator: Boolean(participant.superSpectator),
-        admin: Boolean(participant.admin)
+        admin: Boolean(participant.admin),
+        host: isRoomHost(room, participant.id)
       })),
     viewer: getRoomViewerSnapshot(room, viewerId),
     draft: getDraftSnapshot(room, viewerId)
@@ -832,6 +840,12 @@ function handleRoomStream(roomNumber, url, request, response) {
   const participantId = getParticipantId(url.searchParams.get("participantId"));
   const connectionToken = crypto.randomUUID();
   const existingParticipant = room.participants.get(participantId);
+  const hasCreatorToken = url.searchParams.get("creatorToken") === room.creatorToken;
+
+  if (hasCreatorToken && (!room.creatorId || !room.participants.has(room.creatorId) || room.creatorId === participantId)) {
+    room.creatorId = participantId;
+  }
+
   const requestedRole = url.searchParams.get("role") === "seated" ? "seated" : "spectator";
   const draftPlayer = room.draft?.players.find((player) => player.id === participantId);
   const currentlySeated = existingParticipant?.role === "seated";
@@ -857,7 +871,7 @@ function handleRoomStream(roomNumber, url, request, response) {
     role,
     name,
     superSpectator: role === "spectator" && Boolean(existingParticipant?.superSpectator),
-    admin: Boolean(existingParticipant?.admin),
+    admin: isRoomHost(room, participantId) ? false : Boolean(existingParticipant?.admin),
     connectionToken
   });
   room.clients.set(response, { participantId });
@@ -868,7 +882,8 @@ function handleRoomStream(roomNumber, url, request, response) {
     name,
     seatDenied,
     superSpectator: role === "spectator" && Boolean(existingParticipant?.superSpectator),
-    admin: Boolean(existingParticipant?.admin)
+    admin: isRoomHost(room, participantId) ? false : Boolean(existingParticipant?.admin),
+    host: isRoomHost(room, participantId)
   })}\n\n`);
   broadcastRoom(roomNumber);
 
@@ -963,6 +978,7 @@ function getTablePlayerSnapshot(player, room) {
     name: player.name,
     seat: player.seat,
     admin: Boolean(participant?.admin),
+    host: isRoomHost(room, player.id),
     queueLength: player.queue.length,
     lookingAtBag: Boolean(player.queue[0]),
     credits: player.credits,
@@ -994,16 +1010,19 @@ function getPlayerDraftView(player, draft, includeCurrentBag) {
   };
 }
 
-function getAuctionPlayerSnapshot(player, draft, viewerId) {
+function getAuctionPlayerSnapshot(player, draft, viewerId, room = null) {
   const nomination = draft.auction.currentNomination;
   const pickRecord = nomination?.pickOrder?.find((record) => record.playerId === player.id);
   const revealedBids = nomination?.revealedBids?.find((record) => record.playerId === player.id);
   const isViewer = player.id === viewerId;
+  const participant = room?.participants.get(player.id);
 
   return {
     playerId: player.id,
     name: player.name,
     seat: player.seat,
+    admin: Boolean(participant?.admin),
+    host: room ? isRoomHost(room, player.id) : Boolean(player.host),
     credits: player.credits,
     mulliganTokens: player.mulliganTokens,
     banTokens: player.banTokens,
@@ -1020,7 +1039,7 @@ function getAuctionPlayerSnapshot(player, draft, viewerId) {
   };
 }
 
-function getAuctionSnapshot(draft, viewerId) {
+function getAuctionSnapshot(draft, viewerId, room = null) {
   const speaker = getAuctionSpeaker(draft);
   const nomination = draft.auction.currentNomination;
   const viewerPlayer = getAuctionPlayer(draft, viewerId);
@@ -1054,7 +1073,7 @@ function getAuctionSnapshot(draft, viewerId) {
     nominationsByType: draft.auction.nominationsByType,
     permanentBinCount: draft.auction.permanentBin.length,
     permanentBinItems: draft.auction.permanentBin.map(getItemSnapshot),
-    players: draft.players.map((player) => getAuctionPlayerSnapshot(player, draft, viewerId)),
+    players: draft.players.map((player) => getAuctionPlayerSnapshot(player, draft, viewerId, room)),
     currentNomination: nomination ? {
       type: nomination.type,
       isSpeakerOrder: Boolean(nomination.isSpeakerOrder),
@@ -1149,10 +1168,10 @@ function getDraftSnapshot(room, viewerId) {
     currentPlayer: draft.engine === "auction" ? null : (player ? getPlayerDraftView(player, draft, true) : null),
     superSpectator: isSuperSpectator ? {
       players: draft.engine === "auction"
-        ? draft.players.map((candidate) => getAuctionPlayerSnapshot(candidate, draft, viewerId))
+        ? draft.players.map((candidate) => getAuctionPlayerSnapshot(candidate, draft, viewerId, room))
         : draft.players.map((candidate) => getPlayerDraftView(candidate, draft, true))
     } : null,
-    auction: draft.engine === "auction" ? getAuctionSnapshot(draft, viewerId) : null
+    auction: draft.engine === "auction" ? getAuctionSnapshot(draft, viewerId, room) : null
   };
 }
 
@@ -1354,6 +1373,12 @@ function returnAuctionItems(draft, type, items) {
   }
 
   draft.auction.itemSources[type].push(...shuffle(items));
+}
+
+function shuffleAuctionItemSources(draft) {
+  for (const [type, items] of Object.entries(draft.auction.itemSources || {})) {
+    draft.auction.itemSources[type] = shuffle(items);
+  }
 }
 
 function getAuctionWildcardItem(nomination) {
@@ -1848,6 +1873,12 @@ async function handleParticipantAdmin(roomNumber, request, response) {
     return;
   }
 
+  if (isRoomHost(room, participant.id)) {
+    participant.admin = false;
+    sendJson(response, 409, { error: "host_cannot_be_admin" });
+    return;
+  }
+
   participant.admin = Boolean(body.admin);
   broadcastRoom(roomNumber);
   sendJson(response, 200, getRoomSnapshot(roomNumber, body.viewerId || body.actorId));
@@ -2307,6 +2338,34 @@ async function handleAuctionUndo(roomNumber, request, response) {
   sendJson(response, 200, getRoomSnapshot(roomNumber, body.viewerId || body.actorId || body.participantId));
 }
 
+async function handleAuctionShufflePool(roomNumber, request, response) {
+  const active = getActiveAuctionDraft(roomNumber, response);
+
+  if (!active) {
+    return;
+  }
+
+  let body;
+
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return;
+  }
+
+  const { room, draft } = active;
+
+  if (!hasRoomAdminRights(room, body)) {
+    sendAdminRequired(response);
+    return;
+  }
+
+  pushAuctionUndo(draft);
+  shuffleAuctionItemSources(draft);
+  sendAuctionSnapshot(roomNumber, room, response, body.viewerId || body.actorId || body.participantId);
+}
+
 async function handleAuctionBid(roomNumber, request, response) {
   const active = getActiveAuctionDraft(roomNumber, response);
 
@@ -2531,6 +2590,11 @@ const server = http.createServer(async (request, response) => {
 
     if (action === "undo") {
       await handleAuctionUndo(roomNumber, request, response);
+      return;
+    }
+
+    if (action === "shuffle-pool") {
+      await handleAuctionShufflePool(roomNumber, request, response);
       return;
     }
 

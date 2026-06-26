@@ -564,6 +564,23 @@
         font-size: 0.82rem;
       }
 
+      .participant-badge {
+        display: inline-flex;
+        align-items: center;
+        width: fit-content;
+        margin-left: 0.35rem;
+        padding: 0.1rem 0.4rem;
+        border-radius: 0.35rem;
+        font-size: 0.72rem;
+        font-weight: 800;
+        vertical-align: middle;
+      }
+
+      .host-badge {
+        background: #d8cfbd;
+        color: #111316;
+      }
+
       .participant-line {
         display: grid;
         gap: 0.35rem;
@@ -1322,6 +1339,7 @@
           item.className = "participant-line";
           const name = document.createElement("strong");
           name.textContent = player.name;
+          appendHostBadge(name, player);
           const status = document.createElement("span");
           status.textContent = participantStatus(player, "Seated");
           item.append(name, status);
@@ -2207,10 +2225,23 @@
         };
       }
 
+      function appendHostBadge(container, participant) {
+        if (!participant?.host) {
+          return;
+        }
+
+        const badge = document.createElement("span");
+        badge.className = "participant-badge host-badge";
+        badge.textContent = "Host";
+        container.append(badge);
+      }
+
       function participantStatus(participant, fallback) {
         const labels = [fallback];
 
-        if (participant.admin) {
+        if (participant.host) {
+          labels.push("Host");
+        } else if (participant.admin) {
           labels.push("Admin");
         }
 
@@ -2222,7 +2253,7 @@
       }
 
       function appendAdminAction(container, participant) {
-        if (!hasHostRights() || !participant?.id) {
+        if (!hasHostRights() || !participant?.id || participant.host) {
           return;
         }
 
@@ -2258,6 +2289,7 @@
           card.className = "spectator-card";
           const name = document.createElement("strong");
           name.textContent = spectator.name;
+          appendHostBadge(name, spectator);
           const status = document.createElement("span");
           status.textContent = participantStatus(spectator, "Spectator");
           card.append(name, status);
@@ -2307,8 +2339,9 @@
           card.style.setProperty("--y", `${50 + Math.sin(angle) * 38}%`);
           const name = document.createElement("strong");
           name.textContent = player.name;
+          appendHostBadge(name, player);
           const seat = document.createElement("span");
-          seat.textContent = `${player.admin ? "Admin / " : ""}Seat ${player.seat}`;
+          seat.textContent = `${player.host ? "Host / " : (player.admin ? "Admin / " : "")}Seat ${player.seat}`;
           const queue = document.createElement("span");
           queue.textContent = draft.engine === "auction"
             ? `${player.credits} credits`
@@ -2523,6 +2556,7 @@
           ].filter(Boolean).join(" ");
           const name = document.createElement("strong");
           name.append(player.name);
+          appendHostBadge(name, player);
 
           if (player.isSpeaker) {
             const speakerBadge = document.createElement("span");
@@ -2816,6 +2850,19 @@
         auctionControls.append(button);
       }
 
+      function renderAuctionShufflePoolControl() {
+        if (!hasHostRights()) {
+          return;
+        }
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary";
+        button.textContent = "Shuffle Pool";
+        button.addEventListener("click", shuffleAuctionPool);
+        auctionControls.append(button);
+      }
+
       function renderAuctionBanControls(auction) {
         const nomination = auction.currentNomination;
 
@@ -2998,6 +3045,7 @@
         renderAuctionStage(auction);
         auctionControls.replaceChildren();
         renderAuctionUndoControl(auction);
+        renderAuctionShufflePoolControl();
         renderAuctionPlayers(auction);
         renderAuctionBins(auction);
         renderAuctionItems(auction);
@@ -3186,6 +3234,11 @@
           role,
           participantId: currentViewerId
         });
+        const creatorToken = sessionStorage.getItem(storageKey(currentRoomNumber, "creatorToken"));
+
+        if (creatorToken) {
+          params.set("creatorToken", creatorToken);
+        }
 
         if (name) {
           params.set("name", name);
@@ -3444,7 +3497,9 @@
         const data = await response.json();
 
         if (!response.ok) {
-          roomMessage.textContent = "Could not update admin permissions.";
+          roomMessage.textContent = data.error === "host_cannot_be_admin"
+            ? "The host already has host rights."
+            : "Could not update admin permissions.";
           return;
         }
 
@@ -3477,6 +3532,27 @@
         auctionPendingBids = null;
         renderRoom(data);
         roomMessage.textContent = "Last auction action undone.";
+      }
+
+      async function shuffleAuctionPool() {
+        const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/auction/shuffle-pool`), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(hostPayload({
+            participantId: currentViewerId
+          }))
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          roomMessage.textContent = "Could not shuffle the auction pool.";
+          return;
+        }
+
+        renderRoom(data);
+        roomMessage.textContent = "Auction pool shuffled.";
       }
 
       function filenameFromDisposition(disposition) {
