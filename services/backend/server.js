@@ -31,6 +31,8 @@ const nominationAuctionStartingCredits = 40;
 const nominationAuctionMulligans = 2;
 const nominationAuctionBans = 1;
 const auctionUndoLimit = 30;
+const defaultAuctionSpeakerMode = "bid-and-pick";
+const auctionSpeakerModes = new Set(["none", "autopick", "bid-and-pick"]);
 
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, {
@@ -130,6 +132,7 @@ function defaultDraftSettings() {
       methodId: method.id,
       maxSeats: defaultSeatLimit,
       picksPerBag: 2,
+      auctionSpeakerMode: defaultAuctionSpeakerMode,
       typeOrder: [],
       itemsPerType: {}
     };
@@ -140,6 +143,7 @@ function defaultDraftSettings() {
     methodId: method.id,
     maxSeats: pool.defaultParameters.maxSeats,
     picksPerBag: pool.defaultParameters.picksPerBag,
+    auctionSpeakerMode: cleanAuctionSpeakerMode(pool.defaultParameters.auctionSpeakerMode),
     typeOrder: pool.defaultParameters.typeOrder,
     itemsPerType: pool.defaultParameters.itemsPerType
   };
@@ -288,6 +292,10 @@ function cleanPicksPerBag(picksPerBag) {
   }
 
   return Math.min(Math.max(parsed, 1), 8);
+}
+
+function cleanAuctionSpeakerMode(value, fallback = defaultAuctionSpeakerMode) {
+  return auctionSpeakerModes.has(value) ? value : fallback;
 }
 
 function cleanNonnegativeInteger(value, max = 9999) {
@@ -671,6 +679,9 @@ async function handleUpdatePublicPool(poolId, request, response) {
   const itemsPerType = defaultParameters.itemsPerType === undefined
     ? pool.defaultParameters.itemsPerType
     : cleanItemsPerType(pool, defaultParameters.itemsPerType);
+  const auctionSpeakerMode = defaultParameters.auctionSpeakerMode === undefined
+    ? cleanAuctionSpeakerMode(pool.defaultParameters.auctionSpeakerMode)
+    : cleanAuctionSpeakerMode(defaultParameters.auctionSpeakerMode);
 
   if (!maxSeats) {
     sendJson(response, 400, { error: "invalid_seat_limit" });
@@ -692,6 +703,7 @@ async function handleUpdatePublicPool(poolId, request, response) {
     defaultParameters: {
       maxSeats,
       picksPerBag,
+      auctionSpeakerMode,
       typeOrder,
       itemsPerType
     }
@@ -788,6 +800,9 @@ async function handleRoomSettings(roomNumber, request, response) {
   const itemsPerType = body.itemsPerType === undefined
     ? room.draftSettings.itemsPerType
     : cleanItemsPerType(pool, body.itemsPerType);
+  const auctionSpeakerMode = body.auctionSpeakerMode === undefined
+    ? cleanAuctionSpeakerMode(room.draftSettings.auctionSpeakerMode)
+    : cleanAuctionSpeakerMode(body.auctionSpeakerMode);
 
   if (!picksPerBag) {
     sendJson(response, 400, { error: "invalid_picks_per_bag" });
@@ -805,6 +820,7 @@ async function handleRoomSettings(roomNumber, request, response) {
     methodId: method.id,
     maxSeats,
     picksPerBag,
+    auctionSpeakerMode,
     typeOrder,
     itemsPerType
   };
@@ -1052,6 +1068,7 @@ function getAuctionSnapshot(draft, viewerId, room = null) {
 
   return {
     stage: draft.auction.stage,
+    speakerMode: cleanAuctionSpeakerMode(draft.auction.speakerMode),
     undoAvailable: Boolean(draft.undoStack?.length),
     speakerId: speaker?.id || null,
     speakerName: speaker?.name || null,
@@ -1140,6 +1157,7 @@ function getDraftSnapshot(room, viewerId) {
       methodId: method.id,
       method: getDraftMethodSummary(method),
       picksPerBag: draft.picksPerBag,
+      auctionSpeakerMode: cleanAuctionSpeakerMode(draft.auctionSpeakerMode),
       typeOrder: draft.typeOrder,
       itemsPerType: draft.itemsPerType,
       undoAvailable: draft.engine === "auction" && Boolean(draft.undoStack?.length),
@@ -1162,6 +1180,7 @@ function getDraftSnapshot(room, viewerId) {
     methodId: method.id,
     method: getDraftMethodSummary(method),
     picksPerBag: draft.picksPerBag,
+    auctionSpeakerMode: cleanAuctionSpeakerMode(draft.auctionSpeakerMode),
     typeOrder: draft.typeOrder,
     itemsPerType: draft.itemsPerType,
     table,
@@ -1461,6 +1480,42 @@ function startSpeakerOrderBidding(draft) {
   startAuctionBidding(draft, "speaker_order_bidding");
 }
 
+function finishAuctionSpeakerOrder(draft, records) {
+  const playerById = new Map(draft.players.map((player) => [player.id, player]));
+  const orderedRecords = [...records]
+    .filter((record) => playerById.has(record.playerId))
+    .sort((left, right) => (left.itemOrder || 999) - (right.itemOrder || 999));
+
+  draft.players = orderedRecords.map((record, index) => {
+    const player = playerById.get(record.playerId);
+    player.seat = index + 1;
+    return player;
+  });
+  draft.auction.speakerOrder = draft.players.map((player) => player.id);
+  draft.auction.speakerIndex = 0;
+  draft.auction.speakerOrderResults = orderedRecords.map((record) => ({
+    playerId: record.playerId,
+    order: record.itemOrder || null,
+    bidKind: record.bidKind,
+    bid: record.bid,
+    cost: record.cost
+  }));
+  draft.auction.currentNomination = null;
+  draft.auction.stage = "nomination";
+}
+
+function startAuctionWithRandomSpeakerOrder(draft) {
+  const records = draft.players.map((player, index) => ({
+    playerId: player.id,
+    itemOrder: index + 1,
+    bidKind: "random",
+    bid: 0,
+    cost: 0
+  }));
+
+  finishAuctionSpeakerOrder(draft, records);
+}
+
 function advanceAuctionBanWindow(draft) {
   const nomination = draft.auction.currentNomination;
 
@@ -1580,6 +1635,16 @@ function resolveAuctionBids(draft) {
     playerId: player.id,
     bids: nomination.bids[player.id]
   }));
+
+  if (nomination.isSpeakerOrder && draft.auction.speakerMode === "autopick") {
+    nomination.pickOrder = records.map((record, index) => ({
+      ...record,
+      itemOrder: index + 1
+    }));
+    finishAuctionSpeakerOrder(draft, nomination.pickOrder);
+    return;
+  }
+
   draft.auction.stage = "picking";
 }
 
@@ -1587,27 +1652,7 @@ function finishAuctionNomination(draft) {
   const nomination = draft.auction.currentNomination;
 
   if (nomination.isSpeakerOrder) {
-    const playerById = new Map(draft.players.map((player) => [player.id, player]));
-    const orderedRecords = [...nomination.pickOrder]
-      .filter((record) => playerById.has(record.playerId))
-      .sort((left, right) => (left.itemOrder || 999) - (right.itemOrder || 999));
-
-    draft.players = orderedRecords.map((record, index) => {
-      const player = playerById.get(record.playerId);
-      player.seat = index + 1;
-      return player;
-    });
-    draft.auction.speakerOrder = draft.players.map((player) => player.id);
-    draft.auction.speakerIndex = 0;
-    draft.auction.speakerOrderResults = orderedRecords.map((record) => ({
-      playerId: record.playerId,
-      order: record.itemOrder || null,
-      bidKind: record.bidKind,
-      bid: record.bid,
-      cost: record.cost
-    }));
-    draft.auction.currentNomination = null;
-    draft.auction.stage = "nomination";
+    finishAuctionSpeakerOrder(draft, nomination.pickOrder);
     return;
   }
 
@@ -1653,6 +1698,7 @@ function startBagPassingDraft(room, pool, method) {
     poolId: pool.id,
     methodId: method.id,
     picksPerBag: room.draftSettings.picksPerBag,
+    auctionSpeakerMode: cleanAuctionSpeakerMode(room.draftSettings.auctionSpeakerMode),
     typeOrder: cleanTypeOrder(pool, room.draftSettings.typeOrder),
     itemsPerType: room.draftSettings.itemsPerType,
     players,
@@ -1675,6 +1721,7 @@ function startNominationAuctionDraft(room, pool, method) {
     poolId: pool.id,
     methodId: method.id,
     picksPerBag: room.draftSettings.picksPerBag,
+    auctionSpeakerMode: cleanAuctionSpeakerMode(room.draftSettings.auctionSpeakerMode),
     typeOrder,
     itemsPerType: room.draftSettings.itemsPerType,
     players,
@@ -1682,6 +1729,7 @@ function startNominationAuctionDraft(room, pool, method) {
     undoStack: [],
     auction: {
       stage: "speaker_order_bidding",
+      speakerMode: cleanAuctionSpeakerMode(room.draftSettings.auctionSpeakerMode),
       speakerOrder: [],
       speakerIndex: 0,
       speakerOrderResults: [],
@@ -1692,7 +1740,11 @@ function startNominationAuctionDraft(room, pool, method) {
     }
   };
 
-  startSpeakerOrderBidding(room.draft);
+  if (room.draft.auction.speakerMode === "none") {
+    startAuctionWithRandomSpeakerOrder(room.draft);
+  } else {
+    startSpeakerOrderBidding(room.draft);
+  }
 }
 
 function startDraft(room) {

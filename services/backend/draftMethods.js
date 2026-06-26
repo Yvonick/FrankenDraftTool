@@ -118,7 +118,7 @@ const nominationAuctionMethod = {
       items: [
         "The room starts like a normal draft: the host selects a pool and method, the required number of players sit down, and the host starts the draft.",
         "Each player starts with 40 credits, 2 mulligan tokens, and 1 ban token.",
-        "Players first bid on speaker order. The resulting order becomes the nomination order, and the first player becomes the first speaker."
+        "Speaker order can be random, automatically assigned from a speaker-order bid, or drafted manually after the speaker-order bid. The resulting order becomes the nomination order, and the first player becomes the first speaker."
       ]
     },
     {

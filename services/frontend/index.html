@@ -1015,6 +1015,14 @@
             Picks per bag
             <input id="picks-per-bag-input" type="number" min="1" max="8" step="1">
           </label>
+          <label id="auction-speaker-mode-label">
+            Speaker order
+            <select id="auction-speaker-mode-select">
+              <option value="none">No speaker bid</option>
+              <option value="autopick">Autopick speaker</option>
+              <option value="bid-and-pick">Bid and pick speaker</option>
+            </select>
+          </label>
         </div>
         <div class="pool-upload">
           <label class="pool-upload-drop" id="pool-upload-drop">
@@ -1188,6 +1196,8 @@
       const poolSaveInput = document.querySelector("#pool-save-input");
       const poolSaveNameInput = document.querySelector("#pool-save-name-input");
       const picksPerBagInput = document.querySelector("#picks-per-bag-input");
+      const auctionSpeakerModeLabel = document.querySelector("#auction-speaker-mode-label");
+      const auctionSpeakerModeSelect = document.querySelector("#auction-speaker-mode-select");
       const itemTypeSettings = document.querySelector("#item-type-settings");
       const saveRoomSettings = document.querySelector("#save-room-settings");
       const startDraft = document.querySelector("#start-draft");
@@ -1687,6 +1697,14 @@
         return draftMethodById(draftMethodSelect.value)?.engine === "auction";
       }
 
+      function auctionSpeakerModeValue(value) {
+        return ["none", "autopick", "bid-and-pick"].includes(value) ? value : "bid-and-pick";
+      }
+
+      function updateAuctionSpeakerModeVisibility() {
+        auctionSpeakerModeLabel.hidden = !selectedMethodIsAuction();
+      }
+
       function renderTypeInputs(pool, values) {
         itemTypeSettings.replaceChildren();
         const isAuction = selectedMethodIsAuction();
@@ -1730,6 +1748,8 @@
           renderPoolOptions(null);
           renderDraftMethodOptions(method?.id || null);
           picksPerBagInput.value = settings.picksPerBag;
+          auctionSpeakerModeSelect.value = auctionSpeakerModeValue(settings.auctionSpeakerMode);
+          updateAuctionSpeakerModeVisibility();
           itemTypeSettings.replaceChildren();
           poolSaveInput.checked = false;
           poolSaveNameInput.value = "";
@@ -1743,6 +1763,8 @@
         draftMethodSelect.value = method?.id || "";
         seatLimitInput.value = settings.maxSeats ?? pool.defaultParameters.maxSeats;
         picksPerBagInput.value = settings.picksPerBag;
+        auctionSpeakerModeSelect.value = auctionSpeakerModeValue(settings.auctionSpeakerMode ?? pool.defaultParameters.auctionSpeakerMode);
+        updateAuctionSpeakerModeVisibility();
         poolSaveInput.checked = false;
         poolSaveNameInput.value = pool.name;
         renderTypeInputs(pool, settings.itemsPerType);
@@ -1761,6 +1783,7 @@
           poolId: poolSelect.value,
           methodId: draftMethodSelect.value,
           picksPerBag: Number(picksPerBagInput.value),
+          auctionSpeakerMode: auctionSpeakerModeValue(auctionSpeakerModeSelect.value),
           typeOrder: poolById(poolSelect.value)?.defaultParameters.typeOrder || [],
           itemsPerType
         };
@@ -1817,6 +1840,8 @@
           renderPoolOptions(data.pool.id);
           seatLimitInput.value = data.pool.defaultParameters.maxSeats;
           picksPerBagInput.value = data.pool.defaultParameters.picksPerBag;
+          auctionSpeakerModeSelect.value = auctionSpeakerModeValue(data.pool.defaultParameters.auctionSpeakerMode);
+          updateAuctionSpeakerModeVisibility();
           poolSaveInput.checked = false;
           poolSaveNameInput.value = data.pool.name;
           renderTypeInputs(data.pool, data.pool.defaultParameters.itemsPerType);
@@ -1920,6 +1945,22 @@
           picksInput.value = pool.defaultParameters.picksPerBag;
           picksLabel.append("Picks per bag", picksInput);
 
+          const speakerModeLabel = document.createElement("label");
+          const speakerModeSelect = document.createElement("select");
+          speakerModeSelect.dataset.poolField = "auctionSpeakerMode";
+          for (const [value, text] of [
+            ["none", "No speaker bid"],
+            ["autopick", "Autopick speaker"],
+            ["bid-and-pick", "Bid and pick speaker"]
+          ]) {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = text;
+            speakerModeSelect.append(option);
+          }
+          speakerModeSelect.value = auctionSpeakerModeValue(pool.defaultParameters.auctionSpeakerMode);
+          speakerModeLabel.append("Auction speaker order", speakerModeSelect);
+
           const typeList = document.createElement("div");
           typeList.className = "pool-type-list";
 
@@ -1957,7 +1998,7 @@
           removeButton.dataset.poolAction = "remove";
           removeButton.textContent = "Remove";
           actions.append(saveButton, removeButton);
-          card.append(header, nameLabel, seatsLabel, picksLabel, typeList, actions);
+          card.append(header, nameLabel, seatsLabel, picksLabel, speakerModeLabel, typeList, actions);
           publicPoolsList.append(card);
         }
       }
@@ -1974,6 +2015,7 @@
           defaultParameters: {
             maxSeats: Number(card.querySelector("input[data-pool-field='seats']").value),
             picksPerBag: Number(card.querySelector("input[data-pool-field='picks']").value),
+            auctionSpeakerMode: auctionSpeakerModeValue(card.querySelector("select[data-pool-field='auctionSpeakerMode']").value),
             typeOrder: [...card.querySelectorAll(".pool-type-row")].map((row) => row.dataset.itemType),
             itemsPerType
           }
@@ -3729,6 +3771,8 @@
 
         seatLimitInput.value = pool.defaultParameters.maxSeats;
         picksPerBagInput.value = pool.defaultParameters.picksPerBag;
+        auctionSpeakerModeSelect.value = auctionSpeakerModeValue(pool.defaultParameters.auctionSpeakerMode);
+        updateAuctionSpeakerModeVisibility();
         poolSaveNameInput.value = pool.name;
         renderTypeInputs(pool, pool.defaultParameters.itemsPerType);
       });
@@ -3747,6 +3791,7 @@
         }
 
         renderTypeInputs(pool, currentValues);
+        updateAuctionSpeakerModeVisibility();
       });
 
       poolUploadInput.addEventListener("change", () => {

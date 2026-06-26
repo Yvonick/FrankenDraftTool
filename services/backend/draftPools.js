@@ -31,6 +31,8 @@ function loadAssetOverrides() {
 
 const assetOverrides = loadAssetOverrides();
 const speakerOrderType = "Speaker Order";
+const defaultAuctionSpeakerMode = "bid-and-pick";
+const auctionSpeakerModes = new Set(["none", "autopick", "bid-and-pick"]);
 const systemTileMeshUrls = new Set([
   "https://steamusercontent-a.akamaihd.net/ugc/1495712136739988324/528952D008E642AAC461C7B53CFD1CBE16C62F15/",
   "https://steamusercontent-a.akamaihd.net/ugc/1499090116261708296/E6C28AF3C9C63950CA6BE177DB5AC6E4A6EA8575/"
@@ -439,6 +441,9 @@ function normalizeDefaultParameters(pool, parameters = {}) {
   const picksPerBag = Number.isInteger(parsedPicksPerBag)
     ? Math.min(Math.max(parsedPicksPerBag, 1), 8)
     : 2;
+  const auctionSpeakerMode = auctionSpeakerModes.has(parameters.auctionSpeakerMode)
+    ? parameters.auctionSpeakerMode
+    : defaultAuctionSpeakerMode;
   const requestedTypeOrder = Array.isArray(parameters.typeOrder)
     ? parameters.typeOrder.map((type) => (isSpeakerOrderType(type) ? speakerOrderType : type))
     : [];
@@ -462,6 +467,7 @@ function normalizeDefaultParameters(pool, parameters = {}) {
   return {
     maxSeats,
     picksPerBag,
+    auctionSpeakerMode,
     typeOrder,
     itemsPerType
   };
