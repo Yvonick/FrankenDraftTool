@@ -171,19 +171,76 @@
       }
 
       .settings-sections {
+        width: 100%;
         display: grid;
+        grid-template-columns: repeat(12, minmax(0, 1fr));
         gap: 1rem;
+        align-items: start;
       }
 
       .settings-section {
+        min-width: 0;
         display: grid;
         gap: 0.6rem;
+        align-content: start;
+        grid-column: span 4;
       }
 
       .settings-section h4 {
         margin: 0;
         color: #b7d7c0;
         font-size: 0.95rem;
+      }
+
+      .settings-section-draft {
+        grid-column: span 5;
+      }
+
+      .settings-section-format {
+        grid-column: span 3;
+      }
+
+      .settings-section-pool {
+        grid-column: span 4;
+      }
+
+      .settings-section-counts {
+        grid-column: 1 / -1;
+      }
+
+      #creator-panel {
+        justify-items: stretch;
+        text-align: left;
+      }
+
+      #creator-panel > h3 {
+        text-align: center;
+      }
+
+      #item-type-settings {
+        grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+      }
+
+      @media (max-width: 980px) {
+        .settings-section-draft,
+        .settings-section-format,
+        .settings-section-pool {
+          grid-column: span 6;
+        }
+      }
+
+      @media (max-width: 680px) {
+        .settings-sections {
+          grid-template-columns: 1fr;
+        }
+
+        .settings-section,
+        .settings-section-draft,
+        .settings-section-format,
+        .settings-section-pool,
+        .settings-section-counts {
+          grid-column: 1;
+        }
       }
 
       .item-grid,
@@ -1015,7 +1072,7 @@
       <section class="panel" id="creator-panel" hidden>
         <h3>Room Settings</h3>
         <div class="settings-sections">
-          <section class="settings-section">
+          <section class="settings-section settings-section-draft">
             <h4>Draft</h4>
             <div class="settings-grid">
               <label>
@@ -1032,7 +1089,7 @@
               </label>
             </div>
           </section>
-          <section class="settings-section" id="bag-settings-section">
+          <section class="settings-section settings-section-format" id="bag-settings-section">
             <h4>Bag Draft</h4>
             <div class="settings-grid">
               <label>
@@ -1041,7 +1098,7 @@
               </label>
             </div>
           </section>
-          <section class="settings-section" id="auction-settings-section">
+          <section class="settings-section settings-section-format" id="auction-settings-section">
             <h4>Nomination Auction</h4>
             <div class="settings-grid">
               <label id="auction-speaker-mode-label">
@@ -1054,7 +1111,7 @@
               </label>
             </div>
           </section>
-          <section class="settings-section">
+          <section class="settings-section settings-section-pool">
             <h4>Pool</h4>
             <div class="pool-upload">
               <label class="pool-upload-drop" id="pool-upload-drop">
@@ -1073,7 +1130,7 @@
               </label>
             </div>
           </section>
-          <section class="settings-section">
+          <section class="settings-section settings-section-counts">
             <h4>Item Counts</h4>
             <div class="settings-grid" id="item-type-settings"></div>
           </section>
