@@ -654,6 +654,96 @@
         color: var(--accent-2);
       }
 
+      .draft-panel-grid {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 0.8fr);
+        gap: 1rem;
+        align-items: start;
+      }
+
+      .draft-subpanel {
+        min-width: 0;
+        display: grid;
+        gap: 0.75rem;
+        align-content: start;
+        justify-items: stretch;
+        padding: 0.85rem;
+        border: 1px solid var(--line);
+        border-radius: 0.5rem;
+        background: rgb(3 12 27 / 0.62);
+        text-align: left;
+      }
+
+      .draft-section-header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .draft-section-header h4 {
+        color: var(--accent-2);
+      }
+
+      .checklist-control {
+        position: relative;
+        width: fit-content;
+        justify-self: end;
+      }
+
+      .checklist-control button {
+        min-height: 2.2rem;
+        padding: 0 0.75rem;
+      }
+
+      .draft-checklist-popover {
+        width: min(18rem, calc(100vw - 2rem));
+        position: absolute;
+        right: 0;
+        top: calc(100% + 0.45rem);
+        z-index: 30;
+        display: grid;
+        gap: 0.35rem;
+        padding: 0.75rem;
+        border: 1px solid var(--line-strong);
+        border-radius: 0.5rem;
+        background: linear-gradient(180deg, rgb(9 23 42 / 0.98), rgb(3 9 21 / 0.98));
+        box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 0.5);
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-0.2rem);
+        transition: opacity 0.12s ease, transform 0.12s ease;
+      }
+
+      .checklist-control:hover .draft-checklist-popover,
+      .checklist-control:focus-within .draft-checklist-popover {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateY(0);
+      }
+
+      .checklist-row {
+        display: flex;
+        gap: 0.75rem;
+        align-items: baseline;
+        justify-content: space-between;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      .checklist-row strong {
+        color: var(--text);
+        font-size: 0.92rem;
+        overflow-wrap: anywhere;
+      }
+
+      .checklist-row span {
+        color: var(--accent-2);
+        white-space: nowrap;
+      }
+
       .spectator-card {
         display: grid;
         gap: 0.4rem;
@@ -715,6 +805,10 @@
 
       @media (max-width: 760px) {
         .room-overview {
+          grid-template-columns: 1fr;
+        }
+
+        .draft-panel-grid {
           grid-template-columns: 1fr;
         }
 
@@ -1227,11 +1321,26 @@
 
       <section class="panel" id="player-draft-panel" hidden>
         <h3>Your Draft</h3>
-        <p id="draft-instruction"></p>
-        <div class="item-grid" id="current-bag"></div>
+        <div class="draft-panel-grid">
+          <section class="draft-subpanel">
+            <div class="draft-section-header">
+              <h4>Current Bag</h4>
+            </div>
+            <p id="draft-instruction"></p>
+            <div class="item-grid" id="current-bag"></div>
+          </section>
+          <section class="draft-subpanel">
+            <div class="draft-section-header">
+              <h4>Drafted Items</h4>
+              <div class="checklist-control">
+                <button id="draft-checklist-button" class="secondary" type="button">Checklist</button>
+                <div class="draft-checklist-popover" id="draft-checklist"></div>
+              </div>
+            </div>
+            <div class="item-grid" id="private-drafted-items"></div>
+          </section>
+        </div>
         <button id="lock-choice" type="button">Lock Choices</button>
-        <h4>Drafted Items</h4>
-        <div class="item-grid" id="private-drafted-items"></div>
       </section>
 
       <section class="panel" id="auction-panel" hidden>
@@ -1361,6 +1470,7 @@
       const currentBag = document.querySelector("#current-bag");
       const lockChoice = document.querySelector("#lock-choice");
       const privateDraftedItems = document.querySelector("#private-drafted-items");
+      const draftChecklist = document.querySelector("#draft-checklist");
       const auctionPanel = document.querySelector("#auction-panel");
       const auctionStage = document.querySelector("#auction-stage");
       const auctionPlayers = document.querySelector("#auction-players");
@@ -1402,6 +1512,8 @@
       let auctionBidKey = "";
       let auctionPendingBids = null;
       let currentBagId = null;
+      let previousDraftStatus = null;
+      let audioContext = null;
       let pendingConfirmation = null;
       let draggedPoolTypeRow = null;
 
@@ -1431,6 +1543,62 @@
         sessionStorage.setItem(key, id);
         return id;
       }
+
+      function ensureAudioContext() {
+        if (!window.AudioContext && !window.webkitAudioContext) {
+          return null;
+        }
+
+        if (!audioContext) {
+          const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+          audioContext = new AudioContextConstructor();
+        }
+
+        return audioContext;
+      }
+
+      function unlockAudioContext() {
+        const context = ensureAudioContext();
+
+        if (context?.state === "suspended") {
+          context.resume().catch(() => {});
+        }
+      }
+
+      function playBagChime() {
+        const context = ensureAudioContext();
+
+        if (!context) {
+          return;
+        }
+
+        const play = () => {
+          const now = context.currentTime;
+          const gain = context.createGain();
+          gain.gain.setValueAtTime(0.0001, now);
+          gain.gain.exponentialRampToValueAtTime(0.035, now + 0.025);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.72);
+          gain.connect(context.destination);
+
+          for (const [frequency, delay] of [[880, 0], [1174.66, 0.14]]) {
+            const oscillator = context.createOscillator();
+            oscillator.type = "sine";
+            oscillator.frequency.setValueAtTime(frequency, now + delay);
+            oscillator.connect(gain);
+            oscillator.start(now + delay);
+            oscillator.stop(now + delay + 0.46);
+          }
+        };
+
+        if (context.state === "suspended") {
+          context.resume().then(play).catch(() => {});
+        } else {
+          play();
+        }
+      }
+
+      document.addEventListener("pointerdown", unlockAudioContext, { once: true });
+      document.addEventListener("keydown", unlockAudioContext, { once: true });
 
       async function fetchPools(options = {}) {
         if (pools.length > 0 && !options.force) {
@@ -1757,7 +1925,9 @@
           wrapper.className = "group-section";
           setGroupBasis(wrapper, section.items.length);
           const title = document.createElement("h4");
-          title.textContent = section.label;
+          title.textContent = options.titleForType
+            ? options.titleForType(section.label)
+            : section.label;
           const stack = document.createElement("div");
           stack.className = "item-stack";
 
@@ -1770,7 +1940,7 @@
         }
       }
 
-      function renderGroupedItems(container, items, groups = []) {
+      function renderGroupedItems(container, items, groups = [], options = {}) {
         container.replaceChildren();
 
         if (items.length === 0) {
@@ -1789,13 +1959,18 @@
           wrapper.className = "group-section";
           setGroupBasis(wrapper, section.items.length);
           const title = document.createElement("h4");
-          title.textContent = section.label;
+          title.textContent = draftGrouping.value === "pick" || !options.titleForType
+            ? section.label
+            : options.titleForType(section.label);
           const stack = document.createElement("div");
           stack.className = "item-stack";
           wrapper.append(title, stack);
 
           if (draftGrouping.value === "pick") {
-            renderTypeSections(stack, section.items);
+            renderTypeSections(stack, section.items, {
+              typeOrder: options.typeOrder,
+              titleForType: options.titleForType
+            });
           } else {
             for (const item of section.items) {
               stack.append(renderItemCard(item));
@@ -2572,7 +2747,59 @@
         return count;
       }
 
-      function renderCurrentBag(currentPlayer) {
+      function getDraftTypeProgress(player, draft) {
+        const itemsPerType = draft?.itemsPerType || {};
+        const typeOrder = [
+          ...(draft?.typeOrder || []),
+          ...Object.keys(itemsPerType).filter((type) => !(draft?.typeOrder || []).includes(type))
+        ];
+        const draftedCounts = new Map();
+
+        for (const item of player?.draftedItems || []) {
+          draftedCounts.set(item.type, (draftedCounts.get(item.type) || 0) + 1);
+        }
+
+        return typeOrder
+          .filter((type) => (itemsPerType[type] || 0) > 0)
+          .map((type) => ({
+            type,
+            drafted: draftedCounts.get(type) || 0,
+            max: itemsPerType[type] || 0
+          }));
+      }
+
+      function makeTypeProgressTitle(progress) {
+        const byType = new Map(progress.map((entry) => [entry.type, entry]));
+
+        return (type) => {
+          const entry = byType.get(type);
+          return entry ? `${type} (${entry.drafted}/${entry.max})` : type;
+        };
+      }
+
+      function renderDraftChecklist(progress) {
+        draftChecklist.replaceChildren();
+
+        if (progress.length === 0) {
+          const empty = document.createElement("p");
+          empty.textContent = "No item limits";
+          draftChecklist.append(empty);
+          return;
+        }
+
+        for (const entry of progress) {
+          const row = document.createElement("div");
+          row.className = "checklist-row";
+          const label = document.createElement("strong");
+          label.textContent = entry.type;
+          const count = document.createElement("span");
+          count.textContent = `${entry.drafted}/${entry.max}`;
+          row.append(label, count);
+          draftChecklist.append(row);
+        }
+      }
+
+      function renderCurrentBag(currentPlayer, priorDraftStatus = null) {
         currentBag.replaceChildren();
 
         if (!currentPlayer.currentBag) {
@@ -2586,6 +2813,14 @@
         const bag = currentPlayer.currentBag;
 
         if (currentBagId !== bag.id) {
+          const draftJustStarted = priorDraftStatus
+            && priorDraftStatus !== "active"
+            && latestRoom?.draft?.status === "active";
+
+          if ((currentBagId || draftJustStarted) && currentRole === "seated") {
+            playBagChime();
+          }
+
           currentBagId = bag.id;
           selectedItemIds = new Set();
         }
@@ -3269,7 +3504,7 @@
         }
       }
 
-      function renderPlayerDraft(draft) {
+      function renderPlayerDraft(draft, priorDraftStatus = null) {
         const currentPlayer = draft.currentPlayer;
         playerDraftPanel.hidden = draft.status !== "active" || draft.engine === "auction" || !currentPlayer;
 
@@ -3277,8 +3512,14 @@
           return;
         }
 
-        renderCurrentBag(currentPlayer);
-        renderGroupedItems(privateDraftedItems, currentPlayer.draftedItems, currentPlayer.draftedGroups);
+        renderCurrentBag(currentPlayer, priorDraftStatus);
+        const progress = getDraftTypeProgress(currentPlayer, draft);
+        const titleForType = makeTypeProgressTitle(progress);
+        renderDraftChecklist(progress);
+        renderGroupedItems(privateDraftedItems, currentPlayer.draftedItems, currentPlayer.draftedGroups, {
+          typeOrder: draft.typeOrder,
+          titleForType
+        });
       }
 
       function renderSuperSpectatorDraft(draft) {
@@ -3343,10 +3584,10 @@
         }
       }
 
-      function renderDraft(draft) {
+      function renderDraft(draft, priorDraftStatus = null) {
         draftDisplayPanel.hidden = draft.status === "not_started" || draft.engine === "auction";
         renderTable(draft);
-        renderPlayerDraft(draft);
+        renderPlayerDraft(draft, priorDraftStatus);
         renderAuctionDraft(draft);
         renderSuperSpectatorDraft(draft);
         renderReveal(draft);
@@ -3361,6 +3602,7 @@
       }
 
       function renderRoom(data) {
+        const priorDraftStatus = latestRoom?.draft?.status || previousDraftStatus;
         latestRoom = data;
         renderSeated(data.seated);
         roomStatus.textContent = `${data.seated.length} of ${data.maxSeats} seats filled`;
@@ -3378,7 +3620,8 @@
         startDraft.disabled = data.seated.length === 0;
         sitDown.hidden = currentRole !== "spectator" || !draftNotStarted;
         spectateRoom.hidden = currentRole !== "seated" || !draftNotStarted;
-        renderDraft(data.draft);
+        renderDraft(data.draft, priorDraftStatus);
+        previousDraftStatus = data.draft.status;
       }
 
       function openJoinModal() {
@@ -3475,6 +3718,13 @@
       }
 
       async function enterRoom(id) {
+        if (currentRoomNumber !== id) {
+          latestRoom = null;
+          currentBagId = null;
+          previousDraftStatus = null;
+          selectedItemIds = new Set();
+        }
+
         currentRoomNumber = id;
         await fetchPools();
         await fetchDraftMethods();
@@ -3821,7 +4071,6 @@
         }
 
         selectedItemIds = new Set();
-        currentBagId = null;
         renderRoom(data);
         roomMessage.textContent = "Choice locked.";
       }
