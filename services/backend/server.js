@@ -509,7 +509,7 @@ function createTtsDraftItem(item, usedGuids) {
   return null;
 }
 
-function createTtsBag(player, index, usedGuids) {
+function createTtsContainerBag({ nickname, description, containedObjects, index, usedGuids, color }) {
   return {
     GUID: createTtsGuid(usedGuids),
     Name: "Bag",
@@ -524,13 +524,13 @@ function createTtsBag(player, index, usedGuids) {
       scaleY: 1,
       scaleZ: 1
     },
-    Nickname: player.name,
-    Description: `Drafted items for ${player.name}`,
+    Nickname: nickname,
+    Description: description,
     GMNotes: "",
     AltLookAngle: { x: 0, y: 0, z: 0 },
-    ColorDiffuse: { r: 0.7058823, g: 0.366520882, b: 0 },
+    ColorDiffuse: color || { r: 0.7058823, g: 0.366520882, b: 0 },
     LayoutGroupSortIndex: 0,
-    Value: 0,
+    Value: containedObjects.length,
     Locked: false,
     Grid: false,
     Snap: true,
@@ -549,19 +549,112 @@ function createTtsBag(player, index, usedGuids) {
     LuaScript: "",
     LuaScriptState: "",
     XmlUI: "",
-    ContainedObjects: player.draftedItems
-      .flatMap((item) => getDraftItemExportItems(item)
-        .map((exportItem) => createTtsDraftItem(exportItem, usedGuids)))
-      .filter(Boolean)
+    ContainedObjects: containedObjects
   };
 }
 
+function createTtsBag(player, index, usedGuids) {
+  return createTtsContainerBag({
+    nickname: player.name,
+    description: `Drafted items for ${player.name}`,
+    index,
+    usedGuids,
+    containedObjects: player.draftedItems
+      .flatMap((item) => getDraftItemExportItems(item)
+        .map((exportItem) => createTtsDraftItem(exportItem, usedGuids)))
+      .filter(Boolean)
+  });
+}
+
+function getUsedDraftableItemIds(draft) {
+  const usedIds = new Set();
+
+  for (const player of draft.players) {
+    for (const item of player.draftedItems) {
+      usedIds.add(item.id);
+    }
+  }
+
+  for (const item of draft.discardedItems || []) {
+    usedIds.add(item.id);
+  }
+
+  for (const item of draft.auction?.permanentBin || []) {
+    usedIds.add(item.id);
+  }
+
+  return usedIds;
+}
+
+function getRemainingDraftableItems(pool, draft) {
+  const usedIds = getUsedDraftableItemIds(draft);
+
+  return pool.items.filter((item) => !usedIds.has(item.id));
+}
+
+function getRemainingItemsByType(pool, draft) {
+  const itemsByType = new Map();
+
+  for (const item of getRemainingDraftableItems(pool, draft)) {
+    if (!itemsByType.has(item.type)) {
+      itemsByType.set(item.type, []);
+    }
+
+    itemsByType.get(item.type).push(item);
+  }
+
+  return itemsByType;
+}
+
+function createTtsRemainingTypeBag(type, items, index, usedGuids) {
+  return createTtsContainerBag({
+    nickname: type,
+    description: `Remaining draftable ${type}`,
+    index,
+    usedGuids,
+    color: { r: 0.1, g: 0.28, b: 0.45 },
+    containedObjects: items
+      .map((item) => createTtsDraftItem(item, usedGuids))
+      .filter(Boolean)
+  });
+}
+
+function createTtsRemainingPoolBag(pool, draft, index, usedGuids) {
+  const itemsByType = getRemainingItemsByType(pool, draft);
+  const orderedTypes = [
+    ...pool.types.filter((type) => itemsByType.has(type)),
+    ...[...itemsByType.keys()].filter((type) => !pool.types.includes(type))
+  ];
+  const typeBags = orderedTypes
+    .map((type, typeIndex) => createTtsRemainingTypeBag(type, itemsByType.get(type), typeIndex, usedGuids))
+    .filter((bag) => bag.ContainedObjects.length > 0);
+
+  return createTtsContainerBag({
+    nickname: "Remaining Draftable Pool",
+    description: "Draftable pool items not used during this draft",
+    index,
+    usedGuids,
+    color: { r: 0.08, g: 0.16, b: 0.32 },
+    containedObjects: typeBags
+  });
+}
+
 function createTtsDraftExport(roomNumber, draft) {
+  const pool = getPool(draft.poolId);
+
+  if (!pool) {
+    return {
+      error: "pool_unavailable"
+    };
+  }
+
   const missingItemCount = draft.players.reduce((count, player) => (
     count + player.draftedItems
       .flatMap(getDraftItemExportItems)
       .filter((item) => !isExportableDraftItem(item)).length
-  ), 0);
+  ), 0) + getRemainingDraftableItems(pool, draft)
+    .filter((item) => !isExportableDraftItem(item))
+    .length;
 
   if (missingItemCount > 0) {
     return {
@@ -571,6 +664,7 @@ function createTtsDraftExport(roomNumber, draft) {
   }
 
   const usedGuids = new Set();
+  const playerBags = draft.players.map((player, index) => createTtsBag(player, index, usedGuids));
 
   return {
     SaveName: `Franken Draft ${roomNumber}`,
@@ -589,7 +683,10 @@ function createTtsDraftExport(roomNumber, draft) {
     LuaScript: "",
     LuaScriptState: "",
     XmlUI: "",
-    ObjectStates: draft.players.map((player, index) => createTtsBag(player, index, usedGuids))
+    ObjectStates: [
+      ...playerBags,
+      createTtsRemainingPoolBag(pool, draft, playerBags.length, usedGuids)
+    ]
   };
 }
 
@@ -2266,7 +2363,9 @@ async function handleAuctionWildcard(roomNumber, request, response) {
   }
 
   pushAuctionUndo(draft);
+  const wildcardItem = nomination.items[wildcardIndex];
   const [chosenItem] = source.splice(choiceIndex, 1);
+  draft.discardedItems.push(wildcardItem);
   nomination.items.splice(wildcardIndex, 1, chosenItem);
   moveAuctionToPostDrawStage(draft);
   sendAuctionSnapshot(roomNumber, room, response, speaker.id);
