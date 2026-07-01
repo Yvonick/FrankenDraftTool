@@ -30,10 +30,12 @@ const poolUploadJsonBodyLimit = 25 * 1024 * 1024;
 const nominationAuctionStartingCredits = 40;
 const nominationAuctionMulligans = 2;
 const nominationAuctionBans = 1;
-const auctionUndoLimit = 30;
+const auctionUndoLimit = 1;
 const defaultAuctionSpeakerMode = "bid-and-pick";
 const auctionSpeakerModes = new Set(["none", "autopick", "bid-and-pick"]);
 const sseHeartbeatMs = 25000;
+const emptyRoomTtlMs = 60 * 60 * 1000;
+const roomCleanupIntervalMs = 10 * 60 * 1000;
 
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, {
@@ -174,11 +176,35 @@ function createRoom() {
     draftSettings,
     draft: null,
     revision: 0,
+    createdAt: Date.now(),
+    lastActiveAt: Date.now(),
     participants: new Map(),
     clients: new Map()
   });
 
   return roomNumber;
+}
+
+function touchRoom(room) {
+  if (room) {
+    room.lastActiveAt = Date.now();
+  }
+}
+
+function cleanupIdleRooms() {
+  const now = Date.now();
+
+  for (const [roomNumber, room] of rooms.entries()) {
+    if (room.clients.size > 0) {
+      continue;
+    }
+
+    const lastActiveAt = room.lastActiveAt || room.createdAt || now;
+
+    if (now - lastActiveAt > emptyRoomTtlMs) {
+      rooms.delete(roomNumber);
+    }
+  }
 }
 
 function isRoomHost(room, participantId) {
@@ -264,6 +290,7 @@ function broadcastRoom(roomNumber) {
     return;
   }
 
+  touchRoom(room);
   room.revision = (room.revision || 0) + 1;
 
   for (const [client, metadata] of room.clients.entries()) {
@@ -394,8 +421,8 @@ function cloneItem(item) {
   };
 }
 
-function cloneJson(value) {
-  return JSON.parse(JSON.stringify(value));
+function cloneJson(value, options = {}) {
+  return JSON.parse(JSON.stringify(value, options.replacer));
 }
 
 function getItemSnapshot(item) {
@@ -445,10 +472,20 @@ function isExportableDraftItem(item) {
   return Boolean(item.ttsObject) || item.metaType === "speaker-order";
 }
 
-function getDraftItemExportItems(item) {
+function resolvePoolItemForExport(pool, item) {
+  if (!pool || item.metaType === "speaker-order") {
+    return item;
+  }
+
+  return pool.items.find((poolItem) => poolItem.id === item.id) || item;
+}
+
+function getResolvedDraftItemExportItems(pool, item) {
+  const sourceItem = resolvePoolItemForExport(pool, item);
+
   return [
-    item,
-    ...(Array.isArray(item.linkedItems) ? item.linkedItems : [])
+    sourceItem,
+    ...(Array.isArray(sourceItem.linkedItems) ? sourceItem.linkedItems : [])
   ];
 }
 
@@ -566,14 +603,14 @@ function createTtsContainerBag({ nickname, description, containedObjects, index,
   };
 }
 
-function createTtsBag(player, index, usedGuids) {
+function createTtsBag(player, index, usedGuids, pool) {
   return createTtsContainerBag({
     nickname: player.name,
     description: `Drafted items for ${player.name}`,
     index,
     usedGuids,
     containedObjects: player.draftedItems
-      .flatMap((item) => getDraftItemExportItems(item)
+      .flatMap((item) => getResolvedDraftItemExportItems(pool, item)
         .map((exportItem) => createTtsDraftItem(exportItem, usedGuids)))
       .filter(Boolean)
   });
@@ -663,7 +700,7 @@ function createTtsDraftExport(roomNumber, draft) {
 
   const missingItemCount = draft.players.reduce((count, player) => (
     count + player.draftedItems
-      .flatMap(getDraftItemExportItems)
+      .flatMap((item) => getResolvedDraftItemExportItems(pool, item))
       .filter((item) => !isExportableDraftItem(item)).length
   ), 0) + getRemainingDraftableItems(pool, draft)
     .filter((item) => !isExportableDraftItem(item))
@@ -677,7 +714,7 @@ function createTtsDraftExport(roomNumber, draft) {
   }
 
   const usedGuids = new Set();
-  const playerBags = draft.players.map((player, index) => createTtsBag(player, index, usedGuids));
+  const playerBags = draft.players.map((player, index) => createTtsBag(player, index, usedGuids, pool));
 
   return {
     SaveName: `Franken Draft ${roomNumber}`,
@@ -940,6 +977,7 @@ async function handleRoomSettings(roomNumber, request, response) {
 }
 
 function handleRoomDetails(roomNumber, request, response) {
+  touchRoom(rooms.get(roomNumber));
   const snapshot = getRoomSnapshot(roomNumber);
 
   if (!snapshot) {
@@ -1228,7 +1266,6 @@ function getAuctionSnapshot(draft, viewerId, room = null) {
       temporaryBinCount: nomination.temporaryBin.length,
       temporaryBinItems: nomination.temporaryBin.map(getItemSnapshot),
       permanentBinCount: draft.auction.permanentBin.length,
-      permanentBinItems: draft.auction.permanentBin.map(getItemSnapshot),
       banPlayerId: nomination.banPlayerId || null,
       banPlayerName: getAuctionPlayer(draft, nomination.banPlayerId)?.name || null,
       pickOrder: (nomination.pickOrder || []).map((record, index) => ({
@@ -1459,7 +1496,9 @@ function createAuctionPlayers(seated) {
 }
 
 function cloneDraftForUndo(draft) {
-  const snapshot = cloneJson(draft);
+  const snapshot = cloneJson(draft, {
+    replacer: (key, value) => (key === "ttsObject" ? undefined : value)
+  });
   delete snapshot.undoStack;
   return snapshot;
 }
@@ -2891,6 +2930,9 @@ const server = http.createServer(async (request, response) => {
     error: "not_found"
   });
 });
+
+const roomCleanupInterval = setInterval(cleanupIdleRooms, roomCleanupIntervalMs);
+roomCleanupInterval.unref?.();
 
 server.listen(port, () => {
   console.log(`${serviceName} listening on http://0.0.0.0:${port}`);
