@@ -30,12 +30,13 @@ const poolUploadJsonBodyLimit = 25 * 1024 * 1024;
 const nominationAuctionStartingCredits = 40;
 const nominationAuctionMulligans = 2;
 const nominationAuctionBans = 1;
-const auctionUndoLimit = 1;
+const auctionUndoLimit = 30;
 const defaultAuctionSpeakerMode = "bid-and-pick";
 const auctionSpeakerModes = new Set(["none", "autopick", "bid-and-pick"]);
 const sseHeartbeatMs = 25000;
 const emptyRoomTtlMs = 60 * 60 * 1000;
 const roomCleanupIntervalMs = 10 * 60 * 1000;
+const compactItemRefKey = "__frankenItemRef";
 
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, {
@@ -414,7 +415,6 @@ function cloneItem(item) {
     sourceObjectType: item.sourceObjectType,
     metaType: item.metaType,
     order: item.order,
-    ttsObject: item.ttsObject,
     linkedItems: Array.isArray(item.linkedItems)
       ? item.linkedItems.map(cloneItem)
       : []
@@ -423,6 +423,87 @@ function cloneItem(item) {
 
 function cloneJson(value, options = {}) {
   return JSON.parse(JSON.stringify(value, options.replacer));
+}
+
+function isDraftItemLike(value) {
+  return Boolean(value)
+    && typeof value === "object"
+    && typeof value.id === "string"
+    && typeof value.type === "string"
+    && (
+      "imageUrl" in value
+      || "sourceObjectType" in value
+      || "ttsObject" in value
+      || "metaType" in value
+    );
+}
+
+function compactDraftItem(item) {
+  if (item.metaType === "speaker-order" || isSpeakerOrderType(item.type)) {
+    return cloneItem(item);
+  }
+
+  return {
+    [compactItemRefKey]: item.id
+  };
+}
+
+function addItemsToIndex(index, items = []) {
+  for (const item of items) {
+    if (!item?.id || index.has(item.id)) {
+      continue;
+    }
+
+    index.set(item.id, item);
+    addItemsToIndex(index, item.linkedItems || []);
+  }
+}
+
+function createPoolItemIndex(pool) {
+  const index = new Map();
+  addItemsToIndex(index, pool?.items || []);
+  return index;
+}
+
+function hydrateCompactUndoValue(value, itemIndex) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => hydrateCompactUndoValue(entry, itemIndex));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  if (typeof value[compactItemRefKey] === "string") {
+    const sourceItem = itemIndex.get(value[compactItemRefKey]);
+
+    return sourceItem ? cloneItem(sourceItem) : {
+      id: value[compactItemRefKey],
+      name: "Missing item",
+      content: "",
+      type: "Unknown",
+      imageUrl: null,
+      imageSecondaryUrl: null,
+      imageSheet: null,
+      sourceObjectType: "Unknown",
+      linkedItems: []
+    };
+  }
+
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
+    key,
+    hydrateCompactUndoValue(entry, itemIndex)
+  ]));
+}
+
+function hydrateAuctionUndoDraft(snapshot) {
+  const pool = getPool(snapshot?.poolId);
+
+  if (!pool) {
+    return null;
+  }
+
+  return hydrateCompactUndoValue(snapshot, createPoolItemIndex(pool));
 }
 
 function getItemSnapshot(item) {
@@ -1497,9 +1578,18 @@ function createAuctionPlayers(seated) {
 
 function cloneDraftForUndo(draft) {
   const snapshot = cloneJson(draft, {
-    replacer: (key, value) => (key === "ttsObject" ? undefined : value)
+    replacer: (key, value) => {
+      if (key === "undoStack" || key === "ttsObject") {
+        return undefined;
+      }
+
+      if (isDraftItemLike(value)) {
+        return compactDraftItem(value);
+      }
+
+      return value;
+    }
   });
-  delete snapshot.undoStack;
   return snapshot;
 }
 
@@ -2563,8 +2653,15 @@ async function handleAuctionUndo(roomNumber, request, response) {
     return;
   }
 
+  const restoredDraft = hydrateAuctionUndoDraft(previousDraft);
+
+  if (!restoredDraft) {
+    sendJson(response, 409, { error: "undo_source_unavailable" });
+    return;
+  }
+
   room.draft = {
-    ...previousDraft,
+    ...restoredDraft,
     undoStack
   };
   broadcastRoom(roomNumber);
