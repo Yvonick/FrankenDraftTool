@@ -1642,11 +1642,8 @@ function drawAuctionItems(draft, type, count) {
 }
 
 function returnAuctionItems(draft, type, items) {
-  if (!draft.auction.itemSources[type]) {
-    draft.auction.itemSources[type] = [];
-  }
-
-  draft.auction.itemSources[type].push(...shuffle(items));
+  const source = draft.auction.itemSources[type] || [];
+  draft.auction.itemSources[type] = shuffle([...source, ...items]);
 }
 
 function shuffleAuctionItemSources(draft) {
