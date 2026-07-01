@@ -697,6 +697,140 @@ function createTtsBag(player, index, usedGuids, pool) {
   });
 }
 
+function createTtsDraftableItems(items, pool, usedGuids) {
+  return items
+    .map((item) => createTtsDraftItem(resolvePoolItemForExport(pool, item), usedGuids))
+    .filter(Boolean);
+}
+
+function createTtsCurrentBag({ nickname, description, items, pool, index, usedGuids, color }) {
+  return createTtsContainerBag({
+    nickname,
+    description,
+    index,
+    usedGuids,
+    color,
+    containedObjects: createTtsDraftableItems(items, pool, usedGuids)
+  });
+}
+
+function createTtsBagDraftCurrentBags(pool, draft, index, usedGuids) {
+  const queuedBags = [];
+
+  for (const player of draft.players) {
+    for (const [queueIndex, bag] of (player.queue || []).entries()) {
+      if (!bag.items?.length) {
+        continue;
+      }
+
+      queuedBags.push(createTtsCurrentBag({
+        nickname: `${player.name} - ${queueIndex === 0 ? "Current Bag" : `Queue Bag ${queueIndex + 1}`}`,
+        description: `Bag draft queue for ${player.name}`,
+        items: bag.items,
+        pool,
+        index: queuedBags.length,
+        usedGuids,
+        color: { r: 0.24, g: 0.24, b: 0.42 }
+      }));
+    }
+  }
+
+  if (queuedBags.length === 0) {
+    return null;
+  }
+
+  return createTtsContainerBag({
+    nickname: "Current Bag Draft Queues",
+    description: "Bags currently being viewed or waiting in player queues",
+    index,
+    usedGuids,
+    color: { r: 0.12, g: 0.18, b: 0.36 },
+    containedObjects: queuedBags
+  });
+}
+
+function createTtsAuctionCurrentBags(pool, draft, index, usedGuids) {
+  const nomination = draft.auction?.currentNomination;
+
+  if (!nomination) {
+    return null;
+  }
+
+  const nominationBags = [];
+
+  if (nomination.items?.length) {
+    nominationBags.push(createTtsCurrentBag({
+      nickname: `Current Nomination - ${nomination.type}`,
+      description: `Items currently open during ${draft.auction.stage}`,
+      items: nomination.items,
+      pool,
+      index: nominationBags.length,
+      usedGuids,
+      color: { r: 0.35, g: 0.22, b: 0.1 }
+    }));
+  }
+
+  if (nomination.temporaryBin?.length) {
+    nominationBags.push(createTtsCurrentBag({
+      nickname: `Temporary Bin - ${nomination.type}`,
+      description: "Items set aside by mulligans during the current nomination",
+      items: nomination.temporaryBin,
+      pool,
+      index: nominationBags.length,
+      usedGuids,
+      color: { r: 0.34, g: 0.18, b: 0.28 }
+    }));
+  }
+
+  if (nominationBags.length === 0) {
+    return null;
+  }
+
+  return createTtsContainerBag({
+    nickname: "Current Auction Items",
+    description: "Items currently open or temporarily set aside in the active nomination",
+    index,
+    usedGuids,
+    color: { r: 0.18, g: 0.12, b: 0.32 },
+    containedObjects: nominationBags
+  });
+}
+
+function createTtsCurrentDraftBags(pool, draft, startIndex, usedGuids) {
+  const currentBag = draft.engine === "auction"
+    ? createTtsAuctionCurrentBags(pool, draft, startIndex, usedGuids)
+    : createTtsBagDraftCurrentBags(pool, draft, startIndex, usedGuids);
+
+  return currentBag ? [currentBag] : [];
+}
+
+function addDraftItemIds(ids, items = []) {
+  for (const item of items) {
+    if (item?.id) {
+      ids.add(item.id);
+    }
+  }
+}
+
+function getInFlightDraftItems(draft) {
+  if (!draft || draft.status !== "active") {
+    return [];
+  }
+
+  if (draft.engine === "auction") {
+    const nomination = draft.auction?.currentNomination;
+
+    return [
+      ...(nomination?.items || []),
+      ...(nomination?.temporaryBin || [])
+    ];
+  }
+
+  return draft.players.flatMap((player) => (
+    player.queue || []
+  ).flatMap((bag) => bag.items || []));
+}
+
 function getUsedDraftableItemIds(draft) {
   const usedIds = new Set();
 
@@ -713,6 +847,8 @@ function getUsedDraftableItemIds(draft) {
   for (const item of draft.auction?.permanentBin || []) {
     usedIds.add(item.id);
   }
+
+  addDraftItemIds(usedIds, getInFlightDraftItems(draft));
 
   return usedIds;
 }
@@ -779,13 +915,18 @@ function createTtsDraftExport(roomNumber, draft) {
     };
   }
 
-  const missingItemCount = draft.players.reduce((count, player) => (
+  const missingDraftedItemCount = draft.players.reduce((count, player) => (
     count + player.draftedItems
       .flatMap((item) => getResolvedDraftItemExportItems(pool, item))
       .filter((item) => !isExportableDraftItem(item)).length
-  ), 0) + getRemainingDraftableItems(pool, draft)
+  ), 0);
+  const missingCurrentItemCount = getInFlightDraftItems(draft)
+    .map((item) => resolvePoolItemForExport(pool, item))
+    .filter((item) => !isExportableDraftItem(item)).length;
+  const missingRemainingItemCount = getRemainingDraftableItems(pool, draft)
     .filter((item) => !isExportableDraftItem(item))
     .length;
+  const missingItemCount = missingDraftedItemCount + missingCurrentItemCount + missingRemainingItemCount;
 
   if (missingItemCount > 0) {
     return {
@@ -796,6 +937,7 @@ function createTtsDraftExport(roomNumber, draft) {
 
   const usedGuids = new Set();
   const playerBags = draft.players.map((player, index) => createTtsBag(player, index, usedGuids, pool));
+  const currentBags = createTtsCurrentDraftBags(pool, draft, playerBags.length, usedGuids);
 
   return {
     SaveName: `Franken Draft ${roomNumber}`,
@@ -816,7 +958,8 @@ function createTtsDraftExport(roomNumber, draft) {
     XmlUI: "",
     ObjectStates: [
       ...playerBags,
-      createTtsRemainingPoolBag(pool, draft, playerBags.length, usedGuids)
+      ...currentBags,
+      createTtsRemainingPoolBag(pool, draft, playerBags.length + currentBags.length, usedGuids)
     ]
   };
 }
@@ -2077,7 +2220,7 @@ async function handleStartDraft(roomNumber, request, response) {
   sendJson(response, 200, getRoomSnapshot(roomNumber, body.participantId));
 }
 
-function handleDraftExport(roomNumber, response) {
+function handleDraftExport(roomNumber, url, response) {
   const room = rooms.get(roomNumber);
 
   if (!room) {
@@ -2085,8 +2228,18 @@ function handleDraftExport(roomNumber, response) {
     return;
   }
 
-  if (!room.draft || room.draft.status !== "complete") {
-    sendJson(response, 409, { error: "draft_not_complete" });
+  if (!room.draft || !["active", "complete"].includes(room.draft.status)) {
+    sendJson(response, 409, { error: "draft_not_exportable" });
+    return;
+  }
+
+  if (room.draft.status !== "complete" && !hasRoomAdminRights(room, {
+    creatorToken: url.searchParams.get("creatorToken"),
+    actorId: url.searchParams.get("actorId"),
+    viewerId: url.searchParams.get("viewerId"),
+    participantId: url.searchParams.get("participantId")
+  })) {
+    sendAdminRequired(response);
     return;
   }
 
@@ -2942,7 +3095,7 @@ const server = http.createServer(async (request, response) => {
   const exportDraftMatch = url.pathname.match(/^\/api\/rooms\/(\d{6})\/draft\/export$/);
 
   if (exportDraftMatch && request.method === "GET") {
-    handleDraftExport(exportDraftMatch[1], response);
+    handleDraftExport(exportDraftMatch[1], url, response);
     return;
   }
 

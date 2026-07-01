@@ -1217,6 +1217,7 @@
         <button id="sit-down" class="secondary" type="button" hidden>Sit Down</button>
         <button id="spectate-room" class="secondary" type="button" hidden>Become Spectator</button>
         <button id="restart-draft" class="secondary" type="button" hidden>Restart Draft</button>
+        <button id="export-draft" class="secondary" type="button" hidden>Export TTS JSON</button>
       </div>
       <p id="room-status"></p>
 
@@ -1367,7 +1368,6 @@
       <section class="panel" id="reveal-panel" hidden>
         <h3>Final Drafts</h3>
         <div class="actions" id="reveal-actions">
-          <button id="export-draft" type="button">Export TTS JSON</button>
         </div>
         <div class="reveal-grid" id="revealed-drafts"></div>
       </section>
@@ -2630,6 +2630,18 @@
         };
       }
 
+      function payloadSearchParams(payload) {
+        const params = new URLSearchParams();
+
+        for (const [key, value] of Object.entries(payload)) {
+          if (value) {
+            params.set(key, value);
+          }
+        }
+
+        return params;
+      }
+
       function appendHostBadge(container, participant) {
         if (!participant?.host) {
           return;
@@ -3692,6 +3704,7 @@
         const draftNotStarted = data.draft.status === "not_started";
         creatorPanel.hidden = !hasHostRights() || !draftNotStarted;
         restartDraft.hidden = !hasHostRights() || draftNotStarted;
+        exportDraft.hidden = !hasHostRights() || !["active", "complete"].includes(data.draft.status);
         seatingPanel.hidden = !draftNotStarted;
         startDraft.disabled = data.seated.length === 0;
         sitDown.hidden = currentRole !== "spectator" || !draftNotStarted;
@@ -4093,13 +4106,14 @@
         exportDraft.disabled = true;
 
         try {
-          const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/export`));
+          const params = payloadSearchParams(hostPayload());
+          const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/export?${params}`));
 
           if (!response.ok) {
             const data = await response.json().catch(() => ({}));
             roomMessage.textContent = data.error === "tts_source_unavailable"
               ? "This pool needs to be re-uploaded before it can export TTS JSON."
-              : "Could not export the draft.";
+              : (data.error === "admin_required" ? "Only the host or an admin can export during a draft." : "Could not export the draft.");
             return;
           }
 
