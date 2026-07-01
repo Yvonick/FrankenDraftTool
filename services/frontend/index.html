@@ -1517,6 +1517,8 @@
       let auctionBidKey = "";
       let auctionPendingBids = null;
       let currentBagId = null;
+      let renderedCurrentBagId = null;
+      let currentDraftedItemsKey = "";
       let previousDraftStatus = null;
       let audioContext = null;
       let chimeMuted = localStorage.getItem("frankenDraftTool:chimeMuted") === "true";
@@ -2830,10 +2832,35 @@
         }
       }
 
-      function renderCurrentBag(currentPlayer, priorDraftStatus = null) {
-        currentBag.replaceChildren();
+      function getDraftedItemsRenderKey(player, draft) {
+        const itemsPerTypeKey = Object.entries(draft?.itemsPerType || {})
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([type, count]) => `${type}:${count}`)
+          .join("|");
+        const draftedItemsKey = (player?.draftedItems || [])
+          .map((item) => item.id)
+          .join("|");
+        const draftedGroupsKey = (player?.draftedGroups || [])
+          .map((group) => `${group.id || group.bagId || group.pickNumber}:${(group.items || []).map((item) => item.id).join(",")}`)
+          .join("|");
 
+        return [
+          player?.id || "",
+          draftGrouping.value,
+          (draft?.typeOrder || []).join("|"),
+          itemsPerTypeKey,
+          draftedItemsKey,
+          draftedGroupsKey
+        ].join("::");
+      }
+
+      function renderCurrentBag(currentPlayer, priorDraftStatus = null) {
         if (!currentPlayer.currentBag) {
+          if (renderedCurrentBagId !== null) {
+            currentBag.replaceChildren();
+            renderedCurrentBagId = null;
+          }
+
           draftInstruction.textContent = currentPlayer.queueLength === 0
             ? "No bags in your queue."
             : `${currentPlayer.queueLength} bag${currentPlayer.queueLength === 1 ? "" : "s"} in your queue. Waiting for your next bag.`;
@@ -2842,8 +2869,9 @@
         }
 
         const bag = currentPlayer.currentBag;
+        const bagChanged = currentBagId !== bag.id;
 
-        if (currentBagId !== bag.id) {
+        if (bagChanged) {
           const draftJustStarted = priorDraftStatus
             && priorDraftStatus !== "active"
             && latestRoom?.draft?.status === "active";
@@ -2856,16 +2884,20 @@
           selectedItemIds = new Set();
         }
 
-        const eligible = new Set(bag.eligibleItemIds);
         draftInstruction.textContent = `${currentPlayer.queueLength} bag${currentPlayer.queueLength === 1 ? "" : "s"} in your queue. Select ${bag.requiredPickCount} item${bag.requiredPickCount === 1 ? "" : "s"} from this bag.`;
 
-        renderTypeSections(currentBag, bag.items, {
-          typeOrder: latestRoom?.draft.typeOrder,
-          itemOptions: (item) => ({
-            checkable: true,
-            available: eligible.has(item.id)
-          })
-        });
+        if (renderedCurrentBagId !== bag.id) {
+          const eligible = new Set(bag.eligibleItemIds);
+
+          renderTypeSections(currentBag, bag.items, {
+            typeOrder: latestRoom?.draft.typeOrder,
+            itemOptions: (item) => ({
+              checkable: true,
+              available: eligible.has(item.id)
+            })
+          });
+          renderedCurrentBagId = bag.id;
+        }
 
         lockChoice.hidden = false;
         updateLockButton(bag.requiredPickCount);
@@ -3540,17 +3572,24 @@
         playerDraftPanel.hidden = draft.status !== "active" || draft.engine === "auction" || !currentPlayer;
 
         if (playerDraftPanel.hidden) {
+          renderedCurrentBagId = null;
+          currentDraftedItemsKey = "";
           return;
         }
 
         renderCurrentBag(currentPlayer, priorDraftStatus);
-        const progress = getDraftTypeProgress(currentPlayer, draft);
-        const titleForType = makeTypeProgressTitle(progress);
-        renderDraftChecklist(progress);
-        renderGroupedItems(privateDraftedItems, currentPlayer.draftedItems, currentPlayer.draftedGroups, {
-          typeOrder: draft.typeOrder,
-          titleForType
-        });
+        const draftedItemsKey = getDraftedItemsRenderKey(currentPlayer, draft);
+
+        if (currentDraftedItemsKey !== draftedItemsKey) {
+          const progress = getDraftTypeProgress(currentPlayer, draft);
+          const titleForType = makeTypeProgressTitle(progress);
+          renderDraftChecklist(progress);
+          renderGroupedItems(privateDraftedItems, currentPlayer.draftedItems, currentPlayer.draftedGroups, {
+            typeOrder: draft.typeOrder,
+            titleForType
+          });
+          currentDraftedItemsKey = draftedItemsKey;
+        }
       }
 
       function renderSuperSpectatorDraft(draft) {
@@ -3633,6 +3672,12 @@
       }
 
       function renderRoom(data) {
+        if (latestRoom?.roomNumber === data.roomNumber
+          && data.revision !== undefined
+          && latestRoom.revision === data.revision) {
+          return;
+        }
+
         const priorDraftStatus = latestRoom?.draft?.status || previousDraftStatus;
         latestRoom = data;
         renderSeated(data.seated);
@@ -3752,6 +3797,8 @@
         if (currentRoomNumber !== id) {
           latestRoom = null;
           currentBagId = null;
+          renderedCurrentBagId = null;
+          currentDraftedItemsKey = "";
           previousDraftStatus = null;
           selectedItemIds = new Set();
         }
@@ -3936,6 +3983,8 @@
         settingsInitialized = false;
         selectedItemIds = new Set();
         currentBagId = null;
+        renderedCurrentBagId = null;
+        currentDraftedItemsKey = "";
         renderRoom(data);
         roomMessage.textContent = "Draft reset.";
         restartDraft.disabled = false;

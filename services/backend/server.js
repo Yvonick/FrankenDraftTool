@@ -33,6 +33,7 @@ const nominationAuctionBans = 1;
 const auctionUndoLimit = 30;
 const defaultAuctionSpeakerMode = "bid-and-pick";
 const auctionSpeakerModes = new Set(["none", "autopick", "bid-and-pick"]);
+const sseHeartbeatMs = 25000;
 
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, {
@@ -98,6 +99,12 @@ function sendPresenceEvent(response) {
   response.write(`data: ${JSON.stringify({ openPages: presenceClients.size })}\n\n`);
 }
 
+function sendSseHeartbeat(response) {
+  if (!response.destroyed && !response.writableEnded) {
+    response.write(": heartbeat\n\n");
+  }
+}
+
 function broadcastPresence() {
   for (const client of presenceClients) {
     sendPresenceEvent(client);
@@ -115,8 +122,10 @@ function handlePresenceStream(request, response) {
   presenceClients.add(response);
   sendPresenceEvent(response);
   broadcastPresence();
+  const heartbeat = setInterval(() => sendSseHeartbeat(response), sseHeartbeatMs);
 
   request.on("close", () => {
+    clearInterval(heartbeat);
     presenceClients.delete(response);
     broadcastPresence();
   });
@@ -164,6 +173,7 @@ function createRoom() {
     maxSeats: draftSettings.maxSeats,
     draftSettings,
     draft: null,
+    revision: 0,
     participants: new Map(),
     clients: new Map()
   });
@@ -227,6 +237,7 @@ function getRoomSnapshot(roomNumber, viewerId = null) {
 
   return {
     roomNumber,
+    revision: room.revision || 0,
     maxSeats: room.maxSeats,
     seated: getSeatedParticipants(room),
     spectators: [...room.participants.values()]
@@ -252,6 +263,8 @@ function broadcastRoom(roomNumber) {
   if (!room) {
     return;
   }
+
+  room.revision = (room.revision || 0) + 1;
 
   for (const [client, metadata] of room.clients.entries()) {
     client.write(`data: ${JSON.stringify(getRoomSnapshot(roomNumber, metadata.participantId))}\n\n`);
@@ -998,9 +1011,11 @@ function handleRoomStream(roomNumber, url, request, response) {
     admin: isRoomHost(room, participantId) ? false : Boolean(existingParticipant?.admin),
     host: isRoomHost(room, participantId)
   })}\n\n`);
+  const heartbeat = setInterval(() => sendSseHeartbeat(response), sseHeartbeatMs);
   broadcastRoom(roomNumber);
 
   request.on("close", () => {
+    clearInterval(heartbeat);
     const participant = room.participants.get(participantId);
 
     if (participant?.connectionToken === connectionToken) {
