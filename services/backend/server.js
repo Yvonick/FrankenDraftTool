@@ -174,6 +174,7 @@ function createRoom() {
     creatorToken: crypto.randomUUID(),
     creatorId: null,
     maxSeats: draftSettings.maxSeats,
+    allowSpectators: true,
     draftSettings,
     draft: null,
     revision: 0,
@@ -266,6 +267,7 @@ function getRoomSnapshot(roomNumber, viewerId = null) {
     roomNumber,
     revision: room.revision || 0,
     maxSeats: room.maxSeats,
+    allowSpectators: room.allowSpectators !== false,
     seated: getSeatedParticipants(room),
     spectators: [...room.participants.values()]
       .filter((participant) => participant.role === "spectator")
@@ -1132,6 +1134,9 @@ async function handleRoomSettings(roomNumber, request, response) {
   }
 
   const maxSeats = body.maxSeats === undefined ? room.maxSeats : cleanSeatLimit(body.maxSeats);
+  const allowSpectators = body.allowSpectators === undefined
+    ? room.allowSpectators !== false
+    : body.allowSpectators !== false;
 
   if (!maxSeats) {
     sendJson(response, 400, { error: "invalid_seat_limit" });
@@ -1186,6 +1191,7 @@ async function handleRoomSettings(roomNumber, request, response) {
   }
 
   room.maxSeats = maxSeats;
+  room.allowSpectators = allowSpectators;
   room.draftSettings = {
     poolId: pool.id,
     methodId: method.id,
@@ -1295,6 +1301,12 @@ function handleRoomStream(roomNumber, url, request, response) {
   }
 
   const requestedRole = url.searchParams.get("role") === "seated" ? "seated" : "spectator";
+
+  if (requestedRole === "spectator" && room.allowSpectators === false && existingParticipant?.role !== "spectator") {
+    sendJson(response, 403, { error: "spectators_disabled" });
+    return;
+  }
+
   const draftPlayer = room.draft?.players.find((player) => player.id === participantId);
   const currentlySeated = existingParticipant?.role === "seated";
   const seatedCount = getSeatedParticipants(room).length;

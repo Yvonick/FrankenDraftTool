@@ -736,6 +736,16 @@
         font-size: 0.72rem;
       }
 
+      #table-panel.in-current-bag {
+        padding: 0.85rem;
+        box-shadow: none;
+      }
+
+      #table-panel.in-current-bag .round-table {
+        width: min(100%, 18rem);
+        justify-self: center;
+      }
+
       .table-player strong,
       .table-player span {
         max-width: 100%;
@@ -1176,11 +1186,6 @@
           "bins bins";
       }
 
-      .auction-action-area {
-        position: sticky;
-        top: 0.75rem;
-      }
-
       #auction-personal-player {
         display: grid;
         gap: 0.75rem;
@@ -1332,6 +1337,45 @@
 
       .auction-player-card.personal .auction-drafted-list {
         max-height: 30rem;
+      }
+
+      .auction-player-card.personal.expanded .auction-drafted-list {
+        max-height: none;
+      }
+
+      .auction-bid-recap tr.waiting {
+        background: rgb(246 215 135 / 0.12);
+        box-shadow: inset 3px 0 0 var(--gold);
+      }
+
+      .auction-no-ban-preset {
+        width: fit-content;
+        padding: 0.55rem 0.7rem;
+        border: 1px solid var(--line-strong);
+        border-radius: 0.5rem;
+        background: rgb(12 33 53 / 0.92);
+        color: var(--text);
+        font-weight: 800;
+      }
+
+      .auction-no-ban-preset.active {
+        border-color: var(--accent);
+        background: rgb(16 58 75 / 0.94);
+        box-shadow: inset 0 0 0 1px rgb(123 220 255 / 0.24);
+      }
+
+      .auction-sticky-actions {
+        width: min(34rem, calc(100vw - 2rem));
+        position: fixed;
+        left: 50%;
+        bottom: 0.75rem;
+        z-index: 25;
+        transform: translateX(-50%);
+        padding: 0.6rem;
+        border: 1px solid var(--line-strong);
+        border-radius: 0.5rem;
+        background: rgb(9 23 42 / 0.88);
+        box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 0.45);
       }
 
       .auction-drafted-group {
@@ -1541,6 +1585,10 @@
                 Seat limit
                 <input id="seat-limit-input" type="number" min="1" max="12" step="1">
               </label>
+              <label class="toggle-row">
+                <input id="allow-spectators-input" type="checkbox">
+                Allow spectators
+              </label>
             </div>
           </section>
           <section class="settings-section settings-section-method">
@@ -1582,9 +1630,6 @@
                 <input id="pool-upload-input" type="file" accept=".json,application/json">
               </label>
             </div>
-            <div class="actions settings-actions">
-              <button id="save-pool" class="secondary" type="button">Save Pool</button>
-            </div>
           </section>
           <section class="settings-section settings-section-counts">
             <h4>Item Counts</h4>
@@ -1593,6 +1638,7 @@
         </div>
         <div class="actions">
           <button id="save-room-settings" type="button" hidden>Save Settings</button>
+          <button id="save-pool" class="secondary" type="button">Save Pool</button>
           <button id="start-draft" type="button">Start Draft</button>
         </div>
       </section>
@@ -1623,6 +1669,7 @@
                 <div class="bag-status-row">
                   <p id="draft-instruction"></p>
                 </div>
+                <div id="current-bag-table-slot"></div>
                 <div class="item-grid" id="current-bag"></div>
               </section>
               <section class="draft-subpanel">
@@ -1790,6 +1837,7 @@
       const auctionShuffleTop = document.querySelector("#auction-shuffle-top");
       const restartDraft = document.querySelector("#restart-draft");
       const roomStatus = document.querySelector("#room-status");
+      const participantsFooter = document.querySelector(".participants-footer");
       const seatingPanel = document.querySelector("#seating-panel");
       const seatedPeople = document.querySelector("#seated-people");
       const spectatorCount = document.querySelector("#spectator-count");
@@ -1799,6 +1847,7 @@
       const roomMessage = document.querySelector("#room-message");
       const creatorPanel = document.querySelector("#creator-panel");
       const seatLimitInput = document.querySelector("#seat-limit-input");
+      const allowSpectatorsInput = document.querySelector("#allow-spectators-input");
       const poolSelect = document.querySelector("#pool-select");
       const draftMethodSelect = document.querySelector("#draft-method-select");
       const poolUploadDrop = document.querySelector("#pool-upload-drop");
@@ -1821,6 +1870,7 @@
       const draftGrouping = document.querySelector("#draft-grouping");
       const draftInstruction = document.querySelector("#draft-instruction");
       const currentBag = document.querySelector("#current-bag");
+      const currentBagTableSlot = document.querySelector("#current-bag-table-slot");
       const chimeToggle = document.querySelector("#chime-toggle");
       const lockChoice = document.querySelector("#lock-choice");
       const privateDraftedItems = document.querySelector("#private-drafted-items");
@@ -1874,6 +1924,7 @@
       let auctionBidKey = "";
       let auctionPendingBids = null;
       let expandedAuctionPlayerIds = new Set();
+      let otherAuctionAreasExpanded = false;
       let currentBagId = null;
       let renderedCurrentBagKey = null;
       let currentDraftedItemsKey = "";
@@ -2514,6 +2565,7 @@
 
         return {
           maxSeats: Number(seatLimitInput.value),
+          allowSpectators: allowSpectatorsInput.checked,
           poolId: poolSelect.value,
           methodId: draftMethodSelect.value,
           picksPerBag: Number(picksPerBagInput.value),
@@ -3161,6 +3213,17 @@
         }
       }
 
+      function placeTablePanel(inCurrentBag) {
+        if (inCurrentBag) {
+          currentBagTableSlot.append(tablePanel);
+          tablePanel.classList.add("in-current-bag");
+          return;
+        }
+
+        participantsFooter.insertBefore(tablePanel, spectatorPanel);
+        tablePanel.classList.remove("in-current-bag");
+      }
+
       function updateLockButton(requiredPickCount) {
         const selectedCount = selectedItemIds.size;
         lockChoice.textContent = requiredPickCount === 0 ? "Pass Bag" : "Lock Choices";
@@ -3271,6 +3334,7 @@
             renderedCurrentBagKey = null;
           }
 
+          placeTablePanel(true);
           draftInstruction.textContent = currentPlayer.queueLength === 0
             ? "No bags in your queue."
             : `${currentPlayer.queueLength} bag${currentPlayer.queueLength === 1 ? "" : "s"} in your queue. Waiting for your next bag.`;
@@ -3279,6 +3343,7 @@
         }
 
         const bag = currentPlayer.currentBag;
+        placeTablePanel(false);
         const bagChanged = currentBagId !== bag.id;
         const bagRenderKey = getCurrentBagRenderKey(bag);
 
@@ -3493,7 +3558,9 @@
       }
 
       function renderAuctionPlayerCard(player, auction, waitingIds, options = {}) {
-        const isExpanded = expandedAuctionPlayerIds.has(player.playerId);
+        const isExpanded = options.personal
+          ? expandedAuctionPlayerIds.has(player.playerId)
+          : otherAuctionAreasExpanded;
         const card = document.createElement("section");
         card.className = [
           "auction-player-card",
@@ -3549,7 +3616,10 @@
           expand.type = "button";
           expand.className = "secondary";
           expand.dataset.auctionExpandPlayerId = player.playerId;
-          expand.textContent = isExpanded ? "Reduce Area" : "Expand Area";
+          expand.dataset.auctionExpandScope = options.personal ? "personal" : "others";
+          expand.textContent = isExpanded
+            ? (options.personal ? "Reduce Area" : "Reduce Areas")
+            : (options.personal ? "Expand Area" : "Expand Areas");
           footer.append(expand);
         }
 
@@ -3670,7 +3740,7 @@
           checkbox.closest(".item-card")?.classList.toggle("selected", selected);
         }
 
-        const confirm = auctionItemActions.querySelector("[data-auction-confirm]");
+        const confirm = auctionPanel.querySelector("[data-auction-confirm]");
 
         if (confirm) {
           confirm.disabled = !auctionSelectedItemId;
@@ -3712,7 +3782,10 @@
         }
 
         const actionRow = document.createElement("div");
-        actionRow.className = "actions";
+        actionRow.className = [
+          "actions",
+          action.sticky ? "auction-sticky-actions" : ""
+        ].filter(Boolean).join(" ");
 
         if (action.skipLabel) {
           const skip = document.createElement("button");
@@ -3736,7 +3809,12 @@
           }
         });
         actionRow.append(button);
-        auctionItemActions.append(actionRow);
+
+        if (action.placement === "controls") {
+          auctionControls.append(actionRow);
+        } else {
+          auctionItemActions.append(actionRow);
+        }
       }
 
       function renderAuctionNominationControls(auction) {
@@ -3827,14 +3905,18 @@
         }
 
         const presetLabel = document.createElement("label");
-        presetLabel.className = "toggle-row";
+        presetLabel.className = [
+          "toggle-row",
+          "auction-no-ban-preset",
+          player.noBanPreset ? "active" : ""
+        ].filter(Boolean).join(" ");
         const preset = document.createElement("input");
         preset.type = "checkbox";
         preset.checked = player.noBanPreset;
         preset.addEventListener("change", () => {
           postAuctionAction("no-ban-preset", { noBanPreset: preset.checked });
         });
-        presetLabel.append(preset, "Preset no-ban");
+        presetLabel.append(preset, "Preset No-Ban");
         auctionControls.append(presetLabel);
       }
 
@@ -3853,6 +3935,7 @@
           kind: "ban",
           confirmLabel: "Confirm Ban",
           skipLabel: "No Ban",
+          placement: "controls",
           onConfirm: (item) => postAuctionAction("ban", { itemId: item.id }),
           onSkip: () => postAuctionAction("ban", { itemId: null })
         });
@@ -3911,29 +3994,6 @@
         auctionControls.append(form);
       }
 
-      function renderAuctionPickOrder(auction) {
-        const pickOrder = auction.currentNomination?.pickOrder || [];
-
-        if (pickOrder.length === 0) {
-          return;
-        }
-
-        const wrapper = document.createElement("div");
-        wrapper.className = "auction-player-card";
-        const title = document.createElement("strong");
-        title.textContent = "Pick order";
-        const list = document.createElement("ol");
-
-        for (const record of pickOrder) {
-          const item = document.createElement("li");
-          item.textContent = `${record.playerName}: ${record.bidKind} bid, ${record.cost} credits`;
-          list.append(item);
-        }
-
-        wrapper.append(title, list);
-        auctionControls.append(wrapper);
-      }
-
       function renderAuctionBidRecap(auction) {
         const recap = auction.currentNomination?.revealedBids?.length
           ? auction.currentNomination
@@ -3945,7 +4005,15 @@
         }
 
         const pickByPlayer = new Map((recap.pickOrder || []).map((record) => [record.playerId, record]));
+        const bidByPlayer = new Map(bids.map((record) => [record.playerId, record]));
+        const orderedBids = (recap.pickOrder || [])
+          .map((record) => bidByPlayer.get(record.playerId))
+          .filter(Boolean);
+        const orderedPlayerIds = new Set(orderedBids.map((record) => record.playerId));
+        orderedBids.push(...bids.filter((record) => !orderedPlayerIds.has(record.playerId)));
         const showSecond = auction.players.length >= 5;
+        const showOrder = (recap.pickOrder || []).length > 0;
+        const waitingIds = getAuctionWaitingPlayerIds(auction);
         const wrapper = document.createElement("div");
         wrapper.className = "auction-player-card auction-bid-recap";
         const title = document.createElement("strong");
@@ -3953,7 +4021,7 @@
         const table = document.createElement("table");
         const thead = document.createElement("thead");
         const headRow = document.createElement("tr");
-        const headers = ["Player", "First", ...(showSecond ? ["Second"] : []), "Tie", "Result"];
+        const headers = [...(showOrder ? ["Order"] : []), "Player", "First", ...(showSecond ? ["Second"] : []), "Tie", "Result"];
 
         for (const header of headers) {
           const cell = document.createElement("th");
@@ -3967,10 +4035,12 @@
 
         const tbody = document.createElement("tbody");
 
-        for (const record of bids) {
+        for (const record of orderedBids) {
           const row = document.createElement("tr");
           const pick = pickByPlayer.get(record.playerId);
+          row.className = waitingIds.has(record.playerId) ? "waiting" : "";
           const values = [
+            ...(showOrder ? [pick?.order || "-"] : []),
             record.playerName || "Unknown",
             record.bids?.first ?? 0,
             ...(showSecond ? [record.bids?.second ?? 0] : []),
@@ -4002,6 +4072,7 @@
         renderAuctionItems(auction, {
           kind: "pick",
           confirmLabel: "Confirm Pick",
+          sticky: true,
           onConfirm: (item) => postAuctionAction("pick", { itemId: item.id })
         });
       }
@@ -4029,7 +4100,6 @@
         renderAuctionBins(auction);
         renderAuctionItems(auction);
         renderAuctionBidRecap(auction);
-        renderAuctionPickOrder(auction);
         renderAuctionNoBanPresetControl(auction);
 
         if (auction.stage === "speaker_order_bidding") {
@@ -4170,6 +4240,7 @@
           || Boolean(draft.superSpectator);
         placeDraftGroupingControl(draft, hasDraftedAreas);
         updateAuctionTopControls(draft);
+        placeTablePanel(false);
         renderTable(draft);
         renderPlayerDraft(draft, priorDraftStatus);
         renderAuctionDraft(draft);
@@ -4201,6 +4272,8 @@
         roomStatus.textContent = `${data.seated.length} of ${data.maxSeats} seats filled`;
         renderSpectators(data);
         seatLimitInput.value = data.maxSeats;
+        allowSpectatorsInput.checked = data.allowSpectators !== false;
+        joinSpectate.hidden = data.allowSpectators === false;
 
         if (data.draft.status === "not_started") {
           renderDraftSettings(data.draft.settings);
@@ -4215,12 +4288,13 @@
         seatingPanel.hidden = !draftNotStarted;
         startDraft.disabled = data.seated.length === 0;
         sitDown.hidden = currentRole !== "spectator" || !draftNotStarted;
-        spectateRoom.hidden = currentRole !== "seated" || !draftNotStarted;
+        spectateRoom.hidden = currentRole !== "seated" || !draftNotStarted || data.allowSpectators === false;
         renderDraft(data.draft, priorDraftStatus);
         previousDraftStatus = data.draft.status;
       }
 
       function openJoinModal() {
+        joinSpectate.hidden = latestRoom?.allowSpectators === false;
         joinModal.hidden = false;
         joinName.focus();
       }
@@ -4263,6 +4337,12 @@
       }
 
       function connectToRoom(role, name = "") {
+        if (role === "spectator" && latestRoom?.allowSpectators === false) {
+          roomMessage.textContent = "Spectators are disabled for this room.";
+          openJoinModal();
+          return;
+        }
+
         if (roomEvents) {
           roomEvents.close();
         }
@@ -4309,7 +4389,9 @@
         };
 
         roomEvents.onerror = () => {
-          roomMessage.textContent = "Connection lost. Trying to reconnect...";
+          roomMessage.textContent = role === "spectator" && latestRoom?.allowSpectators === false
+            ? "Spectators are disabled for this room."
+            : "Connection lost. Trying to reconnect...";
         };
       }
 
@@ -4323,6 +4405,8 @@
           settingsInitialized = false;
           renderedSettingsKey = "";
           selectedItemIds = new Set();
+          expandedAuctionPlayerIds = new Set();
+          otherAuctionAreasExpanded = false;
         }
 
         currentRoomNumber = id;
@@ -4589,6 +4673,8 @@
         settingsInitialized = false;
         renderedSettingsKey = "";
         selectedItemIds = new Set();
+        expandedAuctionPlayerIds = new Set();
+        otherAuctionAreasExpanded = false;
         currentBagId = null;
         renderedCurrentBagKey = null;
         currentDraftedItemsKey = "";
@@ -4777,6 +4863,11 @@
       });
 
       joinSpectate.addEventListener("click", () => {
+        if (latestRoom?.allowSpectators === false) {
+          roomMessage.textContent = "Spectators are disabled for this room.";
+          return;
+        }
+
         const name = joinName.value.trim();
         closeJoinModal();
         connectToRoom("spectator", name);
@@ -4784,6 +4875,11 @@
 
       sitDown.addEventListener("click", openSitModal);
       spectateRoom.addEventListener("click", () => {
+        if (latestRoom?.allowSpectators === false) {
+          roomMessage.textContent = "Spectators are disabled for this room.";
+          return;
+        }
+
         const name = sessionStorage.getItem(storageKey(currentRoomNumber, "name")) || "";
         connectToRoom("spectator", name);
       });
@@ -5047,7 +5143,9 @@
 
         const playerId = expandButton.dataset.auctionExpandPlayerId;
 
-        if (expandedAuctionPlayerIds.has(playerId)) {
+        if (expandButton.dataset.auctionExpandScope === "others") {
+          otherAuctionAreasExpanded = !otherAuctionAreasExpanded;
+        } else if (expandedAuctionPlayerIds.has(playerId)) {
           expandedAuctionPlayerIds.delete(playerId);
         } else {
           expandedAuctionPlayerIds.add(playerId);
