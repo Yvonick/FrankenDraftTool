@@ -747,6 +747,14 @@
         white-space: nowrap;
       }
 
+      .checklist-row span.complete {
+        color: #7ddc9a;
+      }
+
+      .checklist-row span.pending {
+        color: #ffb86b;
+      }
+
       .spectator-card {
         display: grid;
         gap: 0.4rem;
@@ -2838,6 +2846,7 @@
           const label = document.createElement("strong");
           label.textContent = entry.type;
           const count = document.createElement("span");
+          count.className = entry.drafted >= entry.max ? "complete" : "pending";
           count.textContent = `${entry.drafted}/${entry.max}`;
           row.append(label, count);
           draftChecklist.append(row);
