@@ -3693,10 +3693,11 @@
         }
       }
 
-      function renderRoom(data) {
+      function renderRoom(data, options = {}) {
         if (latestRoom?.roomNumber === data.roomNumber
           && data.revision !== undefined
-          && latestRoom.revision === data.revision) {
+          && latestRoom.revision === data.revision
+          && !options.force) {
           return;
         }
 
@@ -4450,7 +4451,7 @@
 
       draftGrouping.addEventListener("change", () => {
         if (latestRoom) {
-          renderRoom(latestRoom);
+          renderRoom(latestRoom, { force: true });
         }
       });
 
