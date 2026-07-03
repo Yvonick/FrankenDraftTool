@@ -1517,7 +1517,7 @@
       let auctionBidKey = "";
       let auctionPendingBids = null;
       let currentBagId = null;
-      let renderedCurrentBagId = null;
+      let renderedCurrentBagKey = null;
       let currentDraftedItemsKey = "";
       let previousDraftStatus = null;
       let audioContext = null;
@@ -2866,11 +2866,20 @@
         ].join("::");
       }
 
+      function getCurrentBagRenderKey(bag) {
+        return [
+          bag?.id || "",
+          bag?.requiredPickCount ?? "",
+          (bag?.items || []).map((item) => item.id).join("|"),
+          (bag?.eligibleItemIds || []).join("|")
+        ].join("::");
+      }
+
       function renderCurrentBag(currentPlayer, priorDraftStatus = null) {
         if (!currentPlayer.currentBag) {
-          if (renderedCurrentBagId !== null) {
+          if (renderedCurrentBagKey !== null) {
             currentBag.replaceChildren();
-            renderedCurrentBagId = null;
+            renderedCurrentBagKey = null;
           }
 
           draftInstruction.textContent = currentPlayer.queueLength === 0
@@ -2882,6 +2891,7 @@
 
         const bag = currentPlayer.currentBag;
         const bagChanged = currentBagId !== bag.id;
+        const bagRenderKey = getCurrentBagRenderKey(bag);
 
         if (bagChanged) {
           const draftJustStarted = priorDraftStatus
@@ -2898,7 +2908,7 @@
 
         draftInstruction.textContent = `${currentPlayer.queueLength} bag${currentPlayer.queueLength === 1 ? "" : "s"} in your queue. Select ${bag.requiredPickCount} item${bag.requiredPickCount === 1 ? "" : "s"} from this bag.`;
 
-        if (renderedCurrentBagId !== bag.id) {
+        if (renderedCurrentBagKey !== bagRenderKey) {
           const eligible = new Set(bag.eligibleItemIds);
 
           renderTypeSections(currentBag, bag.items, {
@@ -2908,7 +2918,7 @@
               available: eligible.has(item.id)
             })
           });
-          renderedCurrentBagId = bag.id;
+          renderedCurrentBagKey = bagRenderKey;
         }
 
         lockChoice.hidden = false;
@@ -3584,7 +3594,7 @@
         playerDraftPanel.hidden = draft.status !== "active" || draft.engine === "auction" || !currentPlayer;
 
         if (playerDraftPanel.hidden) {
-          renderedCurrentBagId = null;
+          renderedCurrentBagKey = null;
           currentDraftedItemsKey = "";
           return;
         }
@@ -3810,7 +3820,7 @@
         if (currentRoomNumber !== id) {
           latestRoom = null;
           currentBagId = null;
-          renderedCurrentBagId = null;
+          renderedCurrentBagKey = null;
           currentDraftedItemsKey = "";
           previousDraftStatus = null;
           selectedItemIds = new Set();
@@ -3996,7 +4006,7 @@
         settingsInitialized = false;
         selectedItemIds = new Set();
         currentBagId = null;
-        renderedCurrentBagId = null;
+        renderedCurrentBagKey = null;
         currentDraftedItemsKey = "";
         renderRoom(data);
         roomMessage.textContent = "Draft reset.";
