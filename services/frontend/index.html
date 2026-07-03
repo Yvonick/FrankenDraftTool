@@ -288,6 +288,10 @@
         font-size: 0.95rem;
       }
 
+      .settings-subsection {
+        align-items: end;
+      }
+
       .settings-section-counts {
         grid-column: 1 / -1;
       }
@@ -299,6 +303,16 @@
 
       #creator-panel > h3 {
         text-align: center;
+      }
+
+      #creator-panel.readonly input,
+      #creator-panel.readonly select,
+      #creator-panel.readonly .pool-upload-drop {
+        opacity: 0.72;
+      }
+
+      #creator-panel.readonly .pool-upload-drop {
+        cursor: default;
       }
 
       #item-type-settings {
@@ -674,15 +688,19 @@
         align-content: start;
       }
 
-      #room-view[data-draft-status="not_started"] .draft-side-stack {
-        grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
-      }
-
       @media (min-width: 1120px) {
         .draft-side-stack {
           position: sticky;
           top: 0.75rem;
         }
+      }
+
+      .participants-footer {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+        gap: 1rem;
+        align-items: start;
       }
 
       .round-table {
@@ -1106,7 +1124,10 @@
       .auction-layout {
         width: 100%;
         display: grid;
-        grid-template-columns: minmax(14rem, 0.36fr) minmax(0, 1fr);
+        grid-template-columns: minmax(13rem, 0.28fr) minmax(0, 1fr) minmax(20rem, 0.62fr);
+        grid-template-areas:
+          "action items personal"
+          "others others others";
         gap: 1rem;
         align-items: start;
       }
@@ -1114,6 +1135,7 @@
       .auction-action-area,
       .auction-main-area,
       .auction-items-area,
+      .auction-personal-area,
       .auction-roster-area {
         min-width: 0;
         display: grid;
@@ -1122,8 +1144,36 @@
       }
 
       .auction-action-area {
+        grid-area: action;
+      }
+
+      .auction-items-area {
+        grid-area: items;
+      }
+
+      .auction-personal-area {
+        grid-area: personal;
+      }
+
+      .auction-roster-area {
+        grid-area: others;
+      }
+
+      .auction-layout.no-personal {
+        grid-template-columns: minmax(13rem, 0.28fr) minmax(0, 1fr);
+        grid-template-areas:
+          "action items"
+          "others others";
+      }
+
+      .auction-action-area {
         position: sticky;
         top: 0.75rem;
+      }
+
+      #auction-personal-player {
+        display: grid;
+        gap: 0.75rem;
       }
 
       .auction-player-card,
@@ -1139,6 +1189,13 @@
 
       .auction-player-card {
         align-content: start;
+      }
+
+      .auction-player-card.personal {
+        min-height: 18rem;
+        border-color: var(--accent);
+        background: linear-gradient(180deg, rgb(10 35 52 / 0.96), rgb(5 15 31 / 0.96));
+        box-shadow: inset 0 0 0 1px rgb(123 220 255 / 0.28), 0 0.9rem 1.8rem rgb(0 0 0 / 0.22);
       }
 
       .auction-player-card header {
@@ -1259,6 +1316,10 @@
         max-height: none;
       }
 
+      .auction-player-card.personal .auction-drafted-list {
+        max-height: 30rem;
+      }
+
       .auction-drafted-group {
         display: grid;
         gap: 0.35rem;
@@ -1297,10 +1358,23 @@
       @media (max-width: 980px) {
         .auction-layout {
           grid-template-columns: 1fr;
+          grid-template-areas:
+            "action"
+            "items"
+            "personal"
+            "others";
         }
 
         .auction-action-area {
           position: static;
+        }
+
+        .auction-layout.no-personal {
+          grid-template-columns: 1fr;
+          grid-template-areas:
+            "action"
+            "items"
+            "others";
         }
       }
 
@@ -1441,35 +1515,30 @@
       <section class="panel" id="creator-panel" hidden>
         <h3>Room Settings</h3>
         <div class="settings-sections">
-          <section class="settings-section settings-section-draft">
-            <h4>Draft</h4>
+          <section class="settings-section settings-section-room">
+            <h4>Room</h4>
             <div class="settings-grid">
-              <label>
-                Draft method
-                <select id="draft-method-select"></select>
-              </label>
-              <label>
-                Draft pool
-                <select id="pool-select"></select>
-              </label>
               <label>
                 Seat limit
                 <input id="seat-limit-input" type="number" min="1" max="12" step="1">
               </label>
             </div>
           </section>
-          <section class="settings-section settings-section-format" id="bag-settings-section">
-            <h4>Bag Draft</h4>
+          <section class="settings-section settings-section-method">
+            <h4>Draft Method</h4>
             <div class="settings-grid">
+              <label>
+                Method
+                <select id="draft-method-select"></select>
+              </label>
+            </div>
+            <div class="settings-grid settings-subsection" id="bag-settings-section">
               <label>
                 Picks per bag
                 <input id="picks-per-bag-input" type="number" min="1" max="8" step="1">
               </label>
             </div>
-          </section>
-          <section class="settings-section settings-section-format" id="auction-settings-section">
-            <h4>Nomination Auction</h4>
-            <div class="settings-grid">
+            <div class="settings-grid settings-subsection" id="auction-settings-section">
               <label id="auction-speaker-mode-label">
                 Speaker order
                 <select id="auction-speaker-mode-select">
@@ -1482,6 +1551,12 @@
           </section>
           <section class="settings-section settings-section-pool">
             <h4>Pool</h4>
+            <div class="settings-grid">
+              <label>
+                Existing pool
+                <select id="pool-select"></select>
+              </label>
+            </div>
             <div class="pool-upload">
               <label class="pool-upload-drop" id="pool-upload-drop">
                 <span id="pool-upload-label">Drop JSON or choose file</span>
@@ -1557,7 +1632,7 @@
               <h3>Nomination Auction</h3>
               <p id="auction-stage"></p>
             </div>
-            <div class="auction-layout">
+            <div class="auction-layout" id="auction-layout">
               <section class="auction-action-area">
                 <h4>Action</h4>
                 <div class="actions" id="auction-controls"></div>
@@ -1566,16 +1641,18 @@
                   <div class="auction-bin" id="auction-permanent-bin"></div>
                 </div>
               </section>
-              <div class="auction-main-area">
-                <section class="auction-items-area">
-                  <h4>Current Draftable Items</h4>
-                  <div class="item-grid" id="auction-items"></div>
-                </section>
-                <section class="auction-roster-area">
-                  <h4>Players</h4>
-                  <div class="auction-grid" id="auction-players"></div>
-                </section>
-              </div>
+              <section class="auction-items-area">
+                <h4>Current Draftable Items</h4>
+                <div class="item-grid" id="auction-items"></div>
+              </section>
+              <section class="auction-personal-area" id="auction-personal-area">
+                <h4>Your Area</h4>
+                <div id="auction-personal-player"></div>
+              </section>
+              <section class="auction-roster-area">
+                <h4>Other Players</h4>
+                <div class="auction-grid" id="auction-players"></div>
+              </section>
             </div>
           </section>
 
@@ -1593,23 +1670,25 @@
         </div>
 
         <aside class="draft-side-stack">
-          <section class="panel" id="seating-panel">
-            <h3>Seated</h3>
-            <ul id="seated-people"></ul>
-            <p id="spectator-count"></p>
-          </section>
-
           <section class="panel" id="table-panel" hidden>
             <h3>Round Table</h3>
             <div class="round-table" id="round-table"></div>
           </section>
-
-          <section class="panel" id="spectator-panel">
-            <h3>Spectators</h3>
-            <p id="spectator-summary"></p>
-            <div class="spectator-grid" id="named-spectators"></div>
-          </section>
         </aside>
+      </div>
+
+      <div class="participants-footer">
+        <section class="panel" id="seating-panel">
+          <h3>Seated Players</h3>
+          <ul id="seated-people"></ul>
+          <p id="spectator-count"></p>
+        </section>
+
+        <section class="panel" id="spectator-panel">
+          <h3>Spectators</h3>
+          <p id="spectator-summary"></p>
+          <div class="spectator-grid" id="named-spectators"></div>
+        </section>
       </div>
 
       <p class="message" id="room-message"></p>
@@ -1718,6 +1797,9 @@
       const draftChecklist = document.querySelector("#draft-checklist");
       const auctionPanel = document.querySelector("#auction-panel");
       const auctionStage = document.querySelector("#auction-stage");
+      const auctionLayout = document.querySelector("#auction-layout");
+      const auctionPersonalArea = document.querySelector("#auction-personal-area");
+      const auctionPersonalPlayer = document.querySelector("#auction-personal-player");
       const auctionPlayers = document.querySelector("#auction-players");
       const auctionTemporaryBin = document.querySelector("#auction-temporary-bin");
       const auctionPermanentBin = document.querySelector("#auction-permanent-bin");
@@ -1761,6 +1843,7 @@
       let renderedCurrentBagKey = null;
       let currentDraftedItemsKey = "";
       let previousDraftStatus = null;
+      let renderedSettingsKey = "";
       let audioContext = null;
       let chimeMuted = localStorage.getItem("frankenDraftTool:chimeMuted") === "true";
       let pendingConfirmation = null;
@@ -2309,6 +2392,18 @@
         poolSaveNameLabel.hidden = !poolSaveInput.checked;
       }
 
+      function getDraftSettingsRenderKey(settings) {
+        return JSON.stringify({
+          maxSeats: settings.maxSeats,
+          poolId: settings.poolId,
+          methodId: settings.methodId,
+          picksPerBag: settings.picksPerBag,
+          auctionSpeakerMode: auctionSpeakerModeValue(settings.auctionSpeakerMode),
+          itemsPerType: settings.itemsPerType || {},
+          typeOrder: settings.typeOrder || []
+        });
+      }
+
       function renderTypeInputs(pool, values) {
         itemTypeSettings.replaceChildren();
         const isAuction = selectedMethodIsAuction();
@@ -2333,7 +2428,9 @@
       }
 
       function renderDraftSettings(settings) {
-        if (settingsInitialized) {
+        const settingsKey = getDraftSettingsRenderKey(settings);
+
+        if (settingsInitialized && renderedSettingsKey === settingsKey) {
           return;
         }
 
@@ -2358,6 +2455,7 @@
           poolSaveNameInput.value = "";
           updateDraftSettingsVisibility();
           settingsInitialized = true;
+          renderedSettingsKey = settingsKey;
           return;
         }
 
@@ -2373,6 +2471,7 @@
         renderTypeInputs(pool, settings.itemsPerType);
         updateDraftSettingsVisibility();
         settingsInitialized = true;
+        renderedSettingsKey = settingsKey;
       }
 
       function collectDraftSettings() {
@@ -2391,6 +2490,18 @@
           typeOrder: poolById(poolSelect.value)?.defaultParameters.typeOrder || [],
           itemsPerType
         };
+      }
+
+      function setRoomSettingsEditable(canEdit) {
+        creatorPanel.classList.toggle("readonly", !canEdit);
+
+        for (const control of creatorPanel.querySelectorAll("input, select, textarea")) {
+          control.disabled = !canEdit;
+        }
+
+        saveRoomSettings.hidden = !canEdit;
+        startDraft.hidden = !canEdit;
+        poolUploadDrop.setAttribute("aria-disabled", String(!canEdit));
       }
 
       function poolUploadErrorMessage(error) {
@@ -2415,6 +2526,11 @@
 
       async function uploadPoolFile(file) {
         if (!file) {
+          return;
+        }
+
+        if (!hasHostRights()) {
+          roomMessage.textContent = "Only the host or an admin can change the room pool.";
           return;
         }
 
@@ -3345,75 +3461,101 @@
         return wrapper;
       }
 
+      function renderAuctionPlayerCard(player, auction, waitingIds, options = {}) {
+        const isExpanded = expandedAuctionPlayerIds.has(player.playerId);
+        const card = document.createElement("section");
+        card.className = [
+          "auction-player-card",
+          options.personal ? "personal" : "",
+          player.isSpeaker ? "speaker" : "",
+          waitingIds.has(player.playerId) ? "waiting" : "",
+          isExpanded ? "expanded" : ""
+        ].filter(Boolean).join(" ");
+        const header = document.createElement("header");
+        const name = document.createElement("strong");
+        name.append(options.personal ? `${player.name} (me)` : player.name);
+        appendHostBadge(name, player);
+
+        if (player.isSpeaker) {
+          const speakerBadge = document.createElement("span");
+          speakerBadge.className = "auction-speaker-badge";
+          speakerBadge.textContent = "Speaker";
+          name.append(speakerBadge);
+        }
+
+        const resources = document.createElement("span");
+        resources.textContent = `${player.credits} credits / ${player.mulliganTokens} mulligan / ${player.banTokens} ban`;
+        const picks = document.createElement("span");
+        picks.textContent = `${player.draftedItems.length} picked`;
+        const locks = document.createElement("span");
+
+        if (auction.stage === "speaker_order_bidding") {
+          locks.textContent = player.auctionBidLocked ? "Speaker bids locked" : "Speaker bids pending";
+        } else if (auction.stage === "bidding") {
+          locks.textContent = player.auctionBidLocked ? "Bids locked" : "Bids pending";
+        } else if (player.pickRecord) {
+          locks.textContent = `${player.pickRecord.bidKind} pick - ${player.pickRecord.cost} credits`;
+        }
+
+        header.append(name, resources, picks);
+
+        if (locks.textContent) {
+          header.append(locks);
+        }
+
+        card.append(header);
+        card.append(renderAuctionDraftedList(player));
+
+        const footer = document.createElement("footer");
+        appendAdminAction(footer, {
+          id: player.playerId,
+          host: player.host,
+          admin: player.admin
+        });
+
+        if ((player.draftedGroups || []).length > 0) {
+          const expand = document.createElement("button");
+          expand.type = "button";
+          expand.className = "secondary";
+          expand.dataset.auctionExpandPlayerId = player.playerId;
+          expand.textContent = isExpanded ? "Reduce Area" : "Expand Area";
+          footer.append(expand);
+        }
+
+        if (footer.children.length > 0) {
+          card.append(footer);
+        }
+
+        return card;
+      }
+
       function renderAuctionPlayers(auction) {
         auctionPlayers.replaceChildren();
+        auctionPersonalPlayer.replaceChildren();
         const waitingIds = getAuctionWaitingPlayerIds(auction);
+        const personalPlayer = auction.players.find((player) => player.playerId === currentViewerId);
+        const otherPlayers = personalPlayer
+          ? auction.players.filter((player) => player.playerId !== currentViewerId)
+          : auction.players;
 
-        for (const player of auction.players) {
-          const isExpanded = expandedAuctionPlayerIds.has(player.playerId);
-          const card = document.createElement("section");
-          card.className = [
-            "auction-player-card",
-            player.isSpeaker ? "speaker" : "",
-            waitingIds.has(player.playerId) ? "waiting" : "",
-            isExpanded ? "expanded" : ""
-          ].filter(Boolean).join(" ");
-          const header = document.createElement("header");
-          const name = document.createElement("strong");
-          name.append(player.name);
-          appendHostBadge(name, player);
+        auctionLayout.classList.toggle("no-personal", !personalPlayer);
+        auctionPersonalArea.hidden = !personalPlayer;
 
-          if (player.isSpeaker) {
-            const speakerBadge = document.createElement("span");
-            speakerBadge.className = "auction-speaker-badge";
-            speakerBadge.textContent = "Speaker";
-            name.append(speakerBadge);
-          }
+        if (personalPlayer) {
+          auctionPersonalPlayer.append(renderAuctionPlayerCard(personalPlayer, auction, waitingIds, {
+            personal: true
+          }));
+        }
 
-          const resources = document.createElement("span");
-          resources.textContent = `${player.credits} credits / ${player.mulliganTokens} mulligan / ${player.banTokens} ban`;
-          const picks = document.createElement("span");
-          picks.textContent = `${player.draftedItems.length} picked`;
-          const locks = document.createElement("span");
+        if (otherPlayers.length === 0) {
+          const empty = document.createElement("p");
+          empty.textContent = "No other players";
+          auctionPlayers.append(empty);
+          return;
+        }
 
-          if (auction.stage === "speaker_order_bidding") {
-            locks.textContent = player.auctionBidLocked ? "Speaker bids locked" : "Speaker bids pending";
-          } else if (auction.stage === "bidding") {
-            locks.textContent = player.auctionBidLocked ? "Bids locked" : "Bids pending";
-          } else if (player.pickRecord) {
-            locks.textContent = `${player.pickRecord.bidKind} pick - ${player.pickRecord.cost} credits`;
-          }
-
-          header.append(name, resources, picks);
-
-          if (locks.textContent) {
-            header.append(locks);
-          }
-
-          card.append(header);
-          card.append(renderAuctionDraftedList(player));
-
-          const footer = document.createElement("footer");
-          appendAdminAction(footer, {
-            id: player.playerId,
-            host: player.host,
-            admin: player.admin
-          });
-
-          if ((player.draftedGroups || []).length > 0) {
-            const expand = document.createElement("button");
-            expand.type = "button";
-            expand.className = "secondary";
-            expand.dataset.auctionExpandPlayerId = player.playerId;
-            expand.textContent = isExpanded ? "Reduce Area" : "Expand Area";
-            footer.append(expand);
-          }
-
-          if (footer.children.length > 0) {
-            card.append(footer);
-          }
-
-          auctionPlayers.append(card);
+        for (const player of otherPlayers) {
+          auctionPlayers.append(renderAuctionPlayerCard(player, auction, waitingIds));
         }
       }
 
@@ -3863,6 +4005,9 @@
         auctionPanel.hidden = draft.status !== "active" || draft.engine !== "auction" || !auction;
 
         if (auctionPanel.hidden) {
+          auctionLayout.classList.remove("no-personal");
+          auctionPersonalArea.hidden = true;
+          auctionPersonalPlayer.replaceChildren();
           auctionPlayers.replaceChildren();
           auctionControls.replaceChildren();
           auctionItems.replaceChildren();
@@ -4038,7 +4183,8 @@
         }
 
         const draftNotStarted = data.draft.status === "not_started";
-        creatorPanel.hidden = !hasHostRights() || !draftNotStarted;
+        creatorPanel.hidden = !draftNotStarted;
+        setRoomSettingsEditable(hasHostRights());
         restartDraft.hidden = !hasHostRights() || draftNotStarted;
         exportDraft.hidden = !["active", "complete"].includes(data.draft.status)
           || (data.draft.status === "active" && !hasHostRights());
@@ -4150,6 +4296,8 @@
           renderedCurrentBagKey = null;
           currentDraftedItemsKey = "";
           previousDraftStatus = null;
+          settingsInitialized = false;
+          renderedSettingsKey = "";
           selectedItemIds = new Set();
         }
 
@@ -4331,6 +4479,7 @@
         }
 
         settingsInitialized = false;
+        renderedSettingsKey = "";
         selectedItemIds = new Set();
         currentBagId = null;
         renderedCurrentBagKey = null;
@@ -4775,7 +4924,7 @@
         setParticipantAdmin(button.dataset.adminParticipantId, button.dataset.admin === "true");
       });
 
-      auctionPlayers.addEventListener("click", (event) => {
+      function handleAuctionPlayerAreaClick(event) {
         const adminButton = event.target.closest("button[data-admin-participant-id]");
 
         if (adminButton) {
@@ -4800,7 +4949,10 @@
         if (latestRoom) {
           renderRoom(latestRoom, { force: true });
         }
-      });
+      }
+
+      auctionPlayers.addEventListener("click", handleAuctionPlayerAreaClick);
+      auctionPersonalPlayer.addEventListener("click", handleAuctionPlayerAreaClick);
 
       draftGrouping.addEventListener("change", () => {
         if (latestRoom) {
