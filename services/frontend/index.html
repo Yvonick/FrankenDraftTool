@@ -45,12 +45,17 @@
       }
 
       main {
-        width: min(100% - 2rem, 112rem);
+        width: min(100% - 1rem, 120rem);
         display: grid;
-        gap: 1.25rem;
+        gap: 1rem;
         justify-items: center;
         padding: 1.5rem 0 2.5rem;
         text-align: center;
+      }
+
+      #room-view {
+        justify-items: stretch;
+        text-align: left;
       }
 
       h1,
@@ -210,6 +215,48 @@
         box-shadow: var(--shadow);
       }
 
+      .room-hero {
+        width: 100%;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem 1rem;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.8rem 1rem;
+        border: 1px solid rgb(62 99 138 / 0.72);
+        border-radius: 0.5rem;
+        background: linear-gradient(180deg, rgb(7 18 34 / 0.94), rgb(3 10 22 / 0.96));
+        box-shadow: 0 0.8rem 2rem rgb(0 0 0 / 0.28);
+      }
+
+      .room-title {
+        display: grid;
+        gap: 0.2rem;
+      }
+
+      #room-view .room-title h1 {
+        font-size: 1.8rem;
+        line-height: 1.05;
+      }
+
+      #room-view .room-title h2 {
+        color: var(--accent-2);
+        font-size: 1.15rem;
+      }
+
+      #room-status {
+        color: var(--muted);
+      }
+
+      .room-actions {
+        justify-content: flex-end;
+      }
+
+      .room-actions button {
+        min-height: 2.35rem;
+        padding: 0 0.85rem;
+      }
+
       .settings-grid,
       .spectator-grid {
         width: 100%;
@@ -295,7 +342,7 @@
 
       .reveal-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(min(100%, 32rem), 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
       }
 
       .final-draft-card {
@@ -304,6 +351,11 @@
 
       .final-draft-card > .item-grid {
         align-items: start;
+      }
+
+      .final-draft-card .item-stack > .item-card,
+      .final-draft-card .item-grid > .item-card {
+        flex-basis: 10.5rem;
       }
 
       .item-grid > .group-section {
@@ -597,8 +649,44 @@
         align-items: start;
       }
 
+      .draft-page-grid {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(16rem, 19rem);
+        gap: 1rem;
+        align-items: start;
+      }
+
+      #room-view[data-draft-status="not_started"] .draft-page-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .draft-main-stack,
+      .draft-side-stack {
+        min-width: 0;
+        display: grid;
+        gap: 1rem;
+        align-items: start;
+      }
+
+      .draft-side-stack {
+        grid-template-columns: 1fr;
+        align-content: start;
+      }
+
+      #room-view[data-draft-status="not_started"] .draft-side-stack {
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+      }
+
+      @media (min-width: 1120px) {
+        .draft-side-stack {
+          position: sticky;
+          top: 0.75rem;
+        }
+      }
+
       .round-table {
-        width: min(100%, 23rem);
+        width: min(100%, 15.5rem);
         aspect-ratio: 1;
         position: relative;
         border: 2px solid var(--line-strong);
@@ -622,8 +710,8 @@
       }
 
       .table-player {
-        width: 7rem;
-        min-height: 3.4rem;
+        width: 5.8rem;
+        min-height: 3rem;
         position: absolute;
         left: var(--x);
         top: var(--y);
@@ -631,12 +719,12 @@
         display: grid;
         gap: 0.15rem;
         place-items: center;
-        padding: 0.4rem;
+        padding: 0.32rem;
         border: 1px solid var(--line);
         border-radius: 0.5rem;
         background: rgb(6 16 31 / 0.94);
         box-shadow: 0 0.5rem 1rem rgb(0 0 0 / 0.22);
-        font-size: 0.78rem;
+        font-size: 0.72rem;
       }
 
       .table-player strong,
@@ -658,7 +746,7 @@
       .draft-panel-grid {
         width: 100%;
         display: grid;
-        grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 0.8fr);
+        grid-template-columns: minmax(0, 1.65fr) minmax(18rem, 0.85fr);
         gap: 1rem;
         align-items: start;
       }
@@ -676,7 +764,46 @@
         text-align: left;
       }
 
+      .draft-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem 1rem;
+        align-items: center;
+        justify-content: space-between;
+        justify-items: stretch;
+      }
+
+      .draft-toolbar label {
+        width: min(100%, 16rem);
+        display: grid;
+        gap: 0.3rem;
+      }
+
+      .draft-toolbar h3 {
+        color: var(--accent-2);
+      }
+
+      .bag-status-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .bag-status-row p {
+        color: var(--accent-2);
+        font-weight: 700;
+      }
+
+      #private-drafted-items {
+        max-height: 68vh;
+        overflow: auto;
+        padding-right: 0.15rem;
+      }
+
       .draft-section-header {
+        width: 100%;
         display: flex;
         flex-wrap: wrap;
         gap: 0.75rem;
@@ -819,12 +946,20 @@
           grid-template-columns: 1fr;
         }
 
+        .draft-page-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .draft-side-stack {
+          position: static;
+        }
+
         .draft-panel-grid {
           grid-template-columns: 1fr;
         }
 
         .round-table {
-          width: min(100%, 20rem);
+          width: min(100%, 18rem);
         }
       }
 
@@ -964,8 +1099,31 @@
       .auction-grid {
         width: 100%;
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 11.5rem), 1fr));
         gap: 0.75rem;
+      }
+
+      .auction-layout {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(14rem, 0.36fr) minmax(0, 1fr);
+        gap: 1rem;
+        align-items: start;
+      }
+
+      .auction-action-area,
+      .auction-main-area,
+      .auction-items-area,
+      .auction-roster-area {
+        min-width: 0;
+        display: grid;
+        gap: 0.75rem;
+        align-content: start;
+      }
+
+      .auction-action-area {
+        position: sticky;
+        top: 0.75rem;
       }
 
       .auction-player-card,
@@ -977,6 +1135,29 @@
         border-radius: 0.5rem;
         background: rgb(7 18 34 / 0.92);
         text-align: left;
+      }
+
+      .auction-player-card {
+        align-content: start;
+      }
+
+      .auction-player-card header {
+        display: grid;
+        gap: 0.25rem;
+      }
+
+      .auction-player-card footer {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .auction-player-card footer button {
+        min-height: 1.9rem;
+        padding: 0.2rem 0.5rem;
+        font-size: 0.78rem;
       }
 
       .auction-player-card.waiting {
@@ -1049,7 +1230,7 @@
       .auction-bin-row {
         width: 100%;
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 0.75rem;
       }
 
@@ -1070,13 +1251,27 @@
       .auction-drafted-list {
         display: grid;
         gap: 0.4rem;
-        max-height: 18rem;
+        max-height: 14rem;
         overflow: auto;
+      }
+
+      .auction-player-card.expanded .auction-drafted-list {
+        max-height: none;
+      }
+
+      .auction-drafted-group {
+        display: grid;
+        gap: 0.35rem;
+      }
+
+      .auction-drafted-group h4 {
+        color: var(--accent-2);
+        font-size: 0.9rem;
       }
 
       .auction-drafted-item {
         display: grid;
-        grid-template-columns: 3.2rem minmax(0, 1fr);
+        grid-template-columns: 2.9rem minmax(0, 1fr);
         gap: 0.55rem;
         align-items: center;
         padding: 0.4rem;
@@ -1097,6 +1292,16 @@
       .auction-drafted-item span {
         color: var(--muted);
         font-size: 0.85rem;
+      }
+
+      @media (max-width: 980px) {
+        .auction-layout {
+          grid-template-columns: 1fr;
+        }
+
+        .auction-action-area {
+          position: static;
+        }
       }
 
       .pool-type-list {
@@ -1218,16 +1423,20 @@
     </main>
 
     <main id="room-view" hidden>
-      <h1>FrankenDraftTool</h1>
-      <h2>Room <span id="room-number"></span></h2>
-      <div class="actions">
-        <button id="share-room" type="button">Share Room</button>
-        <button id="sit-down" class="secondary" type="button" hidden>Sit Down</button>
-        <button id="spectate-room" class="secondary" type="button" hidden>Become Spectator</button>
-        <button id="restart-draft" class="secondary" type="button" hidden>Restart Draft</button>
-        <button id="export-draft" class="secondary" type="button" hidden>Export TTS JSON</button>
+      <div class="room-hero">
+        <div class="room-title">
+          <h1>FrankenDraftTool</h1>
+          <h2>Room <span id="room-number"></span></h2>
+          <p id="room-status"></p>
+        </div>
+        <div class="actions room-actions">
+          <button id="share-room" type="button">Share Room</button>
+          <button id="sit-down" class="secondary" type="button" hidden>Sit Down</button>
+          <button id="spectate-room" class="secondary" type="button" hidden>Become Spectator</button>
+          <button id="restart-draft" class="secondary" type="button" hidden>Restart Draft</button>
+          <button id="export-draft" class="secondary" type="button" hidden>Export TTS JSON</button>
+        </div>
       </div>
-      <p id="room-status"></p>
 
       <section class="panel" id="creator-panel" hidden>
         <h3>Room Settings</h3>
@@ -1301,84 +1510,107 @@
         </div>
       </section>
 
-      <section class="panel" id="seating-panel">
-        <h3>Seated</h3>
-        <ul id="seated-people"></ul>
-        <p id="spectator-count"></p>
-      </section>
+      <div class="draft-page-grid">
+        <div class="draft-main-stack">
+          <section class="panel draft-toolbar" id="draft-display-panel" hidden>
+            <h3>Draft Controls</h3>
+            <label>
+              Organize drafted items by
+              <select id="draft-grouping">
+                <option value="type">Item type</option>
+                <option value="pick">Pick order</option>
+              </select>
+            </label>
+          </section>
 
-      <div class="room-overview">
-        <section class="panel" id="table-panel" hidden>
-          <h3>Round Table</h3>
-          <div class="round-table" id="round-table"></div>
-        </section>
-
-        <section class="panel" id="spectator-panel">
-          <h3>Spectators</h3>
-          <p id="spectator-summary"></p>
-          <div class="spectator-grid" id="named-spectators"></div>
-        </section>
-      </div>
-
-      <section class="panel" id="draft-display-panel" hidden>
-        <h3>Draft Display</h3>
-        <label>
-          Organize drafted items by
-          <select id="draft-grouping">
-            <option value="type">Item type</option>
-            <option value="pick">Pick order</option>
-          </select>
-        </label>
-      </section>
-
-      <section class="panel" id="player-draft-panel" hidden>
-        <h3>Your Draft</h3>
-        <div class="draft-panel-grid">
-          <section class="draft-subpanel">
+          <section class="panel" id="player-draft-panel" hidden>
             <div class="draft-section-header">
-              <h4>Current Bag</h4>
+              <h3>Your Draft</h3>
               <button id="chime-toggle" class="secondary" type="button" aria-pressed="false">Mute Chime</button>
             </div>
-            <p id="draft-instruction"></p>
-            <div class="item-grid" id="current-bag"></div>
+            <div class="draft-panel-grid">
+              <section class="draft-subpanel">
+                <div class="draft-section-header">
+                  <h4>Current Bag</h4>
+                </div>
+                <div class="bag-status-row">
+                  <p id="draft-instruction"></p>
+                </div>
+                <div class="item-grid" id="current-bag"></div>
+              </section>
+              <section class="draft-subpanel">
+                <div class="draft-section-header">
+                  <h4>Drafted Items</h4>
+                  <div class="checklist-control">
+                    <button id="draft-checklist-button" class="secondary" type="button">Checklist</button>
+                    <div class="draft-checklist-popover" id="draft-checklist"></div>
+                  </div>
+                </div>
+                <div class="item-grid" id="private-drafted-items"></div>
+              </section>
+            </div>
+            <button id="lock-choice" type="button">Lock Choices</button>
           </section>
-          <section class="draft-subpanel">
+
+          <section class="panel" id="auction-panel" hidden>
             <div class="draft-section-header">
-              <h4>Drafted Items</h4>
-              <div class="checklist-control">
-                <button id="draft-checklist-button" class="secondary" type="button">Checklist</button>
-                <div class="draft-checklist-popover" id="draft-checklist"></div>
+              <h3>Nomination Auction</h3>
+              <p id="auction-stage"></p>
+            </div>
+            <div class="auction-layout">
+              <section class="auction-action-area">
+                <h4>Action</h4>
+                <div class="actions" id="auction-controls"></div>
+                <div class="auction-bin-row">
+                  <div class="auction-bin" id="auction-temporary-bin"></div>
+                  <div class="auction-bin" id="auction-permanent-bin"></div>
+                </div>
+              </section>
+              <div class="auction-main-area">
+                <section class="auction-items-area">
+                  <h4>Current Draftable Items</h4>
+                  <div class="item-grid" id="auction-items"></div>
+                </section>
+                <section class="auction-roster-area">
+                  <h4>Players</h4>
+                  <div class="auction-grid" id="auction-players"></div>
+                </section>
               </div>
             </div>
-            <div class="item-grid" id="private-drafted-items"></div>
+          </section>
+
+          <section class="panel" id="super-draft-panel" hidden>
+            <h3>Super Spectator View</h3>
+            <div class="reveal-grid" id="super-draft-areas"></div>
+          </section>
+
+          <section class="panel" id="reveal-panel" hidden>
+            <h3>Final Drafts</h3>
+            <div class="actions" id="reveal-actions">
+            </div>
+            <div class="reveal-grid" id="revealed-drafts"></div>
           </section>
         </div>
-        <button id="lock-choice" type="button">Lock Choices</button>
-      </section>
 
-      <section class="panel" id="auction-panel" hidden>
-        <h3>Nomination Auction</h3>
-        <p id="auction-stage"></p>
-        <div class="auction-grid" id="auction-players"></div>
-        <div class="auction-bin-row">
-          <div class="auction-bin" id="auction-temporary-bin"></div>
-          <div class="auction-bin" id="auction-permanent-bin"></div>
-        </div>
-        <div class="actions" id="auction-controls"></div>
-        <div class="item-grid" id="auction-items"></div>
-      </section>
+        <aside class="draft-side-stack">
+          <section class="panel" id="seating-panel">
+            <h3>Seated</h3>
+            <ul id="seated-people"></ul>
+            <p id="spectator-count"></p>
+          </section>
 
-      <section class="panel" id="super-draft-panel" hidden>
-        <h3>Super Spectator View</h3>
-        <div class="reveal-grid" id="super-draft-areas"></div>
-      </section>
+          <section class="panel" id="table-panel" hidden>
+            <h3>Round Table</h3>
+            <div class="round-table" id="round-table"></div>
+          </section>
 
-      <section class="panel" id="reveal-panel" hidden>
-        <h3>Final Drafts</h3>
-        <div class="actions" id="reveal-actions">
-        </div>
-        <div class="reveal-grid" id="revealed-drafts"></div>
-      </section>
+          <section class="panel" id="spectator-panel">
+            <h3>Spectators</h3>
+            <p id="spectator-summary"></p>
+            <div class="spectator-grid" id="named-spectators"></div>
+          </section>
+        </aside>
+      </div>
 
       <p class="message" id="room-message"></p>
     </main>
@@ -1524,6 +1756,7 @@
       let auctionSelectedItemId = null;
       let auctionBidKey = "";
       let auctionPendingBids = null;
+      let expandedAuctionPlayerIds = new Set();
       let currentBagId = null;
       let renderedCurrentBagKey = null;
       let currentDraftedItemsKey = "";
@@ -3053,17 +3286,60 @@
         const wrapper = document.createElement("div");
         wrapper.className = "auction-drafted-list";
 
-        if (player.draftedGroups.length === 0) {
+        if ((player.draftedGroups || []).length === 0) {
           const empty = document.createElement("span");
           empty.textContent = "No picks yet";
           wrapper.append(empty);
           return wrapper;
         }
 
-        for (const group of player.draftedGroups) {
-          for (const item of group.items) {
-            wrapper.append(renderAuctionDraftedItem(item, group));
+        if (draftGrouping.value === "pick") {
+          for (const group of player.draftedGroups || []) {
+            const section = document.createElement("section");
+            section.className = "auction-drafted-group";
+            const title = document.createElement("h4");
+            title.textContent = group.label || `Pick ${group.pickNumber}`;
+            section.append(title);
+
+            for (const item of group.items || []) {
+              section.append(renderAuctionDraftedItem(item, group));
+            }
+
+            wrapper.append(section);
           }
+
+          return wrapper;
+        }
+
+        const grouped = new Map();
+
+        for (const group of player.draftedGroups || []) {
+          for (const item of group.items || []) {
+            if (!grouped.has(item.type)) {
+              grouped.set(item.type, []);
+            }
+
+            grouped.get(item.type).push({ item, group });
+          }
+        }
+
+        const orderedTypes = [
+          ...(latestRoom?.draft.typeOrder || []).filter((type) => grouped.has(type)),
+          ...[...grouped.keys()].filter((type) => !(latestRoom?.draft.typeOrder || []).includes(type))
+        ];
+
+        for (const type of orderedTypes) {
+          const section = document.createElement("section");
+          section.className = "auction-drafted-group";
+          const title = document.createElement("h4");
+          title.textContent = type;
+          section.append(title);
+
+          for (const record of grouped.get(type)) {
+            section.append(renderAuctionDraftedItem(record.item, record.group));
+          }
+
+          wrapper.append(section);
         }
 
         return wrapper;
@@ -3074,12 +3350,15 @@
         const waitingIds = getAuctionWaitingPlayerIds(auction);
 
         for (const player of auction.players) {
+          const isExpanded = expandedAuctionPlayerIds.has(player.playerId);
           const card = document.createElement("section");
           card.className = [
             "auction-player-card",
             player.isSpeaker ? "speaker" : "",
-            waitingIds.has(player.playerId) ? "waiting" : ""
+            waitingIds.has(player.playerId) ? "waiting" : "",
+            isExpanded ? "expanded" : ""
           ].filter(Boolean).join(" ");
+          const header = document.createElement("header");
           const name = document.createElement("strong");
           name.append(player.name);
           appendHostBadge(name, player);
@@ -3105,13 +3384,35 @@
             locks.textContent = `${player.pickRecord.bidKind} pick - ${player.pickRecord.cost} credits`;
           }
 
-          card.append(name, resources, picks);
+          header.append(name, resources, picks);
 
           if (locks.textContent) {
-            card.append(locks);
+            header.append(locks);
           }
 
+          card.append(header);
           card.append(renderAuctionDraftedList(player));
+
+          const footer = document.createElement("footer");
+          appendAdminAction(footer, {
+            id: player.playerId,
+            host: player.host,
+            admin: player.admin
+          });
+
+          if ((player.draftedGroups || []).length > 0) {
+            const expand = document.createElement("button");
+            expand.type = "button";
+            expand.className = "secondary";
+            expand.dataset.auctionExpandPlayerId = player.playerId;
+            expand.textContent = isExpanded ? "Reduce Area" : "Expand Area";
+            footer.append(expand);
+          }
+
+          if (footer.children.length > 0) {
+            card.append(footer);
+          }
+
           auctionPlayers.append(card);
         }
       }
@@ -3677,16 +3978,29 @@
           section.className = "item-card final-draft-card";
           const title = document.createElement("h4");
           title.textContent = player.name;
-          const items = document.createElement("div");
-          items.className = "item-grid";
-          section.append(title, items);
-          renderGroupedItems(items, player.items, player.groups);
+
+          if (draft.engine === "auction") {
+            section.append(title, renderAuctionDraftedList({
+              draftedItems: player.items,
+              draftedGroups: player.groups
+            }));
+          } else {
+            const items = document.createElement("div");
+            items.className = "item-grid";
+            section.append(title, items);
+            renderGroupedItems(items, player.items, player.groups);
+          }
+
           revealedDrafts.append(section);
         }
       }
 
       function renderDraft(draft, priorDraftStatus = null) {
-        draftDisplayPanel.hidden = draft.status === "not_started" || draft.engine === "auction";
+        const hasDraftedAreas = draft.status === "complete"
+          || draft.engine === "auction"
+          || Boolean(draft.currentPlayer)
+          || Boolean(draft.superSpectator);
+        draftDisplayPanel.hidden = draft.status === "not_started" || !hasDraftedAreas;
         renderTable(draft);
         renderPlayerDraft(draft, priorDraftStatus);
         renderAuctionDraft(draft);
@@ -3712,6 +4026,8 @@
 
         const priorDraftStatus = latestRoom?.draft?.status || previousDraftStatus;
         latestRoom = data;
+        roomView.dataset.draftStatus = data.draft.status;
+        roomView.dataset.draftEngine = data.draft.engine || "";
         renderSeated(data.seated);
         roomStatus.textContent = `${data.seated.length} of ${data.maxSeats} seats filled`;
         renderSpectators(data);
@@ -3724,7 +4040,8 @@
         const draftNotStarted = data.draft.status === "not_started";
         creatorPanel.hidden = !hasHostRights() || !draftNotStarted;
         restartDraft.hidden = !hasHostRights() || draftNotStarted;
-        exportDraft.hidden = !hasHostRights() || !["active", "complete"].includes(data.draft.status);
+        exportDraft.hidden = !["active", "complete"].includes(data.draft.status)
+          || (data.draft.status === "active" && !hasHostRights());
         seatingPanel.hidden = !draftNotStarted;
         startDraft.disabled = data.seated.length === 0;
         sitDown.hidden = currentRole !== "spectator" || !draftNotStarted;
@@ -4456,6 +4773,33 @@
         }
 
         setParticipantAdmin(button.dataset.adminParticipantId, button.dataset.admin === "true");
+      });
+
+      auctionPlayers.addEventListener("click", (event) => {
+        const adminButton = event.target.closest("button[data-admin-participant-id]");
+
+        if (adminButton) {
+          setParticipantAdmin(adminButton.dataset.adminParticipantId, adminButton.dataset.admin === "true");
+          return;
+        }
+
+        const expandButton = event.target.closest("button[data-auction-expand-player-id]");
+
+        if (!expandButton) {
+          return;
+        }
+
+        const playerId = expandButton.dataset.auctionExpandPlayerId;
+
+        if (expandedAuctionPlayerIds.has(playerId)) {
+          expandedAuctionPlayerIds.delete(playerId);
+        } else {
+          expandedAuctionPlayerIds.add(playerId);
+        }
+
+        if (latestRoom) {
+          renderRoom(latestRoom, { force: true });
+        }
       });
 
       draftGrouping.addEventListener("change", () => {
