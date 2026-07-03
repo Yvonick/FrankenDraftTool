@@ -8,6 +8,6 @@
     "start:backend": "node services/backend/server.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24 <25"
   }
 }
