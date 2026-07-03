@@ -816,8 +816,6 @@
       }
 
       #private-drafted-items {
-        max-height: 68vh;
-        overflow: auto;
         padding-right: 0.15rem;
       }
 
@@ -1162,6 +1160,14 @@
         grid-area: action;
       }
 
+      .auction-action-area.active-action {
+        border-radius: 0.5rem;
+        outline: 1px solid var(--gold);
+        outline-offset: 0.25rem;
+        background: rgb(246 215 135 / 0.08);
+        box-shadow: inset 0 0 0 1px rgb(246 215 135 / 0.22), 0 0 1rem rgb(246 215 135 / 0.12);
+      }
+
       .auction-items-area {
         grid-area: items;
       }
@@ -1365,12 +1371,10 @@
       }
 
       .auction-sticky-actions {
-        width: min(34rem, calc(100vw - 2rem));
-        position: fixed;
-        left: 50%;
+        width: 100%;
+        position: sticky;
         bottom: 0.75rem;
         z-index: 25;
-        transform: translateX(-50%);
         padding: 0.6rem;
         border: 1px solid var(--line-strong);
         border-radius: 0.5rem;
@@ -1725,8 +1729,9 @@
           </section>
 
           <section class="panel" id="reveal-panel" hidden>
-            <h3>Final Drafts</h3>
-            <div class="actions" id="reveal-actions">
+            <div class="draft-section-header">
+              <h3>Final Drafts</h3>
+              <div class="draft-section-tools" id="reveal-tools"></div>
             </div>
             <div class="reveal-grid" id="revealed-drafts"></div>
           </section>
@@ -1879,6 +1884,7 @@
       const auctionPanel = document.querySelector("#auction-panel");
       const auctionStage = document.querySelector("#auction-stage");
       const auctionLayout = document.querySelector("#auction-layout");
+      const auctionActionArea = document.querySelector(".auction-action-area");
       const auctionPersonalArea = document.querySelector("#auction-personal-area");
       const auctionPersonalPlayer = document.querySelector("#auction-personal-player");
       const auctionPlayers = document.querySelector("#auction-players");
@@ -1890,6 +1896,7 @@
       const superDraftPanel = document.querySelector("#super-draft-panel");
       const superDraftAreas = document.querySelector("#super-draft-areas");
       const revealPanel = document.querySelector("#reveal-panel");
+      const revealTools = document.querySelector("#reveal-tools");
       const exportDraft = document.querySelector("#export-draft");
       const revealedDrafts = document.querySelector("#revealed-drafts");
       const joinModal = document.querySelector("#join-modal");
@@ -4083,6 +4090,7 @@
 
         if (auctionPanel.hidden) {
           auctionLayout.classList.remove("no-personal");
+          auctionActionArea.classList.remove("active-action");
           auctionPersonalArea.hidden = true;
           auctionPersonalPlayer.replaceChildren();
           auctionPlayers.replaceChildren();
@@ -4096,6 +4104,10 @@
 
         renderAuctionStage(auction);
         auctionControls.replaceChildren();
+        auctionActionArea.classList.toggle(
+          "active-action",
+          auction.stage === "nomination" && auction.speakerId === currentViewerId
+        );
         renderAuctionPlayers(auction);
         renderAuctionBins(auction);
         renderAuctionItems(auction);
@@ -4220,6 +4232,12 @@
 
         if (bagDraftActive) {
           bagDraftedTools.append(draftGroupingControl);
+          draftDisplayPanel.hidden = true;
+          return;
+        }
+
+        if (draft.status === "complete") {
+          revealTools.append(draftGroupingControl);
           draftDisplayPanel.hidden = true;
           return;
         }

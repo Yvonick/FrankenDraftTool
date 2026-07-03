@@ -1929,13 +1929,23 @@ function startAuctionBidding(draft, stage = "bidding") {
   nomination.pickOrder = [];
   nomination.pickCursor = 0;
   nomination.revealedBids = [];
+  draft.auction.stage = stage;
 
   for (const player of draft.players) {
-    player.currentBids = null;
-    player.auctionBidLocked = false;
+    if (player.credits <= 0) {
+      const bids = { first: 0, second: 0, tie: 0 };
+      player.currentBids = bids;
+      player.auctionBidLocked = true;
+      nomination.bids[player.id] = bids;
+    } else {
+      player.currentBids = null;
+      player.auctionBidLocked = false;
+    }
   }
 
-  draft.auction.stage = stage;
+  if (draft.players.every((player) => player.auctionBidLocked)) {
+    resolveAuctionBids(draft);
+  }
 }
 
 function startSpeakerOrderBidding(draft) {
