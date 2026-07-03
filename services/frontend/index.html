@@ -666,7 +666,7 @@
       .draft-page-grid {
         width: 100%;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(16rem, 19rem);
+        grid-template-columns: minmax(0, 1fr);
         gap: 1rem;
         align-items: start;
       }
@@ -675,32 +675,23 @@
         grid-template-columns: 1fr;
       }
 
-      .draft-main-stack,
-      .draft-side-stack {
+      .draft-main-stack {
         min-width: 0;
         display: grid;
         gap: 1rem;
         align-items: start;
       }
 
-      .draft-side-stack {
-        grid-template-columns: 1fr;
-        align-content: start;
-      }
-
-      @media (min-width: 1120px) {
-        .draft-side-stack {
-          position: sticky;
-          top: 0.75rem;
-        }
-      }
-
       .participants-footer {
         width: 100%;
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+        grid-template-columns: minmax(16rem, 0.8fr) minmax(18rem, 1.2fr);
         gap: 1rem;
         align-items: start;
+      }
+
+      #seating-panel:not([hidden]) ~ #table-panel:not([hidden]) {
+        grid-column: auto;
       }
 
       .round-table {
@@ -834,7 +825,8 @@
       }
 
       .draft-section-header > button,
-      .checklist-control {
+      .checklist-control,
+      .draft-section-tools {
         position: relative;
         width: fit-content;
         justify-self: end;
@@ -879,6 +871,17 @@
         justify-content: space-between;
         color: var(--muted);
         font-size: 0.92rem;
+      }
+
+      .draft-grouping-control {
+        width: min(100%, 14rem);
+        display: grid;
+        gap: 0.3rem;
+        color: var(--muted);
+      }
+
+      .draft-section-tools .draft-grouping-control {
+        width: min(14rem, 100%);
       }
 
       .checklist-row strong {
@@ -968,11 +971,11 @@
           grid-template-columns: 1fr;
         }
 
-        .draft-side-stack {
-          position: static;
+        .draft-panel-grid {
+          grid-template-columns: 1fr;
         }
 
-        .draft-panel-grid {
+        .participants-footer {
           grid-template-columns: 1fr;
         }
 
@@ -1127,7 +1130,8 @@
         grid-template-columns: minmax(13rem, 0.28fr) minmax(0, 1fr) minmax(20rem, 0.62fr);
         grid-template-areas:
           "action items personal"
-          "others others others";
+          "others others others"
+          "bins bins bins";
         gap: 1rem;
         align-items: start;
       }
@@ -1136,7 +1140,8 @@
       .auction-main-area,
       .auction-items-area,
       .auction-personal-area,
-      .auction-roster-area {
+      .auction-roster-area,
+      .auction-bins-area {
         min-width: 0;
         display: grid;
         gap: 0.75rem;
@@ -1159,11 +1164,16 @@
         grid-area: others;
       }
 
+      .auction-bins-area {
+        grid-area: bins;
+      }
+
       .auction-layout.no-personal {
         grid-template-columns: minmax(13rem, 0.28fr) minmax(0, 1fr);
         grid-template-areas:
           "action items"
-          "others others";
+          "others others"
+          "bins bins";
       }
 
       .auction-action-area {
@@ -1291,6 +1301,10 @@
         gap: 0.75rem;
       }
 
+      .auction-item-actions {
+        justify-content: flex-start;
+      }
+
       .auction-control-form {
         width: 100%;
         display: grid;
@@ -1362,7 +1376,8 @@
             "action"
             "items"
             "personal"
-            "others";
+            "others"
+            "bins";
         }
 
         .auction-action-area {
@@ -1374,7 +1389,8 @@
           grid-template-areas:
             "action"
             "items"
-            "others";
+            "others"
+            "bins";
         }
       }
 
@@ -1430,6 +1446,7 @@
       .modal-backdrop {
         position: fixed;
         inset: 0;
+        z-index: 100;
         display: grid;
         place-items: center;
         padding: 1rem;
@@ -1507,6 +1524,8 @@
           <button id="share-room" type="button">Share Room</button>
           <button id="sit-down" class="secondary" type="button" hidden>Sit Down</button>
           <button id="spectate-room" class="secondary" type="button" hidden>Become Spectator</button>
+          <button id="auction-undo-top" class="secondary" type="button" hidden>Undo Last Action</button>
+          <button id="auction-shuffle-top" class="secondary" type="button" hidden>Shuffle Pool</button>
           <button id="restart-draft" class="secondary" type="button" hidden>Restart Draft</button>
           <button id="export-draft" class="secondary" type="button" hidden>Export TTS JSON</button>
         </div>
@@ -1563,15 +1582,8 @@
                 <input id="pool-upload-input" type="file" accept=".json,application/json">
               </label>
             </div>
-            <div class="settings-grid">
-              <label class="toggle-row">
-                <input id="pool-save-input" type="checkbox">
-                Save this pool
-              </label>
-              <label id="pool-save-name-label">
-                Pool name
-                <input id="pool-save-name-input" maxlength="80">
-              </label>
+            <div class="actions settings-actions">
+              <button id="save-pool" class="secondary" type="button">Save Pool</button>
             </div>
           </section>
           <section class="settings-section settings-section-counts">
@@ -1580,7 +1592,7 @@
           </section>
         </div>
         <div class="actions">
-          <button id="save-room-settings" type="button">Save Settings</button>
+          <button id="save-room-settings" type="button" hidden>Save Settings</button>
           <button id="start-draft" type="button">Start Draft</button>
         </div>
       </section>
@@ -1589,7 +1601,7 @@
         <div class="draft-main-stack">
           <section class="panel draft-toolbar" id="draft-display-panel" hidden>
             <h3>Draft Controls</h3>
-            <label>
+            <label class="draft-grouping-control" id="draft-grouping-control">
               Organize drafted items by
               <select id="draft-grouping">
                 <option value="type">Item type</option>
@@ -1616,6 +1628,7 @@
               <section class="draft-subpanel">
                 <div class="draft-section-header">
                   <h4>Drafted Items</h4>
+                  <div class="draft-section-tools" id="bag-drafted-tools"></div>
                   <div class="checklist-control">
                     <button id="draft-checklist-button" class="secondary" type="button">Checklist</button>
                     <div class="draft-checklist-popover" id="draft-checklist"></div>
@@ -1636,14 +1649,11 @@
               <section class="auction-action-area">
                 <h4>Action</h4>
                 <div class="actions" id="auction-controls"></div>
-                <div class="auction-bin-row">
-                  <div class="auction-bin" id="auction-temporary-bin"></div>
-                  <div class="auction-bin" id="auction-permanent-bin"></div>
-                </div>
               </section>
               <section class="auction-items-area">
                 <h4>Current Draftable Items</h4>
                 <div class="item-grid" id="auction-items"></div>
+                <div class="actions auction-item-actions" id="auction-item-actions"></div>
               </section>
               <section class="auction-personal-area" id="auction-personal-area">
                 <h4>Your Area</h4>
@@ -1652,6 +1662,12 @@
               <section class="auction-roster-area">
                 <h4>Other Players</h4>
                 <div class="auction-grid" id="auction-players"></div>
+              </section>
+              <section class="auction-bins-area">
+                <div class="auction-bin-row">
+                  <div class="auction-bin" id="auction-temporary-bin"></div>
+                  <div class="auction-bin" id="auction-permanent-bin"></div>
+                </div>
               </section>
             </div>
           </section>
@@ -1669,12 +1685,6 @@
           </section>
         </div>
 
-        <aside class="draft-side-stack">
-          <section class="panel" id="table-panel" hidden>
-            <h3>Round Table</h3>
-            <div class="round-table" id="round-table"></div>
-          </section>
-        </aside>
       </div>
 
       <div class="participants-footer">
@@ -1682,6 +1692,11 @@
           <h3>Seated Players</h3>
           <ul id="seated-people"></ul>
           <p id="spectator-count"></p>
+        </section>
+
+        <section class="panel" id="table-panel" hidden>
+          <h3>Round Table</h3>
+          <div class="round-table" id="round-table"></div>
         </section>
 
         <section class="panel" id="spectator-panel">
@@ -1733,6 +1748,20 @@
       </form>
     </div>
 
+    <div class="modal-backdrop" id="pool-save-modal" hidden>
+      <form class="modal" id="pool-save-form">
+        <h3>Save Pool</h3>
+        <label>
+          Pool name
+          <input id="pool-save-name-input" maxlength="80" placeholder="Pool name">
+        </label>
+        <div class="actions">
+          <button type="submit">Save Pool</button>
+          <button id="cancel-pool-save" class="secondary" type="button">Cancel</button>
+        </div>
+      </form>
+    </div>
+
     <script>
       const backendOrigin =
         window.location.hostname === "yvonick-frankendrafttool.onrender.com"
@@ -1757,6 +1786,8 @@
       const shareRoom = document.querySelector("#share-room");
       const sitDown = document.querySelector("#sit-down");
       const spectateRoom = document.querySelector("#spectate-room");
+      const auctionUndoTop = document.querySelector("#auction-undo-top");
+      const auctionShuffleTop = document.querySelector("#auction-shuffle-top");
       const restartDraft = document.querySelector("#restart-draft");
       const roomStatus = document.querySelector("#room-status");
       const seatingPanel = document.querySelector("#seating-panel");
@@ -1773,9 +1804,7 @@
       const poolUploadDrop = document.querySelector("#pool-upload-drop");
       const poolUploadInput = document.querySelector("#pool-upload-input");
       const poolUploadLabel = document.querySelector("#pool-upload-label");
-      const poolSaveInput = document.querySelector("#pool-save-input");
-      const poolSaveNameLabel = document.querySelector("#pool-save-name-label");
-      const poolSaveNameInput = document.querySelector("#pool-save-name-input");
+      const savePoolButton = document.querySelector("#save-pool");
       const picksPerBagInput = document.querySelector("#picks-per-bag-input");
       const bagSettingsSection = document.querySelector("#bag-settings-section");
       const auctionSettingsSection = document.querySelector("#auction-settings-section");
@@ -1787,6 +1816,7 @@
       const tablePanel = document.querySelector("#table-panel");
       const roundTable = document.querySelector("#round-table");
       const draftDisplayPanel = document.querySelector("#draft-display-panel");
+      const draftGroupingControl = document.querySelector("#draft-grouping-control");
       const playerDraftPanel = document.querySelector("#player-draft-panel");
       const draftGrouping = document.querySelector("#draft-grouping");
       const draftInstruction = document.querySelector("#draft-instruction");
@@ -1794,6 +1824,7 @@
       const chimeToggle = document.querySelector("#chime-toggle");
       const lockChoice = document.querySelector("#lock-choice");
       const privateDraftedItems = document.querySelector("#private-drafted-items");
+      const bagDraftedTools = document.querySelector("#bag-drafted-tools");
       const draftChecklist = document.querySelector("#draft-checklist");
       const auctionPanel = document.querySelector("#auction-panel");
       const auctionStage = document.querySelector("#auction-stage");
@@ -1805,10 +1836,10 @@
       const auctionPermanentBin = document.querySelector("#auction-permanent-bin");
       const auctionControls = document.querySelector("#auction-controls");
       const auctionItems = document.querySelector("#auction-items");
+      const auctionItemActions = document.querySelector("#auction-item-actions");
       const superDraftPanel = document.querySelector("#super-draft-panel");
       const superDraftAreas = document.querySelector("#super-draft-areas");
       const revealPanel = document.querySelector("#reveal-panel");
-      const revealActions = document.querySelector("#reveal-actions");
       const exportDraft = document.querySelector("#export-draft");
       const revealedDrafts = document.querySelector("#revealed-drafts");
       const joinModal = document.querySelector("#join-modal");
@@ -1825,6 +1856,10 @@
       const confirmMessage = document.querySelector("#confirm-message");
       const confirmAccept = document.querySelector("#confirm-accept");
       const confirmCancel = document.querySelector("#confirm-cancel");
+      const poolSaveModal = document.querySelector("#pool-save-modal");
+      const poolSaveForm = document.querySelector("#pool-save-form");
+      const poolSaveNameInput = document.querySelector("#pool-save-name-input");
+      const cancelPoolSave = document.querySelector("#cancel-pool-save");
       let roomEvents = null;
       let currentRoomNumber = null;
       let currentRole = null;
@@ -1844,6 +1879,7 @@
       let currentDraftedItemsKey = "";
       let previousDraftStatus = null;
       let renderedSettingsKey = "";
+      let roomSettingsSaveTimer = null;
       let audioContext = null;
       let chimeMuted = localStorage.getItem("frankenDraftTool:chimeMuted") === "true";
       let pendingConfirmation = null;
@@ -2389,7 +2425,6 @@
         bagSettingsSection.hidden = isAuction;
         auctionSettingsSection.hidden = !isAuction;
         auctionSpeakerModeLabel.hidden = !isAuction;
-        poolSaveNameLabel.hidden = !poolSaveInput.checked;
       }
 
       function getDraftSettingsRenderKey(settings) {
@@ -2451,8 +2486,6 @@
           picksPerBagInput.value = settings.picksPerBag;
           auctionSpeakerModeSelect.value = auctionSpeakerModeValue(settings.auctionSpeakerMode);
           itemTypeSettings.replaceChildren();
-          poolSaveInput.checked = false;
-          poolSaveNameInput.value = "";
           updateDraftSettingsVisibility();
           settingsInitialized = true;
           renderedSettingsKey = settingsKey;
@@ -2466,8 +2499,6 @@
         seatLimitInput.value = settings.maxSeats ?? pool.defaultParameters.maxSeats;
         picksPerBagInput.value = settings.picksPerBag;
         auctionSpeakerModeSelect.value = auctionSpeakerModeValue(settings.auctionSpeakerMode ?? pool.defaultParameters.auctionSpeakerMode);
-        poolSaveInput.checked = false;
-        poolSaveNameInput.value = pool.name;
         renderTypeInputs(pool, settings.itemsPerType);
         updateDraftSettingsVisibility();
         settingsInitialized = true;
@@ -2499,7 +2530,8 @@
           control.disabled = !canEdit;
         }
 
-        saveRoomSettings.hidden = !canEdit;
+        saveRoomSettings.hidden = true;
+        savePoolButton.hidden = !canEdit;
         startDraft.hidden = !canEdit;
         poolUploadDrop.setAttribute("aria-disabled", String(!canEdit));
       }
@@ -2561,12 +2593,11 @@
           seatLimitInput.value = data.pool.defaultParameters.maxSeats;
           picksPerBagInput.value = data.pool.defaultParameters.picksPerBag;
           auctionSpeakerModeSelect.value = auctionSpeakerModeValue(data.pool.defaultParameters.auctionSpeakerMode);
-          poolSaveInput.checked = false;
-          poolSaveNameInput.value = data.pool.name;
           renderTypeInputs(data.pool, data.pool.defaultParameters.itemsPerType);
           updateDraftSettingsVisibility();
+          await saveSettings({ silent: true });
           poolUploadLabel.textContent = `${data.pool.name} uploaded`;
-          roomMessage.textContent = "Pool uploaded and selected. Save settings to use it for this room.";
+          roomMessage.textContent = "Pool uploaded and selected.";
         } catch (error) {
           poolUploadLabel.textContent = "Drop JSON or choose file";
           roomMessage.textContent = poolUploadErrorMessage(error.message);
@@ -3639,7 +3670,7 @@
           checkbox.closest(".item-card")?.classList.toggle("selected", selected);
         }
 
-        const confirm = auctionControls.querySelector("[data-auction-confirm]");
+        const confirm = auctionItemActions.querySelector("[data-auction-confirm]");
 
         if (confirm) {
           confirm.disabled = !auctionSelectedItemId;
@@ -3648,6 +3679,7 @@
 
       function renderAuctionItems(auction, action = null) {
         auctionItems.replaceChildren();
+        auctionItemActions.replaceChildren();
         const items = auction.currentNomination?.items || [];
         const selectionKey = auctionItemSelectionKey(auction, action);
 
@@ -3704,7 +3736,7 @@
           }
         });
         actionRow.append(button);
-        auctionControls.append(actionRow);
+        auctionItemActions.append(actionRow);
       }
 
       function renderAuctionNominationControls(auction) {
@@ -3804,32 +3836,6 @@
         });
         presetLabel.append(preset, "Preset no-ban");
         auctionControls.append(presetLabel);
-      }
-
-      function renderAuctionUndoControl(auction) {
-        if (!hasHostRights() || !auction.undoAvailable) {
-          return;
-        }
-
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "secondary";
-        button.textContent = "Undo Last Action";
-        button.addEventListener("click", undoAuctionAction);
-        auctionControls.append(button);
-      }
-
-      function renderAuctionShufflePoolControl() {
-        if (!hasHostRights()) {
-          return;
-        }
-
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "secondary";
-        button.textContent = "Shuffle Pool";
-        button.addEventListener("click", shuffleAuctionPool);
-        auctionControls.append(button);
       }
 
       function renderAuctionBanControls(auction) {
@@ -4011,6 +4017,7 @@
           auctionPlayers.replaceChildren();
           auctionControls.replaceChildren();
           auctionItems.replaceChildren();
+          auctionItemActions.replaceChildren();
           auctionBidKey = "";
           auctionPendingBids = null;
           return;
@@ -4018,8 +4025,6 @@
 
         renderAuctionStage(auction);
         auctionControls.replaceChildren();
-        renderAuctionUndoControl(auction);
-        renderAuctionShufflePoolControl();
         renderAuctionPlayers(auction);
         renderAuctionBins(auction);
         renderAuctionItems(auction);
@@ -4102,20 +4107,9 @@
       function renderReveal(draft) {
         revealPanel.hidden = draft.status !== "complete";
         revealedDrafts.replaceChildren();
-        revealActions.querySelector("[data-auction-undo]")?.remove();
 
         if (draft.status !== "complete") {
           return;
-        }
-
-        if (draft.engine === "auction" && draft.undoAvailable && hasHostRights()) {
-          const undo = document.createElement("button");
-          undo.type = "button";
-          undo.className = "secondary";
-          undo.dataset.auctionUndo = "true";
-          undo.textContent = "Undo Last Action";
-          undo.addEventListener("click", undoAuctionAction);
-          revealActions.append(undo);
         }
 
         for (const player of draft.revealedDrafts) {
@@ -4140,12 +4134,42 @@
         }
       }
 
+      function updateAuctionTopControls(draft) {
+        const auctionDraft = draft.engine === "auction" && ["active", "complete"].includes(draft.status);
+        const canAdmin = auctionDraft && hasHostRights();
+        const undoAvailable = draft.auction?.undoAvailable ?? draft.undoAvailable;
+
+        auctionUndoTop.hidden = !canAdmin || !undoAvailable;
+        auctionShuffleTop.hidden = !canAdmin || draft.status !== "active";
+      }
+
+      function placeDraftGroupingControl(draft, hasDraftedAreas) {
+        const bagDraftActive = draft.status === "active"
+          && draft.engine !== "auction"
+          && Boolean(draft.currentPlayer);
+
+        if (bagDraftActive) {
+          bagDraftedTools.append(draftGroupingControl);
+          draftDisplayPanel.hidden = true;
+          return;
+        }
+
+        if (draft.status !== "not_started" && hasDraftedAreas) {
+          draftDisplayPanel.append(draftGroupingControl);
+          draftDisplayPanel.hidden = false;
+          return;
+        }
+
+        draftDisplayPanel.hidden = true;
+      }
+
       function renderDraft(draft, priorDraftStatus = null) {
         const hasDraftedAreas = draft.status === "complete"
           || draft.engine === "auction"
           || Boolean(draft.currentPlayer)
           || Boolean(draft.superSpectator);
-        draftDisplayPanel.hidden = draft.status === "not_started" || !hasDraftedAreas;
+        placeDraftGroupingControl(draft, hasDraftedAreas);
+        updateAuctionTopControls(draft);
         renderTable(draft);
         renderPlayerDraft(draft, priorDraftStatus);
         renderAuctionDraft(draft);
@@ -4405,6 +4429,92 @@
         }
       }
 
+      function scheduleRoomSettingsSave(event) {
+        if (!hasHostRights() || latestRoom?.draft.status !== "not_started") {
+          return;
+        }
+
+        if (event?.target === poolUploadInput) {
+          return;
+        }
+
+        window.clearTimeout(roomSettingsSaveTimer);
+        roomSettingsSaveTimer = window.setTimeout(() => {
+          saveSettings({ silent: true });
+        }, 450);
+      }
+
+      function openPoolSaveModal() {
+        const pool = poolById(poolSelect.value);
+
+        if (!hasHostRights()) {
+          roomMessage.textContent = "Only the host or an admin can save a public pool.";
+          return;
+        }
+
+        poolSaveNameInput.value = pool?.name || "";
+        poolSaveModal.hidden = false;
+        poolSaveNameInput.focus();
+        poolSaveNameInput.select();
+      }
+
+      function closePoolSaveModal() {
+        poolSaveModal.hidden = true;
+      }
+
+      async function saveCurrentRoomPool(event) {
+        event.preventDefault();
+        const poolName = poolSaveNameInput.value.trim();
+
+        if (!poolName) {
+          roomMessage.textContent = "Name the pool before saving it.";
+          poolSaveNameInput.focus();
+          return;
+        }
+
+        const settingsSaved = await saveSettings({ silent: true });
+
+        if (!settingsSaved) {
+          return;
+        }
+
+        const submit = poolSaveForm.querySelector("button[type='submit']");
+        submit.disabled = true;
+
+        try {
+          const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/pool/save`), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(hostPayload({
+              participantId: currentViewerId,
+              poolName
+            }))
+          });
+          const data = await response.json();
+
+          if (!response.ok) {
+            roomMessage.textContent = data.error === "draft_already_started"
+              ? "Pools can only be saved before the draft starts."
+              : "Could not save this pool.";
+            return;
+          }
+
+          if (data.pools) {
+            pools = data.pools;
+          } else if (data.savedPool) {
+            addOrReplacePool(data.savedPool);
+          }
+
+          closePoolSaveModal();
+          renderRoom(data, { force: true });
+          roomMessage.textContent = "Pool saved.";
+        } finally {
+          submit.disabled = false;
+        }
+      }
+
       async function handleStartDraft() {
         startDraft.disabled = true;
         const settingsSaved = await saveSettings({ silent: true });
@@ -4420,9 +4530,7 @@
             "Content-Type": "application/json"
           },
           body: JSON.stringify(hostPayload({
-            participantId: currentViewerId,
-            savePool: poolSaveInput.checked,
-            poolName: poolSaveNameInput.value
+            participantId: currentViewerId
           }))
         });
         const data = await response.json();
@@ -4758,7 +4866,6 @@
         seatLimitInput.value = pool.defaultParameters.maxSeats;
         picksPerBagInput.value = pool.defaultParameters.picksPerBag;
         auctionSpeakerModeSelect.value = auctionSpeakerModeValue(pool.defaultParameters.auctionSpeakerMode);
-        poolSaveNameInput.value = pool.name;
         renderTypeInputs(pool, pool.defaultParameters.itemsPerType);
         updateDraftSettingsVisibility();
       });
@@ -4781,7 +4888,7 @@
         updateDraftSettingsVisibility();
       });
 
-      poolSaveInput.addEventListener("change", updateDraftSettingsVisibility);
+      creatorPanel.addEventListener("change", scheduleRoomSettingsSave);
 
       poolUploadInput.addEventListener("change", () => {
         uploadPoolFile(poolUploadInput.files?.[0]);
@@ -4962,8 +5069,13 @@
 
       shareRoom.addEventListener("click", copyShareUrl);
       saveRoomSettings.addEventListener("click", () => saveSettings());
+      savePoolButton.addEventListener("click", openPoolSaveModal);
+      poolSaveForm.addEventListener("submit", saveCurrentRoomPool);
+      cancelPoolSave.addEventListener("click", closePoolSaveModal);
       startDraft.addEventListener("click", handleStartDraft);
       restartDraft.addEventListener("click", handleRestartDraft);
+      auctionUndoTop.addEventListener("click", undoAuctionAction);
+      auctionShuffleTop.addEventListener("click", shuffleAuctionPool);
       exportDraft.addEventListener("click", exportDraftJson);
       lockChoice.addEventListener("click", lockCurrentChoice);
 

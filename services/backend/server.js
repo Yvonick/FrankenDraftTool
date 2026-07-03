@@ -1200,6 +1200,66 @@ async function handleRoomSettings(roomNumber, request, response) {
   sendJson(response, 200, getRoomSnapshot(roomNumber, body.viewerId || body.actorId || body.participantId));
 }
 
+function saveRoomPoolWithDefaults(room, poolName) {
+  return savePool(room.draftSettings.poolId, {
+    name: cleanOptionalName(poolName),
+    defaultParameters: {
+      maxSeats: room.maxSeats,
+      picksPerBag: room.draftSettings.picksPerBag,
+      auctionSpeakerMode: cleanAuctionSpeakerMode(room.draftSettings.auctionSpeakerMode),
+      typeOrder: room.draftSettings.typeOrder,
+      itemsPerType: room.draftSettings.itemsPerType
+    }
+  });
+}
+
+async function handleSaveRoomPool(roomNumber, request, response) {
+  const room = rooms.get(roomNumber);
+
+  if (!room) {
+    sendJson(response, 404, { error: "room_not_found" });
+    return;
+  }
+
+  let body;
+
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
+    sendJson(response, 400, { error: error.message });
+    return;
+  }
+
+  if (!hasRoomAdminRights(room, body)) {
+    sendAdminRequired(response);
+    return;
+  }
+
+  if (room.draft) {
+    sendJson(response, 409, { error: "draft_already_started" });
+    return;
+  }
+
+  const savedPool = saveRoomPoolWithDefaults(room, body.poolName);
+
+  if (!savedPool) {
+    sendJson(response, 400, { error: "invalid_pool" });
+    return;
+  }
+
+  room.draftSettings = {
+    ...room.draftSettings,
+    poolId: savedPool.id
+  };
+
+  broadcastRoom(roomNumber);
+  sendJson(response, 200, {
+    ...getRoomSnapshot(roomNumber, body.viewerId || body.actorId || body.participantId),
+    savedPool: getPoolSummary(savedPool),
+    pools: listPublicPools().map(getPoolSummary)
+  });
+}
+
 function handleRoomDetails(roomNumber, request, response) {
   touchRoom(rooms.get(roomNumber));
   const snapshot = getRoomSnapshot(roomNumber);
@@ -2196,13 +2256,7 @@ async function handleStartDraft(roomNumber, request, response) {
   }
 
   if (body.savePool) {
-    const savedPool = savePool(room.draftSettings.poolId, {
-      name: cleanOptionalName(body.poolName),
-      defaultParameters: {
-        ...room.draftSettings,
-        maxSeats: room.maxSeats
-      }
-    });
+    const savedPool = saveRoomPoolWithDefaults(room, body.poolName);
 
     if (!savedPool) {
       sendJson(response, 400, { error: "invalid_pool" });
@@ -3021,6 +3075,13 @@ const server = http.createServer(async (request, response) => {
 
   if (settingsMatch && request.method === "POST") {
     await handleRoomSettings(settingsMatch[1], request, response);
+    return;
+  }
+
+  const saveRoomPoolMatch = url.pathname.match(/^\/api\/rooms\/(\d{6})\/pool\/save$/);
+
+  if (saveRoomPoolMatch && request.method === "POST") {
+    await handleSaveRoomPool(saveRoomPoolMatch[1], request, response);
     return;
   }
 
