@@ -406,7 +406,7 @@ function isWildcardItem(item) {
 }
 
 function cloneItem(item) {
-  return {
+  const cloned = {
     id: item.id,
     name: item.name,
     content: item.content,
@@ -421,6 +421,12 @@ function cloneItem(item) {
       ? item.linkedItems.map(cloneItem)
       : []
   };
+
+  if (item.pickedBy) {
+    cloned.pickedBy = item.pickedBy;
+  }
+
+  return cloned;
 }
 
 function cloneJson(value, options = {}) {
@@ -445,9 +451,15 @@ function compactDraftItem(item) {
     return cloneItem(item);
   }
 
-  return {
+  const compacted = {
     [compactItemRefKey]: item.id
   };
+
+  if (item.pickedBy) {
+    compacted.pickedBy = item.pickedBy;
+  }
+
+  return compacted;
 }
 
 function addItemsToIndex(index, items = []) {
@@ -478,8 +490,7 @@ function hydrateCompactUndoValue(value, itemIndex) {
 
   if (typeof value[compactItemRefKey] === "string") {
     const sourceItem = itemIndex.get(value[compactItemRefKey]);
-
-    return sourceItem ? cloneItem(sourceItem) : {
+    const hydrated = sourceItem ? cloneItem(sourceItem) : {
       id: value[compactItemRefKey],
       name: "Missing item",
       content: "",
@@ -490,6 +501,12 @@ function hydrateCompactUndoValue(value, itemIndex) {
       sourceObjectType: "Unknown",
       linkedItems: []
     };
+
+    if (value.pickedBy) {
+      hydrated.pickedBy = value.pickedBy;
+    }
+
+    return hydrated;
   }
 
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
@@ -505,7 +522,9 @@ function hydrateAuctionUndoDraft(snapshot) {
     return null;
   }
 
-  return hydrateCompactUndoValue(snapshot, createPoolItemIndex(pool));
+  const draft = hydrateCompactUndoValue(snapshot, createPoolItemIndex(pool));
+  repairAuctionPickedItems(draft);
+  return draft;
 }
 
 function getItemSnapshot(item) {
@@ -1835,6 +1854,59 @@ function getAuctionPlayer(draft, playerId) {
   return draft.players.find((player) => player.id === playerId) || null;
 }
 
+function getAuctionDraftedItemOwners(draft) {
+  const owners = new Map();
+
+  for (const player of draft.players || []) {
+    const owner = {
+      playerId: player.id,
+      playerName: player.name
+    };
+    const draftedItems = [
+      ...(player.draftedItems || []),
+      ...(player.draftedGroups || []).flatMap((group) => group.items || [])
+    ];
+
+    for (const item of draftedItems) {
+      if (!item?.id) {
+        continue;
+      }
+
+      if (!item.pickedBy) {
+        item.pickedBy = owner;
+      }
+
+      if (!owners.has(item.id)) {
+        owners.set(item.id, item.pickedBy);
+      }
+    }
+  }
+
+  return owners;
+}
+
+function repairAuctionPickedItems(draft) {
+  if (!draft || draft.engine !== "auction") {
+    return;
+  }
+
+  const nomination = draft.auction?.currentNomination;
+
+  if (!nomination) {
+    return;
+  }
+
+  const owners = getAuctionDraftedItemOwners(draft);
+
+  for (const item of nomination.items || []) {
+    const owner = owners.get(item.id);
+
+    if (owner && !item.pickedBy) {
+      item.pickedBy = owner;
+    }
+  }
+}
+
 function getAuctionSpeaker(draft) {
   if (!draft.auction.speakerOrder.length) {
     return null;
@@ -3016,11 +3088,17 @@ async function handleAuctionPick(roomNumber, request, response) {
     return;
   }
 
+  repairAuctionPickedItems(draft);
   const itemId = String(body.itemId || "");
-  const itemIndex = nomination.items.findIndex((item) => item.id === itemId && !item.pickedBy);
+  const itemIndex = nomination.items.findIndex((item) => item.id === itemId);
 
   if (itemIndex < 0) {
     sendJson(response, 400, { error: "item_not_in_nomination" });
+    return;
+  }
+
+  if (nomination.items[itemIndex].pickedBy) {
+    sendJson(response, 409, { error: "item_already_picked" });
     return;
   }
 
