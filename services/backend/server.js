@@ -509,7 +509,7 @@ function hydrateAuctionUndoDraft(snapshot) {
 }
 
 function getItemSnapshot(item) {
-  return {
+  const snapshot = {
     id: item.id,
     name: item.name,
     content: item.content,
@@ -525,6 +525,12 @@ function getItemSnapshot(item) {
       ? item.linkedItems.map(getItemSnapshot)
       : []
   };
+
+  if (item.pickedBy) {
+    snapshot.pickedBy = item.pickedBy;
+  }
+
+  return snapshot;
 }
 
 function getDraftGroupSnapshot(group) {
@@ -760,11 +766,13 @@ function createTtsAuctionCurrentBags(pool, draft, index, usedGuids) {
 
   const nominationBags = [];
 
-  if (nomination.items?.length) {
+  const openNominationItems = (nomination.items || []).filter((item) => !item.pickedBy);
+
+  if (openNominationItems.length) {
     nominationBags.push(createTtsCurrentBag({
       nickname: `Current Nomination - ${nomination.type}`,
       description: `Items currently open during ${draft.auction.stage}`,
-      items: nomination.items,
+      items: openNominationItems,
       pool,
       index: nominationBags.length,
       usedGuids,
@@ -2146,8 +2154,10 @@ function finishAuctionNomination(draft) {
     return;
   }
 
-  if (nomination.items.length > 0) {
-    draft.auction.permanentBin.push(...nomination.items);
+  const unpickedItems = nomination.items.filter((item) => !item.pickedBy);
+
+  if (unpickedItems.length > 0) {
+    draft.auction.permanentBin.push(...unpickedItems);
   }
 
   if (nomination.temporaryBin.length > 0) {
@@ -3007,7 +3017,7 @@ async function handleAuctionPick(roomNumber, request, response) {
   }
 
   const itemId = String(body.itemId || "");
-  const itemIndex = nomination.items.findIndex((item) => item.id === itemId);
+  const itemIndex = nomination.items.findIndex((item) => item.id === itemId && !item.pickedBy);
 
   if (itemIndex < 0) {
     sendJson(response, 400, { error: "item_not_in_nomination" });
@@ -3015,7 +3025,7 @@ async function handleAuctionPick(roomNumber, request, response) {
   }
 
   pushAuctionUndo(draft);
-  const [item] = nomination.items.splice(itemIndex, 1);
+  const item = nomination.items[itemIndex];
   player.draftedItems.push(item);
   player.draftedGroups.push({
     id: crypto.randomUUID(),
@@ -3029,6 +3039,10 @@ async function handleAuctionPick(roomNumber, request, response) {
   pickRecord.itemId = item.id;
   pickRecord.itemName = item.name;
   pickRecord.itemOrder = item.order || null;
+  item.pickedBy = {
+    playerId: player.id,
+    playerName: player.name
+  };
   nomination.pickCursor += 1;
 
   if (nomination.pickCursor >= nomination.pickOrder.length) {

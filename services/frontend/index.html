@@ -582,6 +582,25 @@
         opacity: 0.45;
       }
 
+      .item-banner {
+        position: absolute;
+        left: 0.65rem;
+        right: 0.65rem;
+        top: 0.65rem;
+        z-index: 3;
+        display: grid;
+        place-items: center;
+        min-height: 1.65rem;
+        padding: 0.2rem 0.45rem;
+        border: 1px solid rgb(246 215 135 / 0.55);
+        border-radius: 0.35rem;
+        color: #1f1602;
+        background: rgb(246 215 135 / 0.9);
+        font-size: 0.82rem;
+        font-weight: 800;
+        text-align: center;
+      }
+
       .selection-control {
         width: 1.35rem;
         height: 1.35rem;
@@ -892,6 +911,14 @@
         width: min(14rem, 100%);
       }
 
+      .draft-section-tools {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+        justify-content: flex-end;
+      }
+
       .checklist-row strong {
         color: var(--text);
         font-size: 0.92rem;
@@ -1160,12 +1187,12 @@
         grid-area: action;
       }
 
-      .auction-action-area.active-action {
+      .auction-control-form.active-action {
+        padding: 0.75rem;
+        border: 2px solid var(--gold);
         border-radius: 0.5rem;
-        outline: 1px solid var(--gold);
-        outline-offset: 0.25rem;
-        background: rgb(246 215 135 / 0.08);
-        box-shadow: inset 0 0 0 1px rgb(246 215 135 / 0.22), 0 0 1rem rgb(246 215 135 / 0.12);
+        background: rgb(246 215 135 / 0.1);
+        box-shadow: inset 0 0 0 1px rgb(246 215 135 / 0.3), 0 0 1.15rem rgb(246 215 135 / 0.16);
       }
 
       .auction-items-area {
@@ -1316,6 +1343,10 @@
         justify-content: flex-start;
       }
 
+      #auction-items .item-stack > .item-card {
+        flex-basis: 14.5rem;
+      }
+
       .auction-control-form {
         width: 100%;
         display: grid;
@@ -1374,7 +1405,7 @@
         width: 100%;
         position: sticky;
         bottom: 0.75rem;
-        z-index: 25;
+        z-index: 8;
         padding: 0.6rem;
         border: 1px solid var(--line-strong);
         border-radius: 0.5rem;
@@ -1680,7 +1711,7 @@
                 <div class="draft-section-header">
                   <h4>Drafted Items</h4>
                   <div class="draft-section-tools" id="bag-drafted-tools"></div>
-                  <div class="checklist-control">
+                  <div class="checklist-control" id="draft-checklist-control">
                     <button id="draft-checklist-button" class="secondary" type="button">Checklist</button>
                     <div class="draft-checklist-popover" id="draft-checklist"></div>
                   </div>
@@ -1707,7 +1738,10 @@
                 <div class="actions auction-item-actions" id="auction-item-actions"></div>
               </section>
               <section class="auction-personal-area" id="auction-personal-area">
-                <h4>Your Area</h4>
+                <div class="draft-section-header">
+                  <h4>Your Area</h4>
+                  <div class="draft-section-tools" id="auction-personal-tools"></div>
+                </div>
                 <div id="auction-personal-player"></div>
               </section>
               <section class="auction-roster-area">
@@ -1880,12 +1914,13 @@
       const lockChoice = document.querySelector("#lock-choice");
       const privateDraftedItems = document.querySelector("#private-drafted-items");
       const bagDraftedTools = document.querySelector("#bag-drafted-tools");
+      const draftChecklistControl = document.querySelector("#draft-checklist-control");
       const draftChecklist = document.querySelector("#draft-checklist");
       const auctionPanel = document.querySelector("#auction-panel");
       const auctionStage = document.querySelector("#auction-stage");
       const auctionLayout = document.querySelector("#auction-layout");
-      const auctionActionArea = document.querySelector(".auction-action-area");
       const auctionPersonalArea = document.querySelector("#auction-personal-area");
+      const auctionPersonalTools = document.querySelector("#auction-personal-tools");
       const auctionPersonalPlayer = document.querySelector("#auction-personal-player");
       const auctionPlayers = document.querySelector("#auction-players");
       const auctionTemporaryBin = document.querySelector("#auction-temporary-bin");
@@ -1935,6 +1970,9 @@
       let currentBagId = null;
       let renderedCurrentBagKey = null;
       let currentDraftedItemsKey = "";
+      let auctionItemsRenderKey = "";
+      let auctionControlsRenderKey = "";
+      let auctionPlayersRenderKey = "";
       let previousDraftStatus = null;
       let renderedSettingsKey = "";
       let roomSettingsSaveTimer = null;
@@ -2298,6 +2336,15 @@
           card.append(control);
         }
 
+        const bannerText = options.bannerText || (item.pickedBy ? `Picked by ${item.pickedBy.playerName}` : "");
+
+        if (bannerText) {
+          const banner = document.createElement("div");
+          banner.className = "item-banner";
+          banner.textContent = bannerText;
+          card.append(banner);
+        }
+
         if (item.imageUrl) {
           card.append(renderItemImage(item));
         }
@@ -2355,9 +2402,9 @@
         }));
       }
 
-      function setGroupBasis(wrapper, itemCount) {
+      function setGroupBasis(wrapper, itemCount, itemBasisRem = 13) {
         const columns = Math.min(Math.max(itemCount, 1), 6);
-        const basis = (columns * 13) + ((columns - 1) * 0.75);
+        const basis = (columns * itemBasisRem) + ((columns - 1) * 0.75);
         wrapper.style.setProperty("--group-basis", `${basis}rem`);
       }
 
@@ -2374,7 +2421,7 @@
         for (const section of groupItemsByType(items, options.typeOrder || preferredTypeOrder())) {
           const wrapper = document.createElement("section");
           wrapper.className = "group-section";
-          setGroupBasis(wrapper, section.items.length);
+          setGroupBasis(wrapper, section.items.length, options.itemBasisRem || 13);
           const title = document.createElement("h4");
           title.textContent = options.titleForType
             ? options.titleForType(section.label)
@@ -3638,9 +3685,35 @@
       }
 
       function renderAuctionPlayers(auction) {
+        const waitingIds = getAuctionWaitingPlayerIds(auction);
+        const playersRenderKey = JSON.stringify({
+          stage: auction.stage,
+          grouping: draftGrouping.value,
+          waiting: [...waitingIds].sort(),
+          expanded: [...expandedAuctionPlayerIds].sort(),
+          othersExpanded: otherAuctionAreasExpanded,
+          players: auction.players.map((player) => ({
+            id: player.playerId,
+            credits: player.credits,
+            mulliganTokens: player.mulliganTokens,
+            banTokens: player.banTokens,
+            noBanPreset: player.noBanPreset,
+            bidLocked: player.auctionBidLocked,
+            speaker: player.isSpeaker,
+            host: player.host,
+            admin: player.admin,
+            pickRecord: player.pickRecord ? `${player.pickRecord.bidKind}:${player.pickRecord.cost}` : "",
+            drafted: (player.draftedGroups || []).map((group) => `${group.id}:${(group.items || []).map((item) => item.id).join(",")}`).join("|")
+          }))
+        });
+
+        if (auctionPlayersRenderKey === playersRenderKey) {
+          return;
+        }
+
+        auctionPlayersRenderKey = playersRenderKey;
         auctionPlayers.replaceChildren();
         auctionPersonalPlayer.replaceChildren();
-        const waitingIds = getAuctionWaitingPlayerIds(auction);
         const personalPlayer = auction.players.find((player) => player.playerId === currentViewerId);
         const otherPlayers = personalPlayer
           ? auction.players.filter((player) => player.playerId !== currentViewerId)
@@ -3650,6 +3723,9 @@
         auctionPersonalArea.hidden = !personalPlayer;
 
         if (personalPlayer) {
+          renderDraftChecklist(getDraftTypeProgress({
+            draftedItems: personalPlayer.draftedItems
+          }, latestRoom?.draft));
           auctionPersonalPlayer.append(renderAuctionPlayerCard(personalPlayer, auction, waitingIds, {
             personal: true
           }));
@@ -3691,6 +3767,55 @@
           nomination.banPlayerId || "",
           nomination.items.map((item) => item.id).join(",")
         ].join(":");
+      }
+
+      function auctionItemsRenderKeyFor(auction, action) {
+        const nomination = auction.currentNomination;
+
+        return [
+          auctionItemSelectionKey(auction, action),
+          (nomination?.items || [])
+            .map((item) => `${item.id}:${item.pickedBy?.playerId || ""}`)
+            .join("|"),
+          (latestRoom?.draft.typeOrder || []).join("|")
+        ].join("::");
+      }
+
+      function auctionBidRecapKey(recap) {
+        if (!recap) {
+          return "";
+        }
+
+        return [
+          recap.type || "",
+          recap.isSpeakerOrder ? "speaker" : "items",
+          (recap.pickOrder || []).map((record) => `${record.playerId}:${record.bidKind}:${record.cost}:${record.itemId || ""}`).join("|"),
+          (recap.revealedBids || []).map((record) => `${record.playerId}:${record.bids?.first || 0}:${record.bids?.second || 0}:${record.bids?.tie || 0}`).join("|")
+        ].join(";");
+      }
+
+      function auctionControlsRenderKeyFor(auction) {
+        const nomination = auction.currentNomination;
+        const player = auction.player || {};
+        const recap = nomination?.revealedBids?.length ? nomination : auction.lastBidRecap;
+
+        return [
+          auction.stage,
+          auction.speakerId || "",
+          nomination?.type || "",
+          nomination?.banPlayerId || "",
+          nomination?.currentPickPlayerId || "",
+          nomination?.pickCursor ?? "",
+          (auction.eligibleTypes || []).join("|"),
+          JSON.stringify(auction.nominationsByType || {}),
+          player.playerId || "",
+          player.credits ?? "",
+          player.banTokens ?? "",
+          player.noBanPreset ? "no-ban" : "",
+          player.auctionBidLocked ? "locked" : "open",
+          `${player.currentBids?.first || 0}:${player.currentBids?.second || 0}:${player.currentBids?.tie || 0}`,
+          auctionBidRecapKey(recap)
+        ].join("::");
       }
 
       function auctionBiddingKey(auction) {
@@ -3755,8 +3880,6 @@
       }
 
       function renderAuctionItems(auction, action = null) {
-        auctionItems.replaceChildren();
-        auctionItemActions.replaceChildren();
         const items = auction.currentNomination?.items || [];
         const selectionKey = auctionItemSelectionKey(auction, action);
 
@@ -3764,6 +3887,21 @@
           auctionSelectionKey = selectionKey;
           auctionSelectedItemId = null;
         }
+
+        if (auctionSelectedItemId && items.some((item) => item.id === auctionSelectedItemId && item.pickedBy)) {
+          auctionSelectedItemId = null;
+        }
+
+        const renderKey = auctionItemsRenderKeyFor(auction, action);
+
+        if (auctionItemsRenderKey === renderKey) {
+          updateAuctionSelectionControls();
+          return;
+        }
+
+        auctionItemsRenderKey = renderKey;
+        auctionItems.replaceChildren();
+        auctionItemActions.replaceChildren();
 
         if (items.length === 0) {
           const empty = document.createElement("p");
@@ -3774,14 +3912,23 @@
 
         renderTypeSections(auctionItems, items, {
           typeOrder: latestRoom?.draft.typeOrder,
-          itemOptions: action
-            ? (item) => ({
+          itemBasisRem: 14.5,
+          itemOptions: (item) => {
+            if (!action) {
+              return item.pickedBy
+                ? { available: false, bannerText: `Picked by ${item.pickedBy.playerName}` }
+                : {};
+            }
+
+            return {
               checkable: true,
               auctionSelection: true,
               selectionName: "auction-item",
-              selected: auctionSelectedItemId === item.id
-            })
-            : null
+              available: !item.pickedBy,
+              selected: auctionSelectedItemId === item.id && !item.pickedBy,
+              bannerText: item.pickedBy ? `Picked by ${item.pickedBy.playerName}` : ""
+            };
+          }
         });
 
         if (!action) {
@@ -3809,7 +3956,7 @@
         button.textContent = action.confirmLabel;
         button.disabled = !auctionSelectedItemId;
         button.addEventListener("click", () => {
-          const item = items.find((candidate) => candidate.id === auctionSelectedItemId);
+          const item = items.find((candidate) => candidate.id === auctionSelectedItemId && !candidate.pickedBy);
 
           if (item) {
             action.onConfirm(item);
@@ -3830,7 +3977,7 @@
         }
 
         const form = document.createElement("form");
-        form.className = "auction-control-form";
+        form.className = "auction-control-form active-action";
         const label = document.createElement("label");
         const select = document.createElement("select");
 
@@ -3907,7 +4054,7 @@
       function renderAuctionNoBanPresetControl(auction) {
         const player = auction.player;
 
-        if (!player) {
+        if (!player || player.banTokens <= 0) {
           return;
         }
 
@@ -4084,50 +4231,65 @@
         });
       }
 
+      function hasAuctionItemAction(auction) {
+        const nomination = auction.currentNomination;
+
+        return (auction.stage === "ban" && nomination?.banPlayerId === currentViewerId)
+          || (auction.stage === "picking" && nomination?.currentPickPlayerId === currentViewerId);
+      }
+
       function renderAuctionDraft(draft) {
         const auction = draft.auction;
         auctionPanel.hidden = draft.status !== "active" || draft.engine !== "auction" || !auction;
 
         if (auctionPanel.hidden) {
           auctionLayout.classList.remove("no-personal");
-          auctionActionArea.classList.remove("active-action");
           auctionPersonalArea.hidden = true;
           auctionPersonalPlayer.replaceChildren();
           auctionPlayers.replaceChildren();
           auctionControls.replaceChildren();
           auctionItems.replaceChildren();
           auctionItemActions.replaceChildren();
+          auctionItemsRenderKey = "";
+          auctionControlsRenderKey = "";
+          auctionPlayersRenderKey = "";
           auctionBidKey = "";
           auctionPendingBids = null;
           return;
         }
 
         renderAuctionStage(auction);
-        auctionControls.replaceChildren();
-        auctionActionArea.classList.toggle(
-          "active-action",
-          auction.stage === "nomination" && auction.speakerId === currentViewerId
-        );
         renderAuctionPlayers(auction);
         renderAuctionBins(auction);
-        renderAuctionItems(auction);
-        renderAuctionBidRecap(auction);
-        renderAuctionNoBanPresetControl(auction);
 
-        if (auction.stage === "speaker_order_bidding") {
-          renderAuctionBidControls(auction);
-        } else if (auction.stage === "nomination") {
-          renderAuctionNominationControls(auction);
-        } else if (auction.stage === "wildcard") {
-          renderAuctionWildcardControls(auction);
-        } else if (auction.stage === "mulligan") {
-          renderAuctionMulliganControls(auction);
-        } else if (auction.stage === "ban") {
-          renderAuctionBanControls(auction);
-        } else if (auction.stage === "bidding") {
-          renderAuctionBidControls(auction);
-        } else if (auction.stage === "picking") {
-          renderAuctionPickControls(auction);
+        if (!hasAuctionItemAction(auction)) {
+          renderAuctionItems(auction);
+        }
+
+        const controlsRenderKey = auctionControlsRenderKeyFor(auction);
+
+        if (auctionControlsRenderKey !== controlsRenderKey) {
+          auctionControlsRenderKey = controlsRenderKey;
+          auctionControls.replaceChildren();
+
+          if (auction.stage === "speaker_order_bidding") {
+            renderAuctionBidControls(auction);
+          } else if (auction.stage === "nomination") {
+            renderAuctionNominationControls(auction);
+          } else if (auction.stage === "wildcard") {
+            renderAuctionWildcardControls(auction);
+          } else if (auction.stage === "mulligan") {
+            renderAuctionMulliganControls(auction);
+          } else if (auction.stage === "ban") {
+            renderAuctionBanControls(auction);
+          } else if (auction.stage === "bidding") {
+            renderAuctionBidControls(auction);
+          } else if (auction.stage === "picking") {
+            renderAuctionPickControls(auction);
+          }
+
+          renderAuctionBidRecap(auction);
+          renderAuctionNoBanPresetControl(auction);
         }
       }
 
@@ -4229,9 +4391,19 @@
         const bagDraftActive = draft.status === "active"
           && draft.engine !== "auction"
           && Boolean(draft.currentPlayer);
+        const auctionDraftActive = draft.status === "active"
+          && draft.engine === "auction";
 
         if (bagDraftActive) {
           bagDraftedTools.append(draftGroupingControl);
+          bagDraftedTools.append(draftChecklistControl);
+          draftDisplayPanel.hidden = true;
+          return;
+        }
+
+        if (auctionDraftActive) {
+          auctionPersonalTools.append(draftGroupingControl);
+          auctionPersonalTools.append(draftChecklistControl);
           draftDisplayPanel.hidden = true;
           return;
         }
