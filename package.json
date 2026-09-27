@@ -7,10 +7,14 @@
     "dev": "node scripts/dev-sites.mjs",
     "build": "node scripts/build-sites.mjs",
     "test": "node --test tests/*.test.mjs",
-    "dev:backend": "node services/backend/server.js",
-    "start:backend": "node services/backend/server.js"
+    "db:generate": "drizzle-kit generate"
   },
   "engines": {
     "node": ">=24 <25"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.11",
+    "drizzle-orm": "^0.45.3",
+    "esbuild": "^0.28.2"
   }
 }

@@ -1,22 +1,17 @@
 services:
-  backend:
-    build:
-      context: ./services/backend
+  app:
+    build: .
     environment:
-      PORT: 3000
-    expose:
-      - "3000"
+      SITES_DEV_HOST: 0.0.0.0
+      SITES_DEV_PORT: 8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - draft-data:/app/.sites-runtime/storage
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5
-
-  frontend:
-    build:
-      context: ./services/frontend
-    depends_on:
-      backend:
-        condition: service_healthy
-    ports:
-      - "8080:80"
+volumes:
+  draft-data:

@@ -3,11 +3,14 @@ import { readFile } from "node:fs/promises";
 import { resolve, sep, extname } from "node:path";
 import { Readable } from "node:stream";
 import { createWorker } from "../services/sites/worker.mjs";
+import { localStorageBindings } from "./local-storage.mjs";
 
 const frontend = resolve(import.meta.dirname, "../services/frontend");
 const port = Number(process.env.SITES_DEV_PORT || 4173);
+const host = process.env.SITES_DEV_HOST || '127.0.0.1';
 const types = { ".svg": "image/svg+xml", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp" };
 const env = {
+  ...await localStorageBindings(resolve(import.meta.dirname, "../.sites-runtime/storage")),
   ASSETS: {
     async fetch(request) {
       const filename = resolve(frontend, `.${decodeURIComponent(new URL(request.url).pathname)}`);
@@ -26,7 +29,7 @@ const server = createServer(async (incoming, outgoing) => {
   outgoing.on("close", () => abort.abort());
   try {
     const html = await readFile(resolve(frontend, "index.html"), "utf8");
-    const worker = createWorker({ html, ...(process.env.SITES_BACKEND_ORIGIN ? { backendOrigin: process.env.SITES_BACKEND_ORIGIN } : {}) });
+    const worker = createWorker({ html });
     const request = new Request(new URL(incoming.url, `http://127.0.0.1:${port}`), {
       method: incoming.method,
       headers: incoming.headers,
@@ -46,4 +49,4 @@ const server = createServer(async (incoming, outgoing) => {
     outgoing.end("Unable to serve the local preview.");
   }
 });
-server.listen(port, "127.0.0.1", () => console.log(`Local: http://127.0.0.1:${port}`));
+server.listen(port, host, () => console.log(`Local: http://${host}:${port}`));

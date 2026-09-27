@@ -1,91 +1,50 @@
 # FrankenDraftTool
 
-Personal project to create a web tool to help the TI4 Franken community draft and innovate.
+A multiplayer drafting tool for the TI4 Franken community, with Bag Passing, Nomination Auction, custom Tabletop Simulator pools and TTS exports.
 
-## Sites version
+## Standalone Sites application
 
-The same frontend can run on Sites with a Worker that streams `/api/*` to the existing Render API. It preserves the existing rooms, draft methods, pools and TTS exports. The Sites audience is public, so players do not need a ChatGPT login. Render continues to own multiplayer state and saved pools; this is not a standalone backend migration.
+The frontend **and backend run on Sites**. Rooms, players and draft progress are stored in D1; uploaded pools are stored in R2. The application makes no requests to Render and needs no Render services, disk, environment variables or credentials. The public site requires no ChatGPT login.
+
+- Site: [Franken Draft Tool](https://franken-draft-tool.yvonichou.chatgpt.site)
+- [Development recap](docs/DEVELOPMENT_STATUS.md)
+- [GitHub source](https://github.com/Yvonick/FrankenDraftTool)
+
+## Local development
 
 Use Node 24 and npm:
 
 ```sh
-npm install
+npm ci
 npm run dev
 ```
 
-The preview is at `http://127.0.0.1:4173` and connects to the existing Render API by default. To keep development data isolated, start `npm run dev:backend` in another terminal and run `SITES_BACKEND_ORIGIN=http://127.0.0.1:3000 npm run dev`.
+Open `http://127.0.0.1:4173`. This runs the complete application against a local SQLite database and a local pool directory under `.sites-runtime/storage`. Both survive restarting the process. Local data is separate from the published Site. No external backend is needed.
 
 ```sh
 npm test
 npm run build
 ```
 
-The build emits `dist/server/index.js` and static assets in `dist/client`. `.openai/hosting.json` keeps the Sites project identity. Publish using the Sites plugin; the GitHub remote remains `origin`.
+Alternatively, `docker compose up --build` serves the same standalone application at `http://127.0.0.1:8080`, with storage in the `draft-data` Docker volume. The old two-service Docker setup is retired.
 
-See [the development recap](docs/DEVELOPMENT_STATUS.md) for features, recent history, checks and remaining work.
+## Architecture and publishing
 
-## Run locally
+- `services/backend/draftEngine.js`: shared draft rules, isolated from HTTP server lifecycle and persistence.
+- `services/backend/poolRegistry.js`: TTS parsing and pool registry.
+- `services/sites/api.mjs`: native Worker API and browser-session validation.
+- `services/sites/storage.mjs`: D1 transactions and immutable R2 pool versions.
+- `services/frontend/index.html`: the existing interface; same-origin API calls and short polling for multiplayer updates.
+- `db/schema.ts` and `drizzle/`: schema and generated SQL migrations.
 
-The project is split into two services:
+The build bundles the engine, built-in Franken Y V6.9 pool and interface into `dist/server/index.js`; images are packaged in `dist/client`. `.openai/hosting.json` binds the existing Sites project to `DB` (D1) and `BUCKET` (R2). Publish with the Sites plugin, which packages and applies the checked-in migrations. Keep public access enabled.
 
-- `frontend`: static web frontend served by nginx
-- `backend`: Node.js API service
+For schema changes, edit `db/schema.ts`, run `npm run db:generate`, and inspect the generated SQL. Never edit an already deployed migration. Local development applies new migrations automatically on startup.
 
-Run both services with Docker:
+Room updates use atomic revision checks to prevent simultaneous actions from overwriting each other. Room state is compressed in D1; each room pins its pool version so edits or deletion from the public catalog do not break an ongoing draft or TTS export. Room polling runs about every 1.5 seconds; disconnected participants expire from live presence after 60 seconds. Browser session credentials stay in session storage, so reloading the same tab reconnects to its player.
 
-```sh
-docker compose up --build
-```
+## Migration from Render
 
-The frontend runs at `http://127.0.0.1:8080`.
+Render is no longer part of the deployed application. Its public pool catalog was checked on 27 September 2026 and contained only the built-in Franken Y V6.9 pool, which is bundled here. No saved custom public pools needed copying. Existing in-memory rooms and browser sessions on the old URL were not transferred: create new rooms on the Sites URL.
 
-The frontend proxies backend routes under `/api`. The starter health endpoint is available at:
-
-```sh
-http://127.0.0.1:8080/api/health
-```
-
-For backend-only development without Docker:
-
-```sh
-npm run dev:backend
-```
-
-## Hosting
-
-This project now has separate frontend and backend services, so it should be hosted on an app platform rather than GitHub Pages.
-
-The repo includes a Render Blueprint in `render.yaml` that creates:
-
-- `yvonick-frankendrafttool`: static frontend
-- `yvonick-frankendrafttool-api`: Node.js backend
-
-Deploy the Blueprint from:
-
-```sh
-https://dashboard.render.com/blueprints/new?repo=https://github.com/Yvonick/FrankenDraftTool
-```
-
-After Render creates the services, the public frontend URL should be:
-
-```sh
-https://yvonick-frankendrafttool.onrender.com
-```
-
-The backend health check should be available through the frontend proxy at:
-
-```sh
-https://yvonick-frankendrafttool.onrender.com/api/health
-```
-
-The frontend also opens a live presence stream at `/api/presence` locally, or directly against the Render backend in production, to show how many browser tabs currently have the page open. This count is in-memory per backend instance.
-
-Rooms are also stored in memory for now. The home page can create a numbered room at `/rooms/{roomNumber}`. Anyone with that URL can join, choose to sit down with a display name, or spectate. Rooms start with 6 seats, the creator can change that limit, and spectators can sit down later if a seat is available.
-
-The room creator can configure and launch a draft once the room is full. Drafts randomly seat players around the table, deal starting bags from the pool, let players lock legal picks from their current bag, pass remaining bag contents clockwise, and reveal all drafted items when every bag is empty.
-
-The host can restart an active or completed draft back to setup. Draft views can be grouped by item type or pick order. Named spectators can be promoted to super spectators, which lets them see player draft areas and current bags while a draft is active.
-
-Custom pools can be loaded directly from Tabletop Simulator saved-object JSON files placed in `services/backend/pools/raw`. The backend parses top-level TTS bags as item types and extracts item names plus image URLs from cards, custom tiles, and custom models. The included `Franken Y V69.json` file is loaded this way as the `Franken Y V6.9` pool.
-
-Public saved pools are written to `POOL_STORE_PATH`, defaulting locally to `services/backend/data/public-pools.json`. The Render Blueprint mounts a persistent disk at `/var/data` and sets `POOL_STORE_PATH=/var/data/public-pools.json`, so uploaded/saved public pools survive backend restarts. Render persistent disks require a paid web service instance; without the disk, saved pools fall back to the service's ephemeral filesystem and can disappear after restarts.
+The Render Blueprint has been removed. Legacy Node server/filesystem adapters remain in `services/backend` for reference; they are not used by Sites, `npm run dev`, or Docker Compose. Render services can be retired independently once any games on the old URL have finished.

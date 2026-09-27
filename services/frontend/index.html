@@ -1851,12 +1851,47 @@
     </div>
 
     <script>
-      const backendOrigin =
-        window.location.hostname === "yvonick-frankendrafttool.onrender.com"
-          ? "https://yvonick-frankendrafttool-api.onrender.com"
-          : "";
-
-      const apiUrl = (path) => `${backendOrigin}${path}`;
+      const apiUrl = (path) => path;
+      const sessionKey = "frankenDraftTool:sessionToken";
+      const sessionToken = sessionStorage.getItem(sessionKey) || crypto.randomUUID();
+      sessionStorage.setItem(sessionKey, sessionToken);
+      const apiFetch = (url, options = {}) => {
+        const headers = new Headers(options.headers);
+        headers.set("X-Franken-Session", sessionToken);
+        return fetch(url, { ...options, headers });
+      };
+      // Short requests work across independent Workers and resume after outages.
+      // Durable server state remains authoritative; browser storage only holds identity.
+      class DraftUpdates {
+        constructor(url) {
+          this.url = url;
+          this.closed = false;
+          this.listeners = new Map();
+          this.abort = new AbortController();
+          window.addEventListener("pagehide", () => this.close(), { once: true });
+          this.poll();
+        }
+        addEventListener(type, callback) { this.listeners.set(type, callback); }
+        close() { this.closed = true; clearTimeout(this.timer); this.abort.abort(); }
+        async poll() {
+          let delay = this.url.startsWith("/api/rooms/") ? 1500 : 15000;
+          try {
+            const result = await apiFetch(this.url, { signal: this.abort.signal });
+            if (!result.ok) throw new Error("Could not refresh room");
+            const data = await result.json();
+            if (this.closed) return;
+            if (data.viewer && this.viewerKey !== JSON.stringify(data.viewer)) {
+              this.viewerKey = JSON.stringify(data.viewer);
+              this.listeners.get("viewer")?.({ data: this.viewerKey });
+            }
+            this.onmessage?.({ data: JSON.stringify(data.room || data) });
+          } catch {
+            if (!this.closed) this.onerror?.();
+            delay = 4000;
+          }
+          if (!this.closed) this.timer = setTimeout(() => this.poll(), delay);
+        }
+      }
       const homeView = document.querySelector("#home-view");
       const poolsView = document.querySelector("#pools-view");
       const methodsView = document.querySelector("#methods-view");
@@ -2096,7 +2131,7 @@
           return;
         }
 
-        const response = await fetch(apiUrl("/api/pools"));
+        const response = await apiFetch(apiUrl("/api/pools"));
         const data = await response.json();
         pools = data.pools;
       }
@@ -2106,7 +2141,7 @@
           return;
         }
 
-        const response = await fetch(apiUrl("/api/methods"));
+        const response = await apiFetch(apiUrl("/api/methods"));
         const data = await response.json();
         draftMethods = data.methods;
       }
@@ -2132,7 +2167,7 @@
       }
 
       function startHomePresence() {
-        const presence = new EventSource(apiUrl("/api/presence"));
+        const presence = new DraftUpdates(apiUrl("/api/presence"));
 
         presence.onmessage = (event) => {
           const data = JSON.parse(event.data);
@@ -2680,7 +2715,7 @@
 
         try {
           const fileContent = await file.text();
-          const response = await fetch(apiUrl("/api/pools/upload"), {
+          const response = await apiFetch(apiUrl("/api/pools/upload"), {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
@@ -2726,7 +2761,7 @@
 
         try {
           const fileContent = await file.text();
-          const response = await fetch(apiUrl("/api/pools/upload"), {
+          const response = await apiFetch(apiUrl("/api/pools/upload"), {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
@@ -2887,7 +2922,7 @@
         button.disabled = true;
 
         try {
-          const response = await fetch(apiUrl(`/api/pools/${encodeURIComponent(poolId)}`), {
+          const response = await apiFetch(apiUrl(`/api/pools/${encodeURIComponent(poolId)}`), {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
@@ -2915,7 +2950,7 @@
         button.disabled = true;
 
         try {
-          const response = await fetch(apiUrl(`/api/pools/${encodeURIComponent(poolId)}/delete`), {
+          const response = await apiFetch(apiUrl(`/api/pools/${encodeURIComponent(poolId)}/delete`), {
             method: "POST"
           });
           const data = await response.json();
@@ -3436,7 +3471,7 @@
       }
 
       async function postAuctionAction(action, body = {}) {
-        const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/auction/${action}`), {
+        const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/auction/${action}`), {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -4554,7 +4589,7 @@
           params.set("name", name);
         }
 
-        roomEvents = new EventSource(apiUrl(`/api/rooms/${currentRoomNumber}/presence?${params}`));
+        roomEvents = new DraftUpdates(apiUrl(`/api/rooms/${currentRoomNumber}/presence?${params}`));
 
         roomEvents.addEventListener("viewer", (event) => {
           const viewer = JSON.parse(event.data);
@@ -4604,7 +4639,7 @@
         currentRoomNumber = id;
         await fetchPools();
         await fetchDraftMethods();
-        const response = await fetch(apiUrl(`/api/rooms/${id}`));
+        const response = await apiFetch(apiUrl(`/api/rooms/${id}`));
 
         roomNumber.textContent = id;
         shareRoom.disabled = false;
@@ -4642,7 +4677,7 @@
         createRoom.disabled = true;
 
         try {
-          const response = await fetch(apiUrl("/api/rooms"), {
+          const response = await apiFetch(apiUrl("/api/rooms"), {
             method: "POST"
           });
 
@@ -4672,7 +4707,7 @@
         saveRoomSettings.disabled = true;
 
         try {
-          const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/settings`), {
+          const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/settings`), {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
@@ -4758,7 +4793,7 @@
         submit.disabled = true;
 
         try {
-          const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/pool/save`), {
+          const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/pool/save`), {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
@@ -4800,7 +4835,7 @@
           return;
         }
 
-        const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/start`), {
+        const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/start`), {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -4845,7 +4880,7 @@
         }
 
         restartDraft.disabled = true;
-        const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/restart`), {
+        const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/restart`), {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -4876,7 +4911,7 @@
       }
 
       async function setSuperSpectator(participantId, superSpectator) {
-        const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/spectators/promote`), {
+        const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/spectators/promote`), {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -4898,7 +4933,7 @@
       }
 
       async function setParticipantAdmin(participantId, admin) {
-        const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/participants/admin`), {
+        const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/participants/admin`), {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -4922,7 +4957,7 @@
       }
 
       async function undoAuctionAction() {
-        const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/auction/undo`), {
+        const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/auction/undo`), {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -4949,7 +4984,7 @@
       }
 
       async function shuffleAuctionPool() {
-        const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/auction/shuffle-pool`), {
+        const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/auction/shuffle-pool`), {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -4979,7 +5014,7 @@
 
         try {
           const params = payloadSearchParams(hostPayload());
-          const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/export?${params}`));
+          const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/export?${params}`));
 
           if (!response.ok) {
             const data = await response.json().catch(() => ({}));
@@ -5010,7 +5045,7 @@
         }
 
         lockChoice.disabled = true;
-        const response = await fetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/pick`), {
+        const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/pick`), {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
