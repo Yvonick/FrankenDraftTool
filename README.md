@@ -2,6 +2,28 @@
 
 Personal project to create a web tool to help the TI4 Franken community draft and innovate.
 
+## Sites version
+
+The same frontend can run on Sites with a Worker that streams `/api/*` to the existing Render API. It preserves the existing rooms, draft methods, pools and TTS exports. The Sites audience is public, so players do not need a ChatGPT login. Render continues to own multiplayer state and saved pools; this is not a standalone backend migration.
+
+Use Node 24 and npm:
+
+```sh
+npm install
+npm run dev
+```
+
+The preview is at `http://127.0.0.1:4173` and connects to the existing Render API by default. To keep development data isolated, start `npm run dev:backend` in another terminal and run `SITES_BACKEND_ORIGIN=http://127.0.0.1:3000 npm run dev`.
+
+```sh
+npm test
+npm run build
+```
+
+The build emits `dist/server/index.js` and static assets in `dist/client`. `.openai/hosting.json` keeps the Sites project identity. Publish using the Sites plugin; the GitHub remote remains `origin`.
+
+See [the development recap](docs/DEVELOPMENT_STATUS.md) for features, recent history, checks and remaining work.
+
 ## Run locally
 
 The project is split into two services:

@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>FrankenDraftTool</title>
+    <meta name="description" content="Create a Twilight Imperium 4 Franken draft room, pick a pool, and draft with bag passing or nomination auctions.">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <style>
       :root {
         --space-0: #020611;
@@ -5366,6 +5368,56 @@
       auctionShuffleTop.addEventListener("click", shuffleAuctionPool);
       exportDraft.addEventListener("click", exportDraftJson);
       lockChoice.addEventListener("click", lockCurrentChoice);
+
+      // Read the same catalog and viewer-scoped room state used by the interface.
+      // Unsupported browsers simply continue with the normal UI.
+      if (document.modelContext?.registerTool) {
+        const lifecycle = new AbortController();
+        const emptySchema = { type: "object", properties: {}, additionalProperties: false };
+        const validateEmptyInput = (input) => {
+          if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length) {
+            throw new Error("This tool expects an empty object.");
+          }
+        };
+        const register = (tool) => {
+          try {
+            Promise.resolve(document.modelContext.registerTool(tool, { signal: lifecycle.signal }))
+              .catch(() => {});
+          } catch { /* The visible interface remains available. */ }
+        };
+        register({
+          name: "list_draft_options",
+          title: "List draft pools and methods",
+          description: "Read available draft pools and playable methods for room setup.",
+          inputSchema: emptySchema,
+          annotations: { readOnlyHint: true, untrustedContentHint: true },
+          async execute(input) {
+            validateEmptyInput(input);
+            await Promise.all([fetchPools(), fetchDraftMethods()]);
+            return {
+              pools: pools.map(({ id, name, defaultParameters }) => ({ id, name, defaultParameters })),
+              methods: draftMethods.map(({ id, name, playable }) => ({ id, name, playable }))
+            };
+          }
+        });
+        register({
+          name: "inspect_current_room",
+          title: "Inspect current draft room",
+          description: "Read the current room and draft visible to this participant. Fails when no room is open.",
+          inputSchema: emptySchema,
+          annotations: { readOnlyHint: true, untrustedContentHint: true },
+          execute(input) {
+            validateEmptyInput(input);
+            if (!latestRoom) throw new Error("Open a draft room first.");
+            return JSON.parse(JSON.stringify({
+              roomNumber: currentRoomNumber,
+              seated: latestRoom.seated,
+              draft: latestRoom.draft
+            }));
+          }
+        });
+        window.addEventListener("pagehide", () => lifecycle.abort(), { once: true });
+      }
 
       const roomMatch = window.location.pathname.match(/^\/rooms\/(\d{6})$/);
 

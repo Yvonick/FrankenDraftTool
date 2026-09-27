@@ -16,6 +16,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Local Sites runtime
+.sites-runtime/
+
 # Local persistent data
 services/backend/data/
 
