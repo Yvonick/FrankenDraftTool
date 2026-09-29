@@ -1,4 +1,4 @@
-# Development status — 27 September 2026
+# Development status — 29 September 2026
 
 ## Starting point
 
@@ -30,7 +30,7 @@ The initial Sites proxy has been replaced with an independent backend. All appli
 - D1 stores compressed room state, session ownership, public pool metadata and presence leases. R2 stores immutable uploaded pool files.
 - Atomic revision checks with bounded retries preserve concurrent actions from different Worker instances. Failed writes return a recoverable error.
 - Each room pins an immutable pool version. Editing or deleting the catalog entry cannot remove an ongoing draft's export source.
-- Short polling replaces the Node server's in-memory SSE connections. Draft updates normally arrive within about 1.5 seconds; disconnected presence expires after 60 seconds.
+- Authenticated SSE replaces the Node server's in-memory broadcasts and the initial migration's 1.5-second browser polling. Each active stream observes the durable room revision every 250 ms; hidden tabs use two seconds. Only changed snapshots are rebuilt and sent. Streams renew every 20 seconds, honor backpressure, and release timers on cancellation. Disconnected presence expires after 60 seconds.
 - Participant actions require a random browser-session credential, stored only in that browser tab's session storage. Knowing another player's public ID does not authorize their actions.
 - Local development runs the same Worker API with persistent SQLite and filesystem implementations of D1/R2. It needs no network backend.
 - A generated schema migration provisions five tables and a presence index. The built-in pool is seeded idempotently by the runtime.
@@ -41,6 +41,10 @@ The old Render catalog contained only Franken Y V6.9 when inspected. No custom p
 ## Validation
 
 Automated tests cover standalone routes with external fetch forbidden; six simultaneous joins and picks; participant impersonation rejection; room and pool persistence after reopening storage; public pool edits/deletion during an active draft; room-saved private pools; auction speaker bidding and undo; full Bag Passing and Nomination Auction games with repeated reloads, mulligans, bans and final exports; unavailable storage and failed pool writes; and frontend syntax and request routing.
+
+Streaming tests additionally cover cross-worker delivery, secret-bid filtering, matching action/stream revisions, observe-only reconnects, failed authentication, revision-only idle reads, slow-reader backpressure, cancellation, presence heartbeats and bounded renewal. The update interval excludes database and network latency; it is not a 250 ms end-to-end guarantee.
+
+Reconnect review also corrected a migration issue where another player's save could discard an offline admin or super spectator's permissions. Live presence is filtered separately from saved identities. Returning to a full lobby cannot overfill its seats. The suite now contains 17 tests.
 
 Local browser checks verify the homepage, room creation and joining with the built-in pool and host controls, without a login. Publication must pass the Sites build/package workflow and a live anonymous storage smoke check.
 

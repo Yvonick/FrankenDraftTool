@@ -1860,36 +1860,95 @@
         headers.set("X-Franken-Session", sessionToken);
         return fetch(url, { ...options, headers });
       };
-      // Short requests work across independent Workers and resume after outages.
-      // Durable server state remains authoritative; browser storage only holds identity.
+      // Authenticated streams resume from durable room state after disconnects.
       class DraftUpdates {
         constructor(url) {
           this.url = url;
           this.closed = false;
           this.listeners = new Map();
-          this.abort = new AbortController();
-          window.addEventListener("pagehide", () => this.close(), { once: true });
-          this.poll();
+          this.generation = 0;
+          this.failures = 0;
+          this.joined = false;
+          this.isRoom = this.url.startsWith("/api/rooms/");
+          this.onPageHide = () => this.close();
+          this.onVisibility = () => { if (this.isRoom && !this.closed) this.connect(); };
+          window.addEventListener("pagehide", this.onPageHide);
+          document.addEventListener("visibilitychange", this.onVisibility);
+          this.connect();
         }
         addEventListener(type, callback) { this.listeners.set(type, callback); }
-        close() { this.closed = true; clearTimeout(this.timer); this.abort.abort(); }
-        async poll() {
-          let delay = this.url.startsWith("/api/rooms/") ? 1500 : 15000;
-          try {
-            const result = await apiFetch(this.url, { signal: this.abort.signal });
-            if (!result.ok) throw new Error("Could not refresh room");
-            const data = await result.json();
-            if (this.closed) return;
-            if (data.viewer && this.viewerKey !== JSON.stringify(data.viewer)) {
-              this.viewerKey = JSON.stringify(data.viewer);
-              this.listeners.get("viewer")?.({ data: this.viewerKey });
-            }
-            this.onmessage?.({ data: JSON.stringify(data.room || data) });
-          } catch {
-            if (!this.closed) this.onerror?.();
-            delay = 4000;
+        close() {
+          this.closed = true;
+          this.generation++;
+          clearTimeout(this.timer);
+          this.abort?.abort();
+          window.removeEventListener("pagehide", this.onPageHide);
+          document.removeEventListener("visibilitychange", this.onVisibility);
+        }
+        deliver(data) {
+          if (this.closed) return;
+          if (this.failures) this.onopen?.();
+          this.failures = 0;
+          if (data.viewer && this.viewerKey !== JSON.stringify(data.viewer)) {
+            this.viewerKey = JSON.stringify(data.viewer);
+            this.listeners.get("viewer")?.({ data: this.viewerKey });
           }
-          if (!this.closed) this.timer = setTimeout(() => this.poll(), delay);
+          this.joined = this.joined || Boolean(data.viewer);
+          this.onmessage?.({ data: JSON.stringify(data.room || data) });
+        }
+        async connect() {
+          if (this.closed) return;
+          const generation = ++this.generation;
+          this.abort?.abort();
+          clearTimeout(this.timer);
+          const abort = new AbortController();
+          this.abort = abort;
+          let delay = this.isRoom ? 25 : 15000;
+          const timeout = setTimeout(() => abort.abort(), 35000);
+          let reader;
+          try {
+            const url = new URL(this.url, window.location.origin);
+            if (this.isRoom && this.joined) url.searchParams.set("observe", "1");
+            if (this.isRoom && document.hidden) url.searchParams.set("background", "1");
+            const result = await apiFetch(url.pathname + url.search, {
+              signal: abort.signal,
+              headers: { Accept: this.isRoom ? "text/event-stream" : "application/json" }
+            });
+            if (!result.ok) throw new Error("Could not refresh room");
+            if (!result.headers.get("content-type")?.includes("text/event-stream")) {
+              const data = await result.json();
+              if (generation === this.generation) this.deliver(data);
+              delay = this.isRoom ? 250 : 15000;
+            } else {
+              reader = result.body.getReader();
+              const decoder = new TextDecoder();
+              let buffered = "";
+              for (;;) {
+                const next = await reader.read();
+                if (next.done || generation !== this.generation) break;
+                buffered = (buffered + decoder.decode(next.value, { stream: true })).replace(/\r\n/g, "\n");
+                if (buffered.length > 8 * 1024 * 1024) throw new Error("Room update too large");
+                let boundary;
+                while ((boundary = buffered.indexOf("\n\n")) >= 0) {
+                  const lines = buffered.slice(0, boundary).split("\n");
+                  buffered = buffered.slice(boundary + 2);
+                  if (lines.includes("event: reconnect")) throw new Error("Reconnect requested");
+                  const payload = lines.filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n");
+                  if (payload) this.deliver(JSON.parse(payload));
+                }
+              }
+            }
+          } catch {
+            if (!this.closed && generation === this.generation) {
+              this.failures++;
+              this.onerror?.();
+              delay = Math.min(5000, 500 * 2 ** Math.min(this.failures - 1, 4));
+            }
+          } finally {
+            clearTimeout(timeout);
+            await reader?.cancel().catch(() => {});
+          }
+          if (!this.closed && generation === this.generation) this.timer = setTimeout(() => this.connect(), delay);
         }
       }
       const homeView = document.querySelector("#home-view");
@@ -4485,6 +4544,10 @@
 
       function renderRoom(data, options = {}) {
         if (latestRoom?.roomNumber === data.roomNumber
+          && Number(String(data.revision).split(":")[0]) < Number(String(latestRoom.revision).split(":")[0])) {
+          return;
+        }
+        if (latestRoom?.roomNumber === data.roomNumber
           && data.revision !== undefined
           && latestRoom.revision === data.revision
           && !options.force) {
@@ -4613,6 +4676,10 @@
 
         roomEvents.onmessage = (event) => {
           renderRoom(JSON.parse(event.data));
+        };
+
+        roomEvents.onopen = () => {
+          roomMessage.textContent = currentRole === "seated" ? "You are seated." : "You are spectating.";
         };
 
         roomEvents.onerror = () => {

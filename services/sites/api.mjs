@@ -2,6 +2,7 @@ import engineModule from '../backend/draftEngine.js';
 import registryModule from '../backend/poolRegistry.js';
 import { builtinPool, assetOverrides } from './builtin.mjs';
 import { createStorage, ConflictError, RequestError } from './storage.mjs';
+import { roomStream } from './room-stream.mjs';
 
 const encoder = new TextEncoder();
 const validId = value => typeof value === 'string' && /^[a-zA-Z0-9-]{8,80}$/.test(value);
@@ -75,6 +76,13 @@ export async function handleApi(request, env) {
     const roomMatch = url.pathname.match(/^\/api\/rooms\/(\d{6})(?:\/|$)/);
     const roomId = roomMatch?.[1];
     const presence = roomId && url.pathname === `/api/rooms/${roomId}/presence`;
+    if (presence && request.method === 'GET' && request.headers.get('accept') === 'text/event-stream') {
+      return await roomStream(request, store, snapshotRequest => {
+        const headers = new Headers(snapshotRequest.headers);
+        headers.set('accept', 'application/json');
+        return handleApi(new Request(snapshotRequest, { headers }), env);
+      });
+    }
     const actorId = presence ? url.searchParams.get('participantId') : body.playerId || body.actorId || body.viewerId || body.participantId || url.searchParams.get('actorId') || url.searchParams.get('viewerId') || url.searchParams.get('participantId');
     if (presence && !validId(actorId)) return response({ error: 'invalid_participant' }, 400);
     const hash = (presence || (roomId && actorId)) ? await tokenHash(request) : null;
@@ -111,6 +119,7 @@ export async function handleApi(request, env) {
       let session;
       let active = new Set();
       let existingSession;
+      let seatRelinquished = false;
       if (roomId) {
         active = await store.activeParticipants(roomId);
         if (actorId) {
@@ -125,6 +134,13 @@ export async function handleApi(request, env) {
         }
         const room = engine.rooms.get(roomId);
         for (const id of room.participants.keys()) if (!active.has(id)) room.participants.delete(id);
+        const returning = room.participants.get(actorId);
+        if (presence && existingSession?.last_seen < Date.now() - 60000 && returning?.role === 'seated'
+          && !room.draft?.players.some(player => player.id === actorId)
+          && [...room.participants.values()].filter(player => player.id !== actorId && player.role === 'seated').length >= room.maxSeats) {
+          returning.role = 'spectator';
+          seatRelinquished = true;
+        }
       }
       let joined;
       let changed = request.method === 'POST';
@@ -134,7 +150,9 @@ export async function handleApi(request, env) {
         const requestedRole = url.searchParams.get('role') === 'seated' ? 'seated' : 'spectator';
         const name = url.searchParams.get('name');
         const canSeat = [...room.participants.values()].filter(p => p.role === 'seated').length < room.maxSeats;
-        changed = !member || (requestedRole !== member.role && (requestedRole !== 'seated' || canSeat)) || (name && name !== member.name) || (url.searchParams.get('creatorToken') === room.creatorToken && !room.creatorId);
+        const observe = url.searchParams.get('observe') === '1';
+        if (observe && !existingSession) return response({ error: 'participant_session_required' }, 403);
+        changed = seatRelinquished || !member || (!observe && ((requestedRole !== member.role && (requestedRole !== 'seated' || canSeat)) || (name && name !== member.name) || (url.searchParams.get('creatorToken') === room.creatorToken && !room.creatorId)));
         if (changed) {
           joined = engine.joinRoom(roomId, url, out);
           if (!joined) return new Response(out.body, { status: out.status, headers: out.headers });
@@ -156,6 +174,9 @@ export async function handleApi(request, env) {
         let room;
         if (id && changed) {
           const state = engine.serializeRoom(id);
+          // Presence expiry is not revocation. Keep offline identities and their
+          // permissions while snapshots/counts continue to use live participants.
+          state.participants = [...new Map([...(storedRoom?.state.participants || []), ...state.participants])];
           state.poolObjectKey = selectedKey || `builtin:${builtinPool.id}`;
           room = { id, expected: storedRoom?.revision ?? null, state };
         }
@@ -169,6 +190,13 @@ export async function handleApi(request, env) {
         const headers = new Headers(out.headers);
         headers.delete('access-control-allow-origin');
         headers.set('cache-control', 'no-store');
+        if (id && out.body && headers.get('content-type')?.includes('application/json') && !headers.has('content-disposition')) {
+          const snapshot = JSON.parse(out.body);
+          if (snapshot.roomNumber === id && snapshot.draft) {
+            snapshot.revision = `${(storedRoom?.revision || 0) + (changed ? 1 : 0)}:${[...active].sort().join(',')}`;
+            out.body = JSON.stringify(snapshot);
+          }
+        }
         return new Response(request.method === 'HEAD' ? null : out.body, { status: out.status, headers });
       } catch (error) {
         if (error instanceof ConflictError) continue;

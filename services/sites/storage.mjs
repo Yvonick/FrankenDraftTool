@@ -30,6 +30,9 @@ export function createStorage(env) {
       const row = await statement("SELECT revision, state FROM rooms WHERE id = ?", id).first();
       return row ? { revision: row.revision, state: await decompress(row.state) } : null;
     },
+    async roomRevision(id) {
+      return (await statement("SELECT revision FROM rooms WHERE id = ?", id).first())?.revision ?? null;
+    },
     async pool(key) {
       const object = await env.BUCKET.get(key);
       if (!object) throw new Error("Pool object is unavailable");

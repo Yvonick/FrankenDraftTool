@@ -206,3 +206,74 @@ test('complete bag and auction drafts reveal every pick and export after repeate
     assert.ok(exported.ObjectStates.length > 0);
   }
 });
+
+test('authenticated streams deliver other workers actions without leaking private bids', async t => {
+  const f = await fixture(t);
+  const room = await f.room('nomination-auction');
+  await room.start();
+  const observer = room.players[1];
+  const abort = new AbortController();
+  const streamWorker = createWorker({ html: 'independent observer' });
+  const path = `${room.base}/presence?participantId=${observer.id}&observe=1`;
+  const response = await streamWorker.fetch(new Request(`https://draft.test${path}`, {
+    headers: { accept: 'text/event-stream', 'x-franken-session': observer.token }, signal: abort.signal
+  }), f.env);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /text\/event-stream/);
+  const reader = response.body.getReader();
+  const next = async () => {
+    const chunk = await reader.read();
+    assert.equal(chunk.done, false);
+    return JSON.parse(new TextDecoder().decode(chunk.value).split('\ndata: ')[1]);
+  };
+  try {
+    const initial = await next();
+    assert.equal(initial.viewer.id, observer.id);
+    const started = performance.now();
+    const ownAction = await f.api(`${room.base}/draft/auction/bid`, { playerId: room.host.id, first: 13, second: 0, tie: 7 }, room.host.token);
+    const update = await next();
+    assert.equal(update.room.revision, ownAction.revision, 'POST and stream share a monotonic storage revision');
+    assert.notEqual(update.room.revision, initial.room.revision);
+    assert.ok(performance.now() - started < 1000, 'a cross-worker change arrives on the next 250 ms check');
+    assert.doesNotMatch(JSON.stringify(update), /"first":13|"tie":7/, 'another player cannot see a locked secret bid');
+    const hiddenBid = update.room.draft.auction.players.find(player => player.playerId === room.host.id);
+    assert.equal(hiddenBid.auctionBidLocked, true);
+    assert.equal(hiddenBid.currentBids, null);
+    assert.equal(update.viewer.role, 'seated', 'observe mode does not turn an existing player into a spectator');
+  } finally { abort.abort(); await reader.cancel(); }
+  const forged = await streamWorker.fetch(new Request(`https://draft.test${path}`, {
+    headers: { accept: 'text/event-stream', 'x-franken-session': room.host.token }
+  }), f.env);
+  assert.equal(forged.status, 403);
+});
+
+test('offline admin and super spectator permissions survive other players saves and reloads', async t => {
+  const f = await fixture(t);
+  const room = await f.room();
+  const spectator = { id: crypto.randomUUID(), token: crypto.randomUUID() };
+  await f.api(`${room.base}/presence?${new URLSearchParams({ participantId: spectator.id, name: 'Observer', role: 'spectator' })}`, undefined, spectator.token);
+  await f.api(`${room.base}/participants/admin`, { ...room.auth, participantId: spectator.id, admin: true }, room.host.token);
+  await f.api(`${room.base}/spectators/promote`, { ...room.auth, participantId: spectator.id, superSpectator: true }, room.host.token);
+  await f.env.DB.prepare('UPDATE room_sessions SET last_seen = ? WHERE room_id = ? AND participant_id = ?').bind(Date.now() - 120000, room.roomNumber, spectator.id).run();
+  await f.api(`${room.base}/settings`, { ...room.auth, picksPerBag: 1 }, room.host.token);
+  assert.equal((await room.connect(room.host)).room.namedSpectators.length, 0, 'offline viewers are not shown as present');
+  await f.restart();
+  const returned = await f.api(`${room.base}/presence?participantId=${spectator.id}&observe=1`, undefined, spectator.token);
+  assert.equal(returned.viewer.admin, true);
+  assert.equal(returned.viewer.superSpectator, true);
+  const changed = await f.api(`${room.base}/settings`, { actorId: spectator.id, picksPerBag: 2 }, spectator.token);
+  assert.equal(changed.draft.settings.picksPerBag, 2);
+});
+
+test('reconnecting to a full lobby preserves identity without exceeding the seat limit', async t => {
+  const f = await fixture(t);
+  const room = await f.room('bag-passing-default', 1);
+  await f.env.DB.prepare('UPDATE room_sessions SET last_seen = ? WHERE room_id = ? AND participant_id = ?').bind(Date.now() - 120000, room.roomNumber, room.host.id).run();
+  const replacement = { id: crypto.randomUUID(), token: crypto.randomUUID() };
+  await f.api(`${room.base}/presence?${new URLSearchParams({ participantId: replacement.id, name: 'New player', role: 'seated' })}`, undefined, replacement.token);
+  const returned = await room.connect(room.host);
+  assert.equal(returned.viewer.host, true);
+  assert.equal(returned.viewer.role, 'spectator');
+  assert.equal(returned.room.seated.length, 1);
+  assert.equal((await f.api(room.base)).seated.length, 1);
+});

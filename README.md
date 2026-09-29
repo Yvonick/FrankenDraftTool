@@ -34,14 +34,17 @@ Alternatively, `docker compose up --build` serves the same standalone applicatio
 - `services/backend/poolRegistry.js`: TTS parsing and pool registry.
 - `services/sites/api.mjs`: native Worker API and browser-session validation.
 - `services/sites/storage.mjs`: D1 transactions and immutable R2 pool versions.
-- `services/frontend/index.html`: the existing interface; same-origin API calls and short polling for multiplayer updates.
+- `services/sites/room-stream.mjs`: authenticated, bounded server-sent event streams observing durable room revisions.
+- `services/frontend/index.html`: the existing interface; same-origin API calls and streamed multiplayer updates with automatic reconnects.
 - `db/schema.ts` and `drizzle/`: schema and generated SQL migrations.
 
 The build bundles the engine, built-in Franken Y V6.9 pool and interface into `dist/server/index.js`; images are packaged in `dist/client`. `.openai/hosting.json` binds the existing Sites project to `DB` (D1) and `BUCKET` (R2). Publish with the Sites plugin, which packages and applies the checked-in migrations. Keep public access enabled.
 
 For schema changes, edit `db/schema.ts`, run `npm run db:generate`, and inspect the generated SQL. Never edit an already deployed migration. Local development applies new migrations automatically on startup.
 
-Room updates use atomic revision checks to prevent simultaneous actions from overwriting each other. Room state is compressed in D1; each room pins its pool version so edits or deletion from the public catalog do not break an ongoing draft or TTS export. Room polling runs about every 1.5 seconds; disconnected participants expire from live presence after 60 seconds. Browser session credentials stay in session storage, so reloading the same tab reconnects to its player.
+Room updates use atomic revision checks to prevent simultaneous actions from overwriting each other. Room state is compressed in D1; each room pins its pool version so edits or deletion from the public catalog do not break an ongoing draft or TTS export. Browser session credentials stay in session storage, so reloading the same tab reconnects to its player.
+
+Active tabs receive authenticated server-sent events. Each stream checks an indexed D1 revision every 250 ms, loading and sending the full private-safe snapshot only when changed. This is a check interval, not a guaranteed end-to-end latency: database and network time are additional. Hidden tabs check every two seconds. Streams renew every 20 seconds, stop polling under backpressure, and cancel their timers on disconnect. Presence is refreshed every ten seconds and expires after 60 seconds. Reconnects resume from the current persisted snapshot; older responses cannot roll back newer displayed state. No external realtime service or shared Worker memory is required. At steady state, each active viewer adds approximately four small indexed reads per second; database usage grows with concurrent viewers.
 
 ## Migration from Render
 
