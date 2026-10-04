@@ -4,11 +4,14 @@ import { resolve, sep, extname } from "node:path";
 import { Readable } from "node:stream";
 import { createWorker } from "../services/sites/worker.mjs";
 import { localStorageBindings } from "./local-storage.mjs";
+import { buildIcons } from './build-icons.mjs';
+
+await buildIcons();
 
 const frontend = resolve(import.meta.dirname, "../services/frontend");
 const port = Number(process.env.SITES_DEV_PORT || 4173);
 const host = process.env.SITES_DEV_HOST || '127.0.0.1';
-const types = { ".svg": "image/svg+xml", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp" };
+const types = { ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp" };
 const env = {
   ...await localStorageBindings(resolve(import.meta.dirname, "../.sites-runtime/storage")),
   ASSETS: {

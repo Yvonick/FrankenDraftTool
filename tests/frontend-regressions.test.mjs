@@ -42,6 +42,7 @@ function settingsFixture() {
     latestRoom: room, currentRoomNumber: '123456', currentViewerId: 'host',
     settingsSaveStatus: { textContent: '', dataset: {} }, roomMessage: { textContent: '' },
     startDraft: { disabled: false }, poolUploadInput: {},
+    roomView: { scrollIntoView() { this.scrolled = true; } },
     hasHostRights: () => true, setRoomSettingsEditable: () => {},
     collectDraftSettings: () => ({ ...settings }), hostPayload: value => value, apiUrl: value => value,
     apiFetch(url, options) {
@@ -78,6 +79,7 @@ test('start flushes the scheduled save and never sends settings after draft star
   assert.equal(f.context.roomSettingsSavePromise, null);
   assert.equal(f.context.roomStartPending, false);
   assert.equal(f.context.settingsSaveStatus.textContent, 'Saved');
+  assert.equal(f.context.roomView.scrolled, true);
 });
 
 test('in-flight settings saves serialize newer edits before allowing start', async () => {
@@ -214,13 +216,14 @@ class Element {
   textContent = '';
   attributes = {};
   append(...children) { this.children.push(...children); }
+  replaceChildren(...children) { this.children = children; }
   setAttribute(name, value) { this.attributes[name] = value; }
 }
 
 test('only the current picking recap highlights the waiting player', () => {
   const controls = new Element();
   const context = load(['renderAuctionBidRecap'], {
-    document: { createElement: () => new Element() }, auctionControls: controls,
+    document: { createElement: () => new Element() }, auctionRecap: controls,
     getAuctionWaitingPlayerIds: () => new Set(['p'])
   });
   const recap = { type: 'Heroes', revealedBids: [{ playerId: 'p', playerName: 'Player', bids: { first: 1, tie: 0 } }], pickOrder: [{ playerId: 'p', order: 1, cost: 1, bidKind: 'first' }] };

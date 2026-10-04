@@ -10,8 +10,8 @@ const response = (body, status = 200) => Response.json(body, { status, headers: 
 const initialized = new WeakMap();
 const poolCache = new Map();
 
-async function tokenHash(request) {
-  const token = request.headers.get('x-franken-session');
+async function tokenHash(request, header = 'x-franken-session') {
+  const token = request.headers.get(header);
   if (!validId(token) || token.length < 32) throw new RequestError(401, 'session_required');
   const bytes = await crypto.subtle.digest('SHA-256', encoder.encode(token));
   return [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('');
@@ -73,6 +73,16 @@ export async function handleApi(request, env) {
     if (url.pathname === '/api/presence') return response({ openPages: await store.presence(await tokenHash(request)) });
     const parsed = await readBody(request);
     const { data: body } = parsed;
+    if (url.pathname === '/api/profile') {
+      if (!['GET', 'POST'].includes(request.method)) return response({ error: 'method_not_allowed' }, 405);
+      const hash = await tokenHash(request, 'x-franken-profile');
+      if (request.method === 'POST') {
+        if (typeof body.name !== 'string' || body.name.trim().length > 40) return response({ error: 'invalid_name' }, 400);
+        await store.saveProfile(hash, body.name.trim());
+      }
+      return response({ name: await store.profile(hash) });
+    }
+    if (url.pathname === '/api/rooms' && request.method === 'GET') return response({ rooms: await store.currentRooms() });
     const roomMatch = url.pathname.match(/^\/api\/rooms\/(\d{6})(?:\/|$)/);
     const roomId = roomMatch?.[1];
     const presence = roomId && url.pathname === `/api/rooms/${roomId}/presence`;
@@ -178,7 +188,10 @@ export async function handleApi(request, env) {
           // permissions while snapshots/counts continue to use live participants.
           state.participants = [...new Map([...(storedRoom?.state.participants || []), ...state.participants])];
           state.poolObjectKey = selectedKey || `builtin:${builtinPool.id}`;
-          room = { id, expected: storedRoom?.revision ?? null, state };
+          const summary = { poolName: pools.getPool(state.draftSettings.poolId)?.name || 'Custom pool',
+            methodId: state.draftSettings.methodId, status: state.draft?.status || 'not_started',
+            maxSeats: state.maxSeats, allowSpectators: state.allowSpectators !== false };
+          room = { id, expected: storedRoom?.revision ?? null, state, summary };
         }
         const poolChanges = [...pools.changes].map(([id, pool]) => ({ id, pool, expected: poolRows.get(id)?.revision ?? null, previousKey: poolRows.get(id)?.object_key, summary: pool && pools.getPoolSummary(pool) }));
         await store.commit({ room, poolChanges, session });

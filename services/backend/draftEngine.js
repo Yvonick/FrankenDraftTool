@@ -173,6 +173,7 @@ function createRoom() {
     creatorId: null,
     maxSeats: draftSettings.maxSeats,
     allowSpectators: true,
+    listed: true,
     draftSettings,
     draft: null,
     revision: 0,
@@ -266,6 +267,7 @@ function getRoomSnapshot(roomNumber, viewerId = null) {
     revision: room.revision || 0,
     maxSeats: room.maxSeats,
     allowSpectators: room.allowSpectators !== false,
+    listed: room.listed === true,
     seated: getSeatedParticipants(room),
     spectators: [...room.participants.values()]
       .filter((participant) => participant.role === "spectator")
@@ -1217,6 +1219,7 @@ async function handleRoomSettings(roomNumber, request, response) {
 
   room.maxSeats = maxSeats;
   room.allowSpectators = allowSpectators;
+  if (typeof body.listed === "boolean") room.listed = body.listed;
   room.draftSettings = {
     poolId: pool.id,
     methodId: method.id,
@@ -1638,6 +1641,7 @@ function getDraftSnapshot(room, viewerId) {
       status: "complete",
       engine: draft.engine || method.engine,
       poolId: draft.poolId,
+      poolName: getPool(draft.poolId)?.name || "Custom pool",
       methodId: method.id,
       method: getDraftMethodSummary(method),
       picksPerBag: draft.picksPerBag,
@@ -1661,6 +1665,7 @@ function getDraftSnapshot(room, viewerId) {
     status: "active",
     engine: draft.engine || method.engine,
     poolId: draft.poolId,
+    poolName: getPool(draft.poolId)?.name || "Custom pool",
     methodId: method.id,
     method: getDraftMethodSummary(method),
     picksPerBag: draft.picksPerBag,

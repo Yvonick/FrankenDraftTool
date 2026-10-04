@@ -30,6 +30,17 @@ export function createStorage(env) {
       const row = await statement("SELECT revision, state FROM rooms WHERE id = ?", id).first();
       return row ? { revision: row.revision, state: await decompress(row.state) } : null;
     },
+    async profile(hash) {
+      return (await statement("SELECT name FROM name_preferences WHERE token_hash = ?", hash).first())?.name || '';
+    },
+    async saveProfile(hash, name) {
+      if (!name) await statement("DELETE FROM name_preferences WHERE token_hash = ?", hash).run();
+      else await statement("INSERT INTO name_preferences (token_hash, name, updated_at) VALUES (?, ?, ?) ON CONFLICT(token_hash) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at", hash, name, Date.now()).run();
+    },
+    async currentRooms() {
+      const rows = await statement("SELECT d.room_id, d.summary, count(s.participant_id) AS online FROM room_directory d JOIN room_sessions s ON s.room_id = d.room_id AND s.last_seen > ? WHERE d.listed = 1 AND d.status != 'complete' GROUP BY d.room_id ORDER BY max(s.last_seen) DESC LIMIT 100", Date.now() - 60000).all();
+      return rows.results.map(row => ({ ...JSON.parse(row.summary), roomNumber: row.room_id, online: row.online }));
+    },
     async roomRevision(id) {
       return (await statement("SELECT revision FROM rooms WHERE id = ?", id).first())?.revision ?? null;
     },
@@ -80,6 +91,7 @@ export function createStorage(env) {
           values.push(room.id, room.expected);
           const state = await compress(room.state);
           writes.push(statement("INSERT INTO rooms (id, revision, state, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET revision = excluded.revision, state = excluded.state, updated_at = excluded.updated_at", room.id, (room.expected || 0) + 1, state, Date.now()));
+          writes.push(statement("INSERT INTO room_directory (room_id, listed, status, summary) VALUES (?, ?, ?, ?) ON CONFLICT(room_id) DO UPDATE SET listed = excluded.listed, status = excluded.status, summary = excluded.summary", room.id, room.state.listed === true ? 1 : 0, room.state.draft?.status || 'not_started', JSON.stringify(room.summary || {})));
         }
         if (session) {
           checks.push("(SELECT token_hash FROM room_sessions WHERE room_id = ? AND participant_id = ?) IS NOT ?");

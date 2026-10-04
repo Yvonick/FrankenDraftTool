@@ -38,6 +38,50 @@ export async function fixture(t) {
   };
 }
 
+test('server name preferences survive restarts and never grant room identity', async t => {
+  const f = await fixture(t);
+  const token = crypto.randomUUID();
+  const profile = (body, identity = token) => createWorker({ html: '' }).fetch(new Request('https://draft.test/api/profile', {
+    method: body === undefined ? 'GET' : 'POST', headers: { 'x-franken-profile': identity, 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
+  }), f.env);
+  assert.equal((await profile({name: ' Yvon '})).status, 200);
+  await f.restart();
+  assert.equal((await (await profile()).json()).name, 'Yvon');
+  assert.equal((await (await profile(undefined, crypto.randomUUID())).json()).name, '');
+  assert.equal((await profile({name: 'x'.repeat(41)})).status, 400);
+  assert.equal((await profile(undefined, '')).status, 401);
+  const room = await f.room();
+  assert.equal((await f.raw(`${room.base}/presence?participantId=${room.host.id}&role=seated`, undefined, token)).status, 403);
+  await profile({ name: '' });
+  assert.equal((await (await profile()).json()).name, '');
+});
+
+test('room directory lists live opted-in rooms without loading draft state', async t => {
+  const f = await fixture(t);
+  const room = await f.room();
+  assert.equal((await f.api(room.base)).listed, true);
+  const directory = await f.api('/api/rooms');
+  assert.equal(directory.rooms.length, 1);
+  assert.equal(directory.rooms[0].roomNumber, room.roomNumber);
+  assert.equal(directory.rooms[0].online, 2);
+  assert.equal(directory.rooms[0].draft, undefined);
+  assert.equal(directory.rooms[0].creatorToken, undefined);
+  const rejected = await f.raw(`${room.base}/settings`, { participantId: room.players[1].id, listed: false }, room.players[1].token);
+  assert.equal(rejected.status, 403);
+  await f.api(`${room.base}/settings`, { ...room.auth, listed: false }, room.host.token);
+  assert.equal((await f.api('/api/rooms')).rooms.length, 0);
+  await f.restart();
+  assert.equal((await f.api(room.base)).listed, false);
+  await f.api(`${room.base}/settings`, { ...room.auth, listed: true }, room.host.token);
+  const original = f.env.DB.prepare;
+  f.env.DB.prepare = sql => { assert.ok(!/SELECT revision, state FROM rooms/.test(sql), 'directory must not inflate room blobs'); return original(sql); };
+  assert.equal((await f.api('/api/rooms')).rooms.length, 1);
+  f.env.DB.prepare = original;
+  await f.env.DB.prepare('UPDATE room_sessions SET last_seen = 0').run();
+  assert.equal((await f.api('/api/rooms')).rooms.length, 0);
+});
+
 test('standalone routes and health require no external network or ChatGPT login', async t => {
   const f = await fixture(t);
   const originalFetch = globalThis.fetch;
@@ -199,6 +243,7 @@ test('complete bag and auction drafts reveal every pick and export after repeate
       if (step % 4 === 0) { await f.restart(); state = (await room.connect(room.host)).room; }
     }
     assert.equal(state.draft.status, 'complete');
+    assert.ok(!(await f.api('/api/rooms')).rooms.some(entry => entry.roomNumber === room.roomNumber), 'completed drafts leave the current-room directory');
     assert.equal(state.draft.revealedDrafts.length, 2);
     for (const player of state.draft.revealedDrafts) assert.equal(player.items.length, 2);
     assert.equal(new Set(state.draft.revealedDrafts.flatMap(player => player.items.map(item => item.id))).size, 4);

@@ -25,3 +25,15 @@ export const presence = sqliteTable("page_presence", {
 }, table => [index("idx_presence_last_seen").on(table.lastSeen)]);
 // A duplicate insert intentionally aborts a batch when an optimistic check fails.
 export const guard = sqliteTable("mutation_guard", { id: integer("id").primaryKey() });
+
+export const profiles = sqliteTable("name_preferences", {
+  tokenHash: text("token_hash").primaryKey(),
+  name: text("name").notNull(),
+  updatedAt: integer("updated_at").notNull()
+});
+export const directory = sqliteTable("room_directory", {
+  roomId: text("room_id").primaryKey(),
+  listed: integer("listed").notNull().default(0),
+  status: text("status").notNull(),
+  summary: text("summary").notNull()
+}, table => [index("idx_directory_listed_status").on(table.listed, table.status)]);
