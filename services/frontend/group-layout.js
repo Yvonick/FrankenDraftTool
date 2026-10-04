@@ -9,9 +9,7 @@
 
   function layout(container) {
     if (!container.clientWidth) return;
-    const minimum = window.innerWidth <= 500 ? 140
-      : container.id === 'private-drafted-items' ? 150
-        : container.id === 'auction-items' ? 180 : 160;
+    const minimum = window.innerWidth <= 500 ? 140 : 168;
     const columns = groupColumns(container.clientWidth, minimum);
     container.style.setProperty('--layout-columns', columns);
     const groups = [...container.children].filter(child => child.classList.contains('group-section'));

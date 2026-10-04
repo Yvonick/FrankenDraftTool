@@ -60,6 +60,19 @@ test('group layout fills the available width and measures each group independent
   assert.equal(f.first.style.getPropertyValue('--group-span'), 1);
 });
 
+test('bag, drafted items and nomination use the same card scale', () => {
+  const f = fixture();
+  for (const id of ['current-bag', 'private-drafted-items', 'auction-items']) {
+    f.container.id = id;
+    f.container.clientWidth = 600;
+    f.observers[0].callback();
+    assert.equal(f.container.style.getPropertyValue('--layout-columns'), 3);
+    f.container.clientWidth = 330;
+    f.observers[0].callback();
+    assert.equal(f.container.style.getPropertyValue('--layout-columns'), 1);
+  }
+});
+
 test('layout observers release replaced groups and detached containers, and resume after back navigation', () => {
   const f = fixture();
   f.container.children = [f.first];
