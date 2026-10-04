@@ -52,7 +52,7 @@ const defaultMethod = {
     {
       title: "Setup",
       items: [
-        "The host selects a pool and this draft method, players sit down until the room reaches the pool's player count, and the host starts the draft.",
+        "The host or an admin selects a pool and starts the draft with the seated players. At least one player must be seated; the room does not need to be full.",
         "Players are randomly arranged around the table.",
         "Each player is dealt one starting bag built from the pool's item-type counts."
       ]
@@ -77,7 +77,7 @@ const defaultMethod = {
       title: "Visibility And Finish",
       items: [
         "Current bags and drafted items are private to their owners during the draft, except for super spectators.",
-        "Once all bags are empty, every player's drafted area is revealed and TTS export becomes available."
+        "Once all bags are empty or discarded, every player's drafted area is revealed and everyone can export to TTS. Hosts and admins can also export the current draft before it finishes."
       ]
     }
   ],
@@ -116,7 +116,7 @@ const nominationAuctionMethod = {
     {
       title: "Setup",
       items: [
-        "The room starts like a normal draft: the host selects a pool and method, the required number of players sit down, and the host starts the draft.",
+        "The host or an admin selects a pool and method, then starts with the seated players. The room does not need to be full.",
         "Each player starts with 40 credits, 2 mulligan tokens, and 1 ban token.",
         "Speaker order can be random, automatically assigned from a speaker-order bid, or drafted manually after the speaker-order bid. The resulting order becomes the nomination order, and the first player becomes the first speaker."
       ]
@@ -144,7 +144,7 @@ const nominationAuctionMethod = {
       title: "Hidden Bids",
       items: [
         "Each player privately enters a first-pick bid and a tie-breaker bid. With 5 or more players, each player also enters a second-pick bid.",
-        "Players cannot bid more total credits than they have available.",
+        "Each bid must be a whole number from zero to the player's available credits. The bids are alternatives: only the bid that determines that player's pick position is charged, not their sum.",
         "Once a player locks bids, those bid fields stay hidden until all players have locked."
       ]
     },
@@ -163,14 +163,14 @@ const nominationAuctionMethod = {
         "After pick order is decided, players pick one item each from the nominated pool in that order.",
         "The one remaining displayed item goes to a permanent bin.",
         "Temporary-bin items from mulligans are shuffled back into the pool after the nomination resolves.",
-        "The draft ends once every item type has reached its maximum number of nominations. Export becomes available at that point, with each player exported as one TTS bag."
+        "The draft ends once every item type has reached its maximum number of nominations. Everyone can then export to TTS, with each player exported as one bag. Hosts and admins can also export the current draft before it finishes."
       ]
     },
     {
       title: "Visibility",
       items: [
         "Everything is public to players and spectators except each player's hidden bid fields before reveal.",
-        "The draft view should show players, speaker, current pick order and revealed bids when relevant, the nominated items, temporary/permanent bin icons with hover lists, and each player's credits, tokens, picked items, and credit spent per pick."
+        "Players' drafted items and the credits paid for each pick remain public throughout the auction."
       ]
     }
   ],

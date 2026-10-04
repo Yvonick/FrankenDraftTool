@@ -740,8 +740,8 @@
       }
 
       .table-player {
-        width: 5.8rem;
-        min-height: 3rem;
+        width: 2rem;
+        height: 2rem;
         position: absolute;
         left: var(--x);
         top: var(--y);
@@ -754,7 +754,30 @@
         border-radius: 0.5rem;
         background: rgb(6 16 31 / 0.94);
         box-shadow: 0 0.5rem 1rem rgb(0 0 0 / 0.22);
-        font-size: 0.72rem;
+        font-size: 0.85rem;
+      }
+
+      .table-roster {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+        gap: 0.75rem;
+        padding: 0;
+        list-style: none;
+        text-align: left;
+      }
+
+      .table-roster li {
+        min-width: 0;
+        display: grid;
+        gap: 0.25rem;
+        align-content: start;
+        overflow-wrap: anywhere;
+      }
+
+      .table-player.looking {
+        border-color: var(--accent);
+        color: var(--accent);
       }
 
       #table-panel.in-current-bag {
@@ -886,8 +909,7 @@
         transition: opacity 0.12s ease, transform 0.12s ease;
       }
 
-      .checklist-control:hover .draft-checklist-popover,
-      .checklist-control:focus-within .draft-checklist-popover {
+      .checklist-control[data-open="true"] .draft-checklist-popover {
         opacity: 1;
         pointer-events: auto;
         transform: translateY(0);
@@ -1164,7 +1186,7 @@
       .auction-layout {
         width: 100%;
         display: grid;
-        grid-template-columns: minmax(13rem, 0.28fr) minmax(0, 1fr) minmax(20rem, 0.62fr);
+        grid-template-columns: minmax(22.5rem, 0.5fr) minmax(0, 1fr) minmax(20rem, 0.62fr);
         grid-template-areas:
           "action items personal"
           "others others others"
@@ -1187,6 +1209,22 @@
 
       .auction-action-area {
         grid-area: action;
+      }
+
+      #auction-controls,
+      #auction-controls > *,
+      .auction-control-form label,
+      .auction-control-form input,
+      .auction-control-form select {
+        min-width: 0;
+        max-width: 100%;
+      }
+
+      #auction-controls {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        align-content: start;
+        justify-items: stretch;
       }
 
       .auction-control-form.active-action {
@@ -1214,7 +1252,7 @@
       }
 
       .auction-layout.no-personal {
-        grid-template-columns: minmax(13rem, 0.28fr) minmax(0, 1fr);
+        grid-template-columns: minmax(22.5rem, 0.5fr) minmax(0, 1fr);
         grid-template-areas:
           "action items"
           "others others"
@@ -1329,9 +1367,10 @@
 
       .auction-bid-recap th,
       .auction-bid-recap td {
-        padding: 0.35rem 0.45rem;
+        padding: 0.35rem 0.3rem;
         border-bottom: 1px solid var(--line);
         text-align: left;
+        overflow-wrap: anywhere;
       }
 
       .auction-bin-row {
@@ -1405,14 +1444,65 @@
 
       .auction-sticky-actions {
         width: 100%;
-        position: sticky;
-        bottom: 0.75rem;
         z-index: 8;
         padding: 0.6rem;
         border: 1px solid var(--line-strong);
         border-radius: 0.5rem;
         background: rgb(9 23 42 / 0.88);
         box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 0.45);
+      }
+
+      .auction-bin {
+        position: relative;
+      }
+
+      .auction-bin > button {
+        width: 100%;
+      }
+
+      .bin-items {
+        position: absolute;
+        bottom: 100%;
+        left: 0;
+        width: 100%;
+        max-height: min(20rem, 60dvh);
+        overflow: auto;
+        margin: 0;
+        padding: 0.75rem 0.75rem 0.75rem 1.75rem;
+        border: 1px solid var(--line-strong);
+        border-radius: 0.5rem;
+        background: var(--space-1);
+        z-index: 30;
+        overflow-wrap: anywhere;
+      }
+
+      .auction-bid-recap th {
+        white-space: nowrap;
+      }
+
+      .auction-sticky-actions.docked {
+        position: fixed;
+        left: var(--dock-left);
+        width: var(--dock-width);
+        bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+      }
+
+      #auction-item-actions {
+        min-height: var(--action-height, 0px);
+      }
+
+      .inline-status {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        color: var(--muted);
+      }
+
+      .inline-status:empty {
+        display: none;
+      }
+
+      .inline-status[data-error="true"] {
+        color: var(--danger);
       }
 
       .auction-drafted-group {
@@ -1531,8 +1621,23 @@
         display: grid;
         place-items: center;
         padding: 1rem;
+        width: 100%;
+        max-width: none;
+        height: 100%;
+        max-height: none;
+        margin: 0;
+        border: 0;
+        color: var(--text);
         background: rgb(0 4 12 / 0.78);
         backdrop-filter: blur(8px);
+      }
+
+      .modal-backdrop::backdrop {
+        background: transparent;
+      }
+
+      .modal-backdrop:not([open]) {
+        display: none;
       }
 
       .modal {
@@ -1544,6 +1649,8 @@
         border-radius: 0.5rem;
         background: linear-gradient(180deg, rgb(9 23 42 / 0.98), rgb(3 9 21 / 0.98));
         box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 0.55);
+        max-height: calc(100dvh - 2rem);
+        overflow-y: auto;
       }
 
       [hidden] {
@@ -1579,7 +1686,7 @@
         </div>
       </section>
       <div class="pool-admin-list" id="public-pools-list"></div>
-      <p class="message" id="pools-message"></p>
+      <p class="message" id="pools-message" role="status" aria-live="polite"></p>
     </main>
 
     <main id="methods-view" hidden>
@@ -1612,6 +1719,7 @@
         </div>
       </div>
 
+      <p class="message" id="room-message" role="status" aria-live="polite"></p>
       <section class="panel" id="creator-panel" hidden>
         <h3>Room Settings</h3>
         <div class="settings-sections">
@@ -1674,7 +1782,8 @@
           </section>
         </div>
         <div class="actions">
-          <button id="save-room-settings" type="button" hidden>Save Settings</button>
+          <span class="inline-status" id="settings-save-status" role="status"></span>
+          <button id="save-room-settings" class="secondary" type="button" hidden>Retry Save</button>
           <button id="save-pool" class="secondary" type="button">Save Pool</button>
           <button id="start-draft" type="button">Start Draft</button>
         </div>
@@ -1714,8 +1823,8 @@
                   <h4>Drafted Items</h4>
                   <div class="draft-section-tools" id="bag-drafted-tools"></div>
                   <div class="checklist-control" id="draft-checklist-control">
-                    <button id="draft-checklist-button" class="secondary" type="button">Checklist</button>
-                    <div class="draft-checklist-popover" id="draft-checklist"></div>
+                    <button id="draft-checklist-button" class="secondary" type="button" aria-expanded="false" aria-controls="draft-checklist">Checklist</button>
+                    <div class="draft-checklist-popover" id="draft-checklist" hidden></div>
                   </div>
                 </div>
                 <div class="item-grid" id="private-drafted-items"></div>
@@ -1732,6 +1841,7 @@
             <div class="auction-layout" id="auction-layout">
               <section class="auction-action-area">
                 <h4>Action</h4>
+                <p class="inline-status" id="auction-message" role="status"></p>
                 <div class="actions" id="auction-controls"></div>
               </section>
               <section class="auction-items-area">
@@ -1785,6 +1895,7 @@
         <section class="panel" id="table-panel" hidden>
           <h3>Round Table</h3>
           <div class="round-table" id="round-table"></div>
+          <ul class="table-roster" id="table-roster"></ul>
         </section>
 
         <section class="panel" id="spectator-panel">
@@ -1794,12 +1905,12 @@
         </section>
       </div>
 
-      <p class="message" id="room-message"></p>
     </main>
 
-    <div class="modal-backdrop" id="join-modal" hidden>
+    <dialog class="modal-backdrop" id="join-modal" aria-labelledby="join-title" aria-describedby="join-status" hidden>
       <form class="modal" id="join-form">
-        <h3>Join Room</h3>
+        <h3 id="join-title">Join Room</h3>
+        <p id="join-status" role="status"></p>
         <label>
           Name <span>(optional for spectators)</span>
           <input id="join-name" name="name" autocomplete="name" maxlength="40" placeholder="Your name">
@@ -1807,13 +1918,14 @@
         <div class="actions">
           <button id="join-seat" type="submit">Sit Down</button>
           <button id="join-spectate" class="secondary" type="button">Spectate</button>
+          <button id="cancel-join" class="secondary" type="button">Back</button>
         </div>
       </form>
-    </div>
+    </dialog>
 
-    <div class="modal-backdrop" id="sit-modal" hidden>
+    <dialog class="modal-backdrop" id="sit-modal" aria-labelledby="sit-title" hidden>
       <form class="modal" id="sit-form">
-        <h3>Sit Down</h3>
+        <h3 id="sit-title">Sit Down</h3>
         <label>
           Name
           <input id="sit-name" name="name" autocomplete="name" maxlength="40" placeholder="Your name">
@@ -1823,9 +1935,9 @@
           <button id="cancel-sit" class="secondary" type="button">Cancel</button>
         </div>
       </form>
-    </div>
+    </dialog>
 
-    <div class="modal-backdrop" id="confirm-modal" hidden>
+    <dialog class="modal-backdrop" id="confirm-modal" aria-labelledby="confirm-title" aria-describedby="confirm-message" hidden>
       <form class="modal" id="confirm-form">
         <h3 id="confirm-title">Confirm</h3>
         <p id="confirm-message"></p>
@@ -1834,21 +1946,22 @@
           <button id="confirm-cancel" class="secondary" type="button">Cancel</button>
         </div>
       </form>
-    </div>
+    </dialog>
 
-    <div class="modal-backdrop" id="pool-save-modal" hidden>
+    <dialog class="modal-backdrop" id="pool-save-modal" aria-labelledby="pool-save-title" hidden>
       <form class="modal" id="pool-save-form">
-        <h3>Save Pool</h3>
+        <h3 id="pool-save-title">Save Pool</h3>
         <label>
           Pool name
           <input id="pool-save-name-input" maxlength="80" placeholder="Pool name">
         </label>
+        <p class="inline-status" id="pool-save-message" role="status"></p>
         <div class="actions">
           <button type="submit">Save Pool</button>
           <button id="cancel-pool-save" class="secondary" type="button">Cancel</button>
         </div>
       </form>
-    </div>
+    </dialog>
 
     <script>
       const apiUrl = (path) => path;
@@ -1996,9 +2109,11 @@
       const auctionSpeakerModeSelect = document.querySelector("#auction-speaker-mode-select");
       const itemTypeSettings = document.querySelector("#item-type-settings");
       const saveRoomSettings = document.querySelector("#save-room-settings");
+      const settingsSaveStatus = document.querySelector("#settings-save-status");
       const startDraft = document.querySelector("#start-draft");
       const tablePanel = document.querySelector("#table-panel");
       const roundTable = document.querySelector("#round-table");
+      const tableRoster = document.querySelector("#table-roster");
       const draftDisplayPanel = document.querySelector("#draft-display-panel");
       const draftGroupingControl = document.querySelector("#draft-grouping-control");
       const playerDraftPanel = document.querySelector("#player-draft-panel");
@@ -2022,6 +2137,7 @@
       const auctionTemporaryBin = document.querySelector("#auction-temporary-bin");
       const auctionPermanentBin = document.querySelector("#auction-permanent-bin");
       const auctionControls = document.querySelector("#auction-controls");
+      const auctionMessage = document.querySelector("#auction-message");
       const auctionItems = document.querySelector("#auction-items");
       const auctionItemActions = document.querySelector("#auction-item-actions");
       const superDraftPanel = document.querySelector("#super-draft-panel");
@@ -2033,6 +2149,9 @@
       const joinModal = document.querySelector("#join-modal");
       const joinForm = document.querySelector("#join-form");
       const joinName = document.querySelector("#join-name");
+      const joinSeat = document.querySelector("#join-seat");
+      const joinStatus = document.querySelector("#join-status");
+      const cancelJoin = document.querySelector("#cancel-join");
       const joinSpectate = document.querySelector("#join-spectate");
       const sitModal = document.querySelector("#sit-modal");
       const sitForm = document.querySelector("#sit-form");
@@ -2047,6 +2166,7 @@
       const poolSaveModal = document.querySelector("#pool-save-modal");
       const poolSaveForm = document.querySelector("#pool-save-form");
       const poolSaveNameInput = document.querySelector("#pool-save-name-input");
+      const poolSaveMessage = document.querySelector("#pool-save-message");
       const cancelPoolSave = document.querySelector("#cancel-pool-save");
       let roomEvents = null;
       let currentRoomNumber = null;
@@ -2072,10 +2192,100 @@
       let previousDraftStatus = null;
       let renderedSettingsKey = "";
       let roomSettingsSaveTimer = null;
+      let roomSettingsSavePromise = null;
+      let roomSettingsEditVersion = 0;
+      let roomSettingsDirty = false;
+      let roomSettingsSaveFailed = false;
+      let roomStartPending = false;
+      let roomPoolSavePending = false;
+      let auctionActionPending = false;
+      let auctionDockFrame = null;
       let audioContext = null;
       let chimeMuted = localStorage.getItem("frankenDraftTool:chimeMuted") === "true";
       let pendingConfirmation = null;
       let draggedPoolTypeRow = null;
+      const disclosures = [];
+
+      function installDisclosure(container, button, content) {
+        let pinned = false;
+        const show = (open) => {
+          content.hidden = !open;
+          container.dataset.open = String(open);
+          button.setAttribute("aria-expanded", String(open));
+        };
+        const close = () => { pinned = false; show(false); };
+        button.setAttribute("aria-controls", content.id);
+        button.setAttribute("aria-expanded", "false");
+        button.addEventListener("click", () => { pinned = !pinned; show(pinned); });
+        container.addEventListener("pointerenter", (event) => { if (event.pointerType === "mouse") show(true); });
+        container.addEventListener("pointerleave", () => { if (!pinned) show(false); });
+        container.addEventListener("focusout", (event) => { if (!container.contains(event.relatedTarget)) close(); });
+        container.addEventListener("keydown", (event) => {
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          event.stopPropagation();
+          close();
+          button.focus();
+        });
+        disclosures.push({ container, close });
+      }
+
+      installDisclosure(draftChecklistControl, document.querySelector("#draft-checklist-button"), draftChecklist);
+      document.addEventListener("pointerdown", (event) => {
+        for (const disclosure of disclosures) {
+          if (!disclosure.container.contains(event.target)) disclosure.close();
+        }
+      });
+
+      function setInlineStatus(element, message, error = false) {
+        element.textContent = message;
+        element.dataset.error = String(error);
+      }
+
+      function openModal(modal, initialFocus) {
+        disclosures.forEach(({ close }) => close());
+        modal.hidden = false;
+        if (!modal.open) modal.showModal();
+        initialFocus?.focus();
+      }
+
+      function closeModal(modal) {
+        if (modal.open) modal.close();
+        modal.hidden = true;
+      }
+
+      function updateAuctionDock() {
+        const row = auctionItemActions.querySelector(".auction-sticky-actions");
+        if (!row || auctionPanel.hidden) {
+          auctionItemActions.style.removeProperty("--action-height");
+          return;
+        }
+        const height = row.getBoundingClientRect().height;
+        auctionItemActions.style.setProperty("--action-height", `${height}px`);
+        const slot = auctionItemActions.getBoundingClientRect();
+        const viewport = window.visualViewport;
+        const top = viewport?.offsetTop || 0;
+        const bottom = top + (viewport?.height || window.innerHeight);
+        const dock = slot.top < top || slot.top + height > bottom - 12;
+        row.classList.toggle("docked", dock);
+        const left = Math.max(8, slot.left);
+        row.style.setProperty("--dock-left", `${left}px`);
+        row.style.setProperty("--dock-width", `${Math.max(0, Math.min(slot.right, document.documentElement.clientWidth - 8) - left)}px`);
+      }
+
+      function scheduleAuctionDock() {
+        if (auctionDockFrame !== null) return;
+        auctionDockFrame = requestAnimationFrame(() => {
+          auctionDockFrame = null;
+          updateAuctionDock();
+        });
+      }
+
+      window.addEventListener("scroll", scheduleAuctionDock, { passive: true });
+      window.addEventListener("resize", scheduleAuctionDock);
+      window.visualViewport?.addEventListener("resize", scheduleAuctionDock);
+      window.visualViewport?.addEventListener("scroll", scheduleAuctionDock);
+      new ResizeObserver(scheduleAuctionDock).observe(auctionPanel);
 
       function show(view) {
         for (const candidate of [homeView, poolsView, methodsView, roomView]) {
@@ -2664,6 +2874,7 @@
       }
 
       function renderDraftSettings(settings) {
+        if (roomSettingsDirty || roomSettingsSavePromise) return;
         const settingsKey = getDraftSettingsRenderKey(settings);
 
         if (settingsInitialized && renderedSettingsKey === settingsKey) {
@@ -2727,15 +2938,19 @@
 
       function setRoomSettingsEditable(canEdit) {
         creatorPanel.classList.toggle("readonly", !canEdit);
+        const locked = roomStartPending || roomPoolSavePending;
 
         for (const control of creatorPanel.querySelectorAll("input, select, textarea")) {
-          control.disabled = !canEdit;
+          control.disabled = !canEdit || locked;
         }
 
-        saveRoomSettings.hidden = true;
+        saveRoomSettings.hidden = !canEdit || !roomSettingsSaveFailed;
+        saveRoomSettings.disabled = locked || Boolean(roomSettingsSavePromise);
         savePoolButton.hidden = !canEdit;
+        savePoolButton.disabled = locked;
         startDraft.hidden = !canEdit;
-        poolUploadDrop.setAttribute("aria-disabled", String(!canEdit));
+        startDraft.disabled = locked || !latestRoom?.seated.length;
+        poolUploadDrop.setAttribute("aria-disabled", String(!canEdit || locked));
       }
 
       function poolUploadErrorMessage(error) {
@@ -2851,7 +3066,12 @@
       }
 
       function renderPublicPools() {
-        publicPoolsList.replaceChildren();
+        const existingCards = new Map([...publicPoolsList.querySelectorAll(".pool-admin-card")]
+          .map((card) => [card.dataset.poolId, card]));
+        const ids = new Set(pools.map((pool) => pool.id));
+        for (const child of [...publicPoolsList.children]) {
+          if (!ids.has(child.dataset.poolId)) child.remove();
+        }
 
         if (pools.length === 0) {
           const empty = document.createElement("p");
@@ -2861,9 +3081,14 @@
         }
 
         for (const pool of pools) {
+          const existing = existingCards.get(pool.id);
+          const poolVersion = JSON.stringify(pool);
+          if (existing && (existing.dataset.dirty === "true"
+            || existing.dataset.saving === "true" || existing.dataset.poolVersion === poolVersion)) continue;
           const card = document.createElement("section");
           card.className = "pool-admin-card";
           card.dataset.poolId = pool.id;
+          card.dataset.poolVersion = poolVersion;
           const header = document.createElement("header");
           const title = document.createElement("h3");
           title.textContent = pool.name;
@@ -2921,10 +3146,12 @@
             const row = document.createElement("div");
             row.className = "pool-type-row";
             row.dataset.itemType = itemType.type;
-            const dragHandle = document.createElement("span");
+            const dragHandle = document.createElement("button");
+            dragHandle.type = "button";
             dragHandle.className = "pool-type-drag-handle";
             dragHandle.draggable = true;
-            dragHandle.setAttribute("aria-label", `Drag ${itemType.type}`);
+            dragHandle.setAttribute("aria-label", `Reorder ${itemType.type}`);
+            dragHandle.title = `Reorder ${itemType.type}. Use arrow keys, Home or End.`;
             dragHandle.textContent = "::";
             const label = document.createElement("label");
             const input = document.createElement("input");
@@ -2950,10 +3177,24 @@
           removeButton.className = "secondary";
           removeButton.dataset.poolAction = "remove";
           removeButton.textContent = "Remove";
-          actions.append(saveButton, removeButton);
+          const status = document.createElement("span");
+          status.className = "inline-status";
+          status.dataset.poolStatus = "true";
+          status.setAttribute("role", "status");
+          status.textContent = existing ? "Saved" : "";
+          actions.append(saveButton, removeButton, status);
           card.append(header, nameLabel, seatsLabel, picksLabel, speakerModeLabel, typeList, actions);
-          publicPoolsList.append(card);
+          if (existing) existing.replaceWith(card);
+          else publicPoolsList.append(card);
+          card.dataset.savedSettings = JSON.stringify(collectManagedPoolSettings(card));
         }
+      }
+
+      function markManagedPoolDirty(card) {
+        if (!card) return;
+        const dirty = JSON.stringify(collectManagedPoolSettings(card)) !== card.dataset.savedSettings;
+        card.dataset.dirty = String(dirty);
+        setInlineStatus(card.querySelector("[data-pool-status]"), dirty ? "Unsaved changes" : "Saved");
       }
 
       function collectManagedPoolSettings(card) {
@@ -2978,7 +3219,12 @@
       async function saveManagedPool(card) {
         const poolId = card.dataset.poolId;
         const button = card.querySelector("button[data-pool-action='save']");
+        if (button.disabled) return;
+        const status = card.querySelector("[data-pool-status]");
+        const payload = JSON.stringify(collectManagedPoolSettings(card));
         button.disabled = true;
+        card.dataset.saving = "true";
+        setInlineStatus(status, "Saving...");
 
         try {
           const response = await apiFetch(apiUrl(`/api/pools/${encodeURIComponent(poolId)}`), {
@@ -2986,19 +3232,28 @@
             headers: {
               "Content-Type": "application/json"
             },
-            body: JSON.stringify(collectManagedPoolSettings(card))
+            body: payload
           });
           const data = await response.json();
 
           if (!response.ok) {
-            poolsMessage.textContent = "Could not save pool.";
+            setInlineStatus(status, "Could not save pool. Your changes are still here; try Save again.", true);
             return;
           }
 
           pools = data.pools;
+          card.dataset.savedSettings = payload;
+          const saved = pools.find((pool) => pool.id === poolId);
+          if (saved) card.querySelector("h3").textContent = saved.name;
+          markManagedPoolDirty(card);
+          card.dataset.saving = "false";
+          if (card.dataset.dirty !== "true") card.dataset.poolVersion = "";
           renderPublicPools();
           poolsMessage.textContent = "Pool saved.";
+        } catch {
+          setInlineStatus(status, "Connection failed. Your changes are still here; try Save again.", true);
         } finally {
+          card.dataset.saving = "false";
           button.disabled = false;
         }
       }
@@ -3022,6 +3277,8 @@
           pools = data.pools;
           renderPublicPools();
           poolsMessage.textContent = "Pool removed.";
+        } catch {
+          setInlineStatus(card.querySelector("[data-pool-status]"), "Connection failed. The pool was not confirmed removed.", true);
         } finally {
           button.disabled = false;
         }
@@ -3164,7 +3421,8 @@
           details.textContent = [
             methodOptionLabels.engine[method.engine] || method.engine,
             methodOptionLabels.itemPresentation[method.itemPresentation] || method.itemPresentation,
-            methodOptionLabels.completion[method.completion] || method.completion
+            method.id === "nomination-auction" ? "All nominations complete"
+              : (methodOptionLabels.completion[method.completion] || method.completion)
           ].join(" / ");
           const sections = document.createElement("div");
           sections.className = "method-section-list";
@@ -3326,6 +3584,7 @@
       function renderTable(draft) {
         tablePanel.hidden = draft.status === "not_started";
         roundTable.replaceChildren();
+        tableRoster.replaceChildren();
 
         if (draft.status === "not_started") {
           return;
@@ -3340,15 +3599,20 @@
 
         for (const player of draft.table) {
           const angle = (Math.PI * 2 * (player.seat - 1)) / total - Math.PI / 2;
-          const card = document.createElement("div");
-          card.className = "table-player";
-          card.style.setProperty("--x", `${50 + Math.cos(angle) * 38}%`);
-          card.style.setProperty("--y", `${50 + Math.sin(angle) * 38}%`);
+          const marker = document.createElement("span");
+          marker.className = `table-player${player.lookingAtBag ? " looking" : ""}`;
+          marker.style.setProperty("--x", `${50 + Math.cos(angle) * 38}%`);
+          marker.style.setProperty("--y", `${50 + Math.sin(angle) * 38}%`);
+          marker.textContent = player.seat;
+          marker.title = player.name;
+          marker.setAttribute("aria-label", `Seat ${player.seat}: ${player.name}`);
+          roundTable.append(marker);
+          const card = document.createElement("li");
           const name = document.createElement("strong");
           name.textContent = player.name;
           appendHostBadge(name, player);
           const seat = document.createElement("span");
-          seat.textContent = `${player.host ? "Host / " : (player.admin ? "Admin / " : "")}Seat ${player.seat}`;
+          seat.textContent = `${player.admin && !player.host ? "Admin / " : ""}Seat ${player.seat}`;
           const queue = document.createElement("span");
           queue.textContent = draft.engine === "auction"
             ? `${player.credits} credits`
@@ -3359,7 +3623,7 @@
             : (player.lookingAtBag ? "Looking at a bag" : "No current bag");
           card.append(name, seat, queue, looking);
           appendAdminAction(card, player);
-          roundTable.append(card);
+          tableRoster.append(card);
         }
       }
 
@@ -3530,27 +3794,49 @@
       }
 
       async function postAuctionAction(action, body = {}) {
-        const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/auction/${action}`), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            ...body,
-            playerId: currentViewerId
-          })
-        });
-        const data = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          roomMessage.textContent = data.error === "wrong_auction_stage"
-            ? "That auction action is not available right now."
-            : "Could not update the auction.";
+        const preset = action === "no-ban-preset";
+        if (!preset && auctionActionPending) return null;
+        if (!preset) auctionActionPending = true;
+        const buttons = preset ? [] : [...auctionControls.querySelectorAll("button:not(:disabled)"),
+          ...auctionItemActions.querySelectorAll("button:not(:disabled)")];
+        buttons.forEach((button) => { button.disabled = true; });
+        setInlineStatus(auctionMessage, "Saving...");
+        try {
+          const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/auction/${action}`), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...body, playerId: currentViewerId })
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const errors = {
+              wrong_auction_stage: "The turn has changed. Wait for the current room state before trying again.",
+              invalid_bid: "Each bid must be a whole number between zero and your available credits.",
+              bid_already_locked: "Your bids are already locked.",
+              item_already_picked: "That item has already been picked. Select another item.",
+              item_not_in_nomination: "That item is no longer available in this nomination.",
+              no_mulligan_tokens: "You have no mulligan tokens left.",
+              no_ban_tokens: "You have no ban tokens left.",
+              no_replacement_available: "There are no remaining items to replace a banned item.",
+              not_enough_pool_items: "There are not enough remaining items for a new draw.",
+              invalid_nomination_type: "That item type can no longer be nominated.",
+              speaker_required: "Only the current speaker can do that."
+            };
+            setInlineStatus(auctionMessage, errors[data.error] || "Could not update the auction. Please retry.", true);
+            return null;
+          }
+          setInlineStatus(auctionMessage, "");
+          roomMessage.textContent = "";
+          renderRoom(data);
+          return data;
+        } catch {
+          setInlineStatus(auctionMessage, "Connection lost. The action was not confirmed; check the room before retrying.", true);
           return null;
+        } finally {
+          if (!preset) auctionActionPending = false;
+          buttons.forEach((button) => { if (button.isConnected) button.disabled = false; });
+          updateAuctionSelectionControls();
         }
-
-        renderRoom(data);
-        return data;
       }
 
       function auctionStageLabel(auction) {
@@ -3783,6 +4069,7 @@
       function renderAuctionPlayers(auction) {
         const waitingIds = getAuctionWaitingPlayerIds(auction);
         const playersRenderKey = JSON.stringify({
+          viewerId: currentViewerId,
           stage: auction.stage,
           grouping: draftGrouping.value,
           waiting: [...waitingIds].sort(),
@@ -3843,10 +4130,34 @@
         const nomination = auction.currentNomination;
         const temporaryItems = nomination?.temporaryBinItems || [];
         const permanentItems = auction.permanentBinItems || nomination?.permanentBinItems || [];
-        auctionTemporaryBin.textContent = `Temporary bin: ${temporaryItems.length}`;
-        auctionPermanentBin.textContent = `Permanent bin: ${permanentItems.length}`;
-        auctionTemporaryBin.title = temporaryItems.map((item) => item.name).join("\n") || "Empty";
-        auctionPermanentBin.title = permanentItems.map((item) => item.name).join("\n") || "Empty";
+        for (const [container, label, items] of [
+          [auctionTemporaryBin, "Temporary bin", temporaryItems],
+          [auctionPermanentBin, "Permanent bin", permanentItems]
+        ]) {
+          let button = container.querySelector("button");
+          if (!button) {
+            button = document.createElement("button");
+            button.type = "button";
+            button.className = "secondary";
+            const list = document.createElement("ul");
+            list.id = `${container.id}-items`;
+            list.className = "bin-items";
+            list.hidden = true;
+            container.append(button, list);
+            installDisclosure(container, button, list);
+          }
+          const key = JSON.stringify(items.map((item) => [item.id, item.name]));
+          if (container.dataset.itemsKey === key) continue;
+          container.dataset.itemsKey = key;
+          button.textContent = `${label}: ${items.length}`;
+          const list = container.querySelector("ul");
+          list.replaceChildren();
+          for (const name of items.length ? items.map((item) => item.name) : ["Empty"]) {
+            const item = document.createElement("li");
+            item.textContent = name;
+            list.append(item);
+          }
+        }
       }
 
       function auctionItemSelectionKey(auction, action) {
@@ -3922,6 +4233,7 @@
         }
 
         return [
+          currentViewerId || "",
           auction.stage,
           nomination.type,
           nomination.isSpeakerOrder ? "speaker-order" : "items",
@@ -3971,7 +4283,7 @@
         const confirm = auctionPanel.querySelector("[data-auction-confirm]");
 
         if (confirm) {
-          confirm.disabled = !auctionSelectedItemId;
+          confirm.disabled = !auctionSelectedItemId || auctionActionPending;
         }
       }
 
@@ -3998,6 +4310,7 @@
         auctionItemsRenderKey = renderKey;
         auctionItems.replaceChildren();
         auctionItemActions.replaceChildren();
+        scheduleAuctionDock();
 
         if (items.length === 0) {
           const empty = document.createElement("p");
@@ -4263,11 +4576,15 @@
         orderedBids.push(...bids.filter((record) => !orderedPlayerIds.has(record.playerId)));
         const showSecond = auction.players.length >= 5;
         const showOrder = (recap.pickOrder || []).length > 0;
-        const waitingIds = getAuctionWaitingPlayerIds(auction);
+        const waitingIds = recap === auction.currentNomination && auction.stage === "picking"
+          ? getAuctionWaitingPlayerIds(auction) : new Set();
         const wrapper = document.createElement("div");
         wrapper.className = "auction-player-card auction-bid-recap";
+        wrapper.tabIndex = 0;
+        wrapper.setAttribute("role", "region");
         const title = document.createElement("strong");
         title.textContent = `${recap.isSpeakerOrder ? "Speaker order" : recap.type} bids recap`;
+        wrapper.setAttribute("aria-label", title.textContent);
         const table = document.createElement("table");
         const thead = document.createElement("thead");
         const headRow = document.createElement("tr");
@@ -4550,20 +4867,33 @@
         if (latestRoom?.roomNumber === data.roomNumber
           && data.revision !== undefined
           && latestRoom.revision === data.revision
+          && JSON.stringify(latestRoom.viewer) === JSON.stringify(data.viewer)
           && !options.force) {
           return;
         }
 
         const priorDraftStatus = latestRoom?.draft?.status || previousDraftStatus;
         latestRoom = data;
+        currentViewerId = data.viewer?.id || null;
+        currentRole = data.viewer?.role || null;
+        if (data.draft.status !== "not_started") {
+          window.clearTimeout(roomSettingsSaveTimer);
+          roomSettingsSaveTimer = null;
+          roomSettingsDirty = false;
+          roomSettingsSaveFailed = false;
+          settingsInitialized = false;
+          renderedSettingsKey = "";
+        }
         roomView.dataset.draftStatus = data.draft.status;
         roomView.dataset.draftEngine = data.draft.engine || "";
         renderSeated(data.seated);
         roomStatus.textContent = `${data.seated.length} of ${data.maxSeats} seats filled`;
         renderSpectators(data);
-        seatLimitInput.value = data.maxSeats;
-        allowSpectatorsInput.checked = data.allowSpectators !== false;
-        joinSpectate.hidden = data.allowSpectators === false;
+        if (!roomSettingsDirty && !roomSettingsSavePromise) {
+          seatLimitInput.value = data.maxSeats;
+          allowSpectatorsInput.checked = data.allowSpectators !== false;
+        }
+        updateJoinOptions();
 
         if (data.draft.status === "not_started") {
           renderDraftSettings(data.draft.settings);
@@ -4576,35 +4906,45 @@
         exportDraft.hidden = !["active", "complete"].includes(data.draft.status)
           || (data.draft.status === "active" && !hasHostRights());
         seatingPanel.hidden = !draftNotStarted;
-        startDraft.disabled = data.seated.length === 0;
+        startDraft.disabled = roomStartPending || roomPoolSavePending || data.seated.length === 0;
         sitDown.hidden = currentRole !== "spectator" || !draftNotStarted;
         spectateRoom.hidden = currentRole !== "seated" || !draftNotStarted || data.allowSpectators === false;
         renderDraft(data.draft, priorDraftStatus);
+        scheduleAuctionDock();
         previousDraftStatus = data.draft.status;
       }
 
-      function openJoinModal() {
+      function updateJoinOptions() {
+        const status = latestRoom?.draft.status;
+        const canSit = status === "not_started" && latestRoom.seated.length < latestRoom.maxSeats;
+        joinSeat.disabled = !canSit;
         joinSpectate.hidden = latestRoom?.allowSpectators === false;
-        joinModal.hidden = false;
-        joinName.focus();
+        joinStatus.textContent = status === "complete" ? "This draft is complete."
+          : status === "active" ? "This draft has already started."
+          : !canSit ? "All seats are filled." : "";
+        if (joinSpectate.hidden && !canSit) joinStatus.textContent += " Spectators are disabled.";
+      }
+
+      function openJoinModal() {
+        updateJoinOptions();
+        openModal(joinModal, joinSeat.disabled ? (joinSpectate.hidden ? cancelJoin : joinSpectate) : joinName);
       }
 
       function closeJoinModal() {
-        joinModal.hidden = true;
+        closeModal(joinModal);
       }
 
       function openSitModal() {
         sitName.value = sessionStorage.getItem(storageKey(currentRoomNumber, "name")) || "";
-        sitModal.hidden = false;
-        sitName.focus();
+        openModal(sitModal, sitName);
       }
 
       function closeSitModal() {
-        sitModal.hidden = true;
+        closeModal(sitModal);
       }
 
       function closeConfirmModal(confirmed = false) {
-        confirmModal.hidden = true;
+        closeModal(confirmModal);
 
         if (pendingConfirmation) {
           const resolve = pendingConfirmation;
@@ -4618,11 +4958,10 @@
         confirmTitle.textContent = title;
         confirmMessage.textContent = message;
         confirmAccept.textContent = acceptLabel;
-        confirmModal.hidden = false;
+        openModal(confirmModal, confirmCancel);
 
         return new Promise((resolve) => {
           pendingConfirmation = resolve;
-          confirmAccept.focus();
         });
       }
 
@@ -4771,44 +5110,70 @@
       }
 
       async function saveSettings(options = {}) {
-        saveRoomSettings.disabled = true;
+        window.clearTimeout(roomSettingsSaveTimer);
+        roomSettingsSaveTimer = null;
+        if (roomSettingsSavePromise) return roomSettingsSavePromise;
+        if (latestRoom?.draft.status !== "not_started" || !hasHostRights()) return false;
 
-        try {
-          const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/settings`), {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify(hostPayload({
-              participantId: currentViewerId,
-              ...collectDraftSettings()
-            }))
-          });
-
-          const data = await response.json();
-
-          if (!response.ok) {
-            roomMessage.textContent =
-              data.error === "seat_limit_below_current_players"
-                ? "Seat limit cannot be below the number of seated players."
-                : "Could not save room settings.";
+        // One writer drains newer edits before start/publish is allowed to continue.
+        roomSettingsSavePromise = (async () => {
+          try {
+            let savedVersion;
+            do {
+              savedVersion = roomSettingsEditVersion;
+              const settings = collectDraftSettings();
+              roomSettingsDirty = true;
+              roomSettingsSaveFailed = false;
+              setInlineStatus(settingsSaveStatus, "Saving...");
+              const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/settings`), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(hostPayload({ participantId: currentViewerId, ...settings }))
+              });
+              const data = await response.json();
+              if (!response.ok) {
+                throw new Error(data.error === "seat_limit_below_current_players"
+                  ? "Seat limit cannot be below the number of seated players."
+                  : "Could not save settings. Your changes are still here; retry before starting.");
+              }
+              renderRoom(data);
+            } while (savedVersion !== roomSettingsEditVersion && latestRoom?.draft.status === "not_started");
+            roomSettingsDirty = false;
+            setInlineStatus(settingsSaveStatus, "Saved");
+            return true;
+          } catch (error) {
+            if (latestRoom?.draft.status !== "not_started") {
+              roomSettingsDirty = false;
+              roomSettingsSaveFailed = false;
+              setInlineStatus(settingsSaveStatus, "");
+              return false;
+            }
+            roomSettingsSaveFailed = true;
+            setInlineStatus(settingsSaveStatus, error.message || "Could not save settings. Please retry.", true);
             return false;
           }
-
-          renderRoom(data);
-
-          if (!options.silent) {
-            roomMessage.textContent = "Room settings saved.";
-          }
-
-          return true;
+        })();
+        setRoomSettingsEditable(hasHostRights());
+        try {
+          return await roomSettingsSavePromise;
         } finally {
-          saveRoomSettings.disabled = false;
+          window.clearTimeout(roomSettingsSaveTimer);
+          roomSettingsSaveTimer = null;
+          roomSettingsSavePromise = null;
+          if (latestRoom) renderRoom(latestRoom, { force: true });
         }
       }
 
+      function markRoomSettingsDirty(event) {
+        if (!hasHostRights() || latestRoom?.draft.status !== "not_started"
+          || roomStartPending || roomPoolSavePending || event?.target === poolUploadInput) return;
+        roomSettingsEditVersion += 1;
+        roomSettingsDirty = true;
+        setInlineStatus(settingsSaveStatus, "Unsaved changes");
+      }
+
       function scheduleRoomSettingsSave(event) {
-        if (!hasHostRights() || latestRoom?.draft.status !== "not_started") {
+        if (!hasHostRights() || latestRoom?.draft.status !== "not_started" || roomStartPending || roomPoolSavePending) {
           return;
         }
 
@@ -4816,6 +5181,7 @@
           return;
         }
 
+        markRoomSettingsDirty(event);
         window.clearTimeout(roomSettingsSaveTimer);
         roomSettingsSaveTimer = window.setTimeout(() => {
           saveSettings({ silent: true });
@@ -4831,35 +5197,37 @@
         }
 
         poolSaveNameInput.value = pool?.name || "";
-        poolSaveModal.hidden = false;
-        poolSaveNameInput.focus();
+        setInlineStatus(poolSaveMessage, "");
+        openModal(poolSaveModal, poolSaveNameInput);
         poolSaveNameInput.select();
       }
 
       function closePoolSaveModal() {
-        poolSaveModal.hidden = true;
+        closeModal(poolSaveModal);
       }
 
       async function saveCurrentRoomPool(event) {
         event.preventDefault();
+        if (roomPoolSavePending || roomStartPending) return;
         const poolName = poolSaveNameInput.value.trim();
 
         if (!poolName) {
-          roomMessage.textContent = "Name the pool before saving it.";
+          setInlineStatus(poolSaveMessage, "Name the pool before saving it.", true);
           poolSaveNameInput.focus();
           return;
         }
 
-        const settingsSaved = await saveSettings({ silent: true });
-
-        if (!settingsSaved) {
-          return;
-        }
-
         const submit = poolSaveForm.querySelector("button[type='submit']");
+        roomPoolSavePending = true;
         submit.disabled = true;
+        setRoomSettingsEditable(hasHostRights());
+        setInlineStatus(poolSaveMessage, "Saving...");
 
         try {
+          if (!await saveSettings({ silent: true })) {
+            setInlineStatus(poolSaveMessage, settingsSaveStatus.textContent, true);
+            return;
+          }
           const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/pool/save`), {
             method: "POST",
             headers: {
@@ -4873,9 +5241,9 @@
           const data = await response.json();
 
           if (!response.ok) {
-            roomMessage.textContent = data.error === "draft_already_started"
+            setInlineStatus(poolSaveMessage, data.error === "draft_already_started"
               ? "Pools can only be saved before the draft starts."
-              : "Could not save this pool.";
+              : "Could not save this pool. Please retry.", true);
             return;
           }
 
@@ -4888,51 +5256,57 @@
           closePoolSaveModal();
           renderRoom(data, { force: true });
           roomMessage.textContent = "Pool saved.";
+        } catch {
+          setInlineStatus(poolSaveMessage, "Connection failed. Saving the pool was not confirmed.", true);
         } finally {
+          roomPoolSavePending = false;
           submit.disabled = false;
+          setRoomSettingsEditable(hasHostRights());
         }
       }
 
       async function handleStartDraft() {
-        startDraft.disabled = true;
-        const settingsSaved = await saveSettings({ silent: true });
+        if (roomStartPending || roomPoolSavePending) return;
+        roomStartPending = true;
+        roomMessage.textContent = "";
+        setRoomSettingsEditable(hasHostRights());
+        try {
+          startDraft.disabled = true;
+          const settingsSaved = await saveSettings({ silent: true });
 
-        if (!settingsSaved) {
-          startDraft.disabled = false;
-          return;
-        }
+          if (!settingsSaved) return;
 
-        const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/start`), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(hostPayload({
-            participantId: currentViewerId
-          }))
-        });
-        const data = await response.json();
+          const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/start`), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(hostPayload({ participantId: currentViewerId }))
+          });
+          const data = await response.json();
 
-        if (!response.ok) {
-          if (data.error === "room_not_full") {
-            roomMessage.textContent = "The room must be full before starting.";
-          } else if (data.error === "no_players") {
-            roomMessage.textContent = "Seat at least one player before starting.";
-          } else if (data.error === "unsupported_draft_method") {
-            roomMessage.textContent = "That draft method is a definition only. The live engine is not implemented yet.";
-          } else if (data.error === "no_nomination_types") {
-            roomMessage.textContent = "Set at least one item type above zero before starting this auction.";
-          } else if (data.error === "not_enough_pool_items") {
-            roomMessage.textContent = "The pool does not have enough items for those draft parameters.";
-          } else {
-            roomMessage.textContent = "Could not start the draft.";
+          if (!response.ok) {
+            if (data.error === "no_players") {
+              roomMessage.textContent = "Seat at least one player before starting.";
+            } else if (data.error === "unsupported_draft_method") {
+              roomMessage.textContent = "That draft method is a definition only. The live engine is not implemented yet.";
+            } else if (data.error === "no_nomination_types") {
+              roomMessage.textContent = "Set at least one item type above zero before starting this auction.";
+            } else if (data.error === "not_enough_pool_items") {
+              roomMessage.textContent = "The pool does not have enough items for those draft parameters.";
+            } else {
+              roomMessage.textContent = "Could not start the draft.";
+            }
+            setInlineStatus(settingsSaveStatus, roomMessage.textContent, true);
+            return;
           }
-          startDraft.disabled = false;
-          return;
-        }
 
-        renderRoom(data);
-        roomMessage.textContent = "Draft started.";
+          renderRoom(data);
+          roomMessage.textContent = "Draft started.";
+        } catch {
+          setInlineStatus(settingsSaveStatus, "Connection failed. Draft start was not confirmed; check the room before retrying.", true);
+        } finally {
+          roomStartPending = false;
+          setRoomSettingsEditable(hasHostRights());
+        }
       }
 
       async function handleRestartDraft() {
@@ -5145,6 +5519,7 @@
 
       joinForm.addEventListener("submit", (event) => {
         event.preventDefault();
+        if (joinSeat.disabled) return;
         const name = joinName.value.trim();
 
         if (!name) {
@@ -5155,6 +5530,34 @@
         closeJoinModal();
         connectToRoom("seated", name);
       });
+
+      cancelJoin.addEventListener("click", () => { window.location.href = "/"; });
+      for (const [modal, cancel] of [
+        [joinModal, () => { window.location.href = "/"; }],
+        [sitModal, closeSitModal],
+        [confirmModal, () => closeConfirmModal(false)],
+        [poolSaveModal, closePoolSaveModal]
+      ]) {
+        modal.addEventListener("cancel", (event) => {
+          event.preventDefault();
+          cancel();
+        });
+        modal.addEventListener("keydown", (event) => {
+          if (event.key !== "Tab") return;
+          const controls = [...modal.querySelectorAll("button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex='0']")]
+            .filter((element) => element.getClientRects().length > 0);
+          const first = controls[0];
+          const last = controls[controls.length - 1];
+          if (!first) return;
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        });
+      }
 
       joinSpectate.addEventListener("click", () => {
         if (latestRoom?.allowSpectators === false) {
@@ -5278,6 +5681,7 @@
         updateDraftSettingsVisibility();
       });
 
+      creatorPanel.addEventListener("input", markRoomSettingsDirty);
       creatorPanel.addEventListener("change", scheduleRoomSettingsSave);
 
       poolUploadInput.addEventListener("change", () => {
@@ -5355,8 +5759,35 @@
       });
 
       publicPoolsList.addEventListener("dragend", () => {
+        markManagedPoolDirty(draggedPoolTypeRow?.closest(".pool-admin-card"));
         draggedPoolTypeRow?.classList.remove("dragging");
         draggedPoolTypeRow = null;
+      });
+
+      publicPoolsList.addEventListener("input", (event) => {
+        markManagedPoolDirty(event.target.closest(".pool-admin-card"));
+      });
+      publicPoolsList.addEventListener("change", (event) => {
+        markManagedPoolDirty(event.target.closest(".pool-admin-card"));
+      });
+      publicPoolsList.addEventListener("keydown", (event) => {
+        const handle = event.target.closest(".pool-type-drag-handle");
+        if (!handle || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const row = handle.closest(".pool-type-row");
+        const list = row.parentElement;
+        if (event.key === "Home") list.prepend(row);
+        else if (event.key === "End") list.append(row);
+        else if (["ArrowLeft", "ArrowUp"].includes(event.key) && row.previousElementSibling) {
+          list.insertBefore(row, row.previousElementSibling);
+        } else if (["ArrowRight", "ArrowDown"].includes(event.key) && row.nextElementSibling) {
+          list.insertBefore(row.nextElementSibling, row);
+        }
+        handle.focus();
+        const card = row.closest(".pool-admin-card");
+        markManagedPoolDirty(card);
+        const position = [...list.children].indexOf(row) + 1;
+        setInlineStatus(card.querySelector("[data-pool-status]"), `${row.dataset.itemType}: position ${position} of ${list.children.length}. Unsaved changes.`);
       });
 
       publicPoolsList.addEventListener("click", async (event) => {
@@ -5411,7 +5842,7 @@
         setParticipantAdmin(button.dataset.adminParticipantId, button.dataset.admin === "true");
       });
 
-      roundTable.addEventListener("click", (event) => {
+      tableRoster.addEventListener("click", (event) => {
         const button = event.target.closest("button[data-admin-participant-id]");
 
         if (!button) {
