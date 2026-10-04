@@ -435,7 +435,7 @@ function normalizeDefaultParameters(pool, parameters = {}) {
     const maxValue = isSpeakerOrderType(type) ? 1 : 10;
     const value = Number.isInteger(parsed)
       ? Math.min(Math.max(parsed, 0), maxValue)
-      : 1;
+      : (isSpeakerOrderType(type) ? 1 : 2);
 
     return [type, value];
   }));
