@@ -212,6 +212,7 @@ test('saving a pool preserves edits made while its save is in flight', async () 
 
 class Element {
   children = [];
+  dataset = {};
   className = '';
   textContent = '';
   attributes = {};
@@ -219,6 +220,52 @@ class Element {
   replaceChildren(...children) { this.children = children; }
   setAttribute(name, value) { this.attributes[name] = value; }
 }
+
+test('setup renders and collects room-specific type order, including hidden speaker settings', () => {
+  const list = new Element();
+  list.querySelectorAll = selector => selector === '.room-type-row' ? list.children
+    : list.children.map(row => row.children[1].children[1]);
+  const pool = { itemTypes: [{ type: 'Units' }, { type: 'Techs' }, { type: 'Speaker Order', isMeta: true }],
+    defaultParameters: { typeOrder: ['Units', 'Techs', 'Speaker Order'], itemsPerType: { Units: 2, Techs: 2, 'Speaker Order': 1 } } };
+  let auction = true;
+  const context = load(['renderTypeInputs', 'collectDraftSettings'], {
+    document: { createElement: () => new Element() }, window: {}, itemTypeSettings: list,
+    selectedMethodIsAuction: () => auction, seatLimitInput: {value: 6}, allowSpectatorsInput: {checked: true},
+    listedInput: {checked: true}, poolSelect: {value: 'pool'}, draftMethodSelect: {value: 'auction'},
+    picksPerBagInput: {value: 2}, auctionSpeakerModeSelect: {value: 'none'}, auctionSpeakerModeValue: x => x
+  });
+  const order = ['Techs', 'Speaker Order', 'Units'];
+  context.renderTypeInputs(pool, { Units: 3, Techs: 0, 'Speaker Order': 1 }, order);
+  assert.deepEqual(list.children.map(row => row.dataset.itemType), order);
+  assert.equal(list.children[1].hidden, true);
+  const settings = JSON.parse(JSON.stringify(context.collectDraftSettings()));
+  assert.deepEqual(settings.typeOrder, order);
+  assert.deepEqual(settings.itemsPerType, { Techs: 0, 'Speaker Order': 1, Units: 3 });
+  auction = false;
+  context.renderTypeInputs(pool, settings.itemsPerType, settings.typeOrder);
+  assert.equal(list.children[1].hidden, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.collectDraftSettings())).typeOrder, order);
+});
+
+test('setup keyboard reorder moves existing rows without losing count inputs', () => {
+  const rows = [{type: 'Units', value: 3}, {type: 'Speaker Order', hidden: true}, {type: 'Techs', value: 0}];
+  const list = { children: [...rows], insertBefore(row, before) {
+    if (row === before) return;
+    this.children.splice(this.children.indexOf(row), 1);
+    this.children.splice(this.children.indexOf(before), 0, row);
+  }, append(row) { this.children.splice(this.children.indexOf(row), 1); this.children.push(row); } };
+  let saves = 0, focused = false;
+  const handle = { closest: () => rows[0], focus: () => { focused = true; } };
+  const context = load(['moveRoomTypeWithKeyboard'], { itemTypeSettings: list, scheduleRoomSettingsSave: () => { saves++; } });
+  context.moveRoomTypeWithKeyboard(handle, 'ArrowRight');
+  assert.deepEqual(list.children.map(row => row.type), ['Techs', 'Units', 'Speaker Order']);
+  assert.equal(rows[0].value, 3);
+  assert.equal(rows[2].value, 0);
+  assert.equal(focused, true);
+  assert.equal(saves, 1);
+  context.moveRoomTypeWithKeyboard(handle, 'Home');
+  assert.equal(list.children[0], rows[0]);
+});
 
 test('only the current picking recap highlights the waiting player', () => {
   const controls = new Element();

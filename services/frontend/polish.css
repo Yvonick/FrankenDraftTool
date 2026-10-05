@@ -61,8 +61,11 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 .settings-section-counts { order: 4; grid-column: 1 / -1; }
 .settings-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); }
 .settings-grid label, .pool-admin-card label { font-size: .875rem; }
-#item-type-settings { grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); }
+#item-type-settings { grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); }
 #item-type-settings label { grid-template-rows: 1fr auto; }
+.room-type-row { align-items: stretch; }
+.room-type-row .pool-type-drag-handle { touch-action: none; }
+.room-type-row.dragging { outline: 2px solid var(--accent); }
 .pool-upload-drop { background: var(--space-1); border-style: dashed; padding: .9rem; min-height: 4.5rem; }
 #creator-panel.readonly .settings-sections, #creator-panel.readonly > .actions { display: none; }
 #room-settings-summary { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 1.5rem; }
@@ -84,9 +87,14 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 .table-roster li { border: none; padding: 0; font-size: .875rem; }
 .participant-actions button { min-height: 2.25rem; font-size: .8125rem; padding: .35rem .6rem; }
 .spectator-card { background: none; box-shadow: none; border: 0; padding: .5rem 0; }
-.draft-panel-grid { grid-template-columns: minmax(0, 1.7fr) minmax(19rem, 1fr); gap: 2rem; }
+.draft-panel-grid { grid-template-columns: minmax(0, var(--bag-width, 1.7fr)) 12px minmax(0, var(--picks-width, 1fr)); gap: 0 1rem; }
 .draft-subpanel { padding: 0; }
-.draft-subpanel + .draft-subpanel { border-left: 1px solid var(--line); padding-left: 1.5rem; }
+#bag-divider { position: relative; cursor: col-resize; touch-action: none; align-self: stretch; min-height: 8rem; border-radius: 4px; }
+#bag-divider::before { content: ""; position: absolute; top: 0; bottom: 0; left: 5px; width: 2px; background: var(--line); }
+#bag-divider::after { content: ""; position: absolute; top: 3rem; left: 3px; width: 6px; height: 2rem; border-radius: 3px; background: var(--line-strong); }
+#bag-divider:hover::before, #bag-divider:focus-visible::before, #bag-divider.dragging::before, #bag-divider:hover::after, #bag-divider:focus-visible::after, #bag-divider.dragging::after { background: var(--accent); }
+#bag-divider:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.resizing-draft, .resizing-draft * { cursor: col-resize !important; user-select: none !important; }
 .draft-section-header { gap: .75rem; align-items: center; }
 .draft-section-tools { gap: .5rem; }
 .draft-grouping-control { font-size: .875rem; width: auto; max-width: 100%; }
@@ -190,7 +198,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 .modal-backdrop:has(.inspector) .item-preview { display: none; }
 @media (max-width: 1050px) {
   .auction-layout { grid-template-columns: minmax(0,1.5fr) minmax(17rem,1fr); }
-  .draft-panel-grid { grid-template-columns: minmax(0,1.5fr) minmax(17rem,1fr); gap: 1rem; }
 }
 @media (max-width: 800px) {
   main { width: calc(100% - 2rem); padding-top: 1.5rem; }
@@ -199,7 +206,9 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
   .identity-button { max-width: 12rem; }
   .settings-sections, #room-settings-summary, .draft-panel-grid, .method-admin-list { grid-template-columns: minmax(0,1fr); }
   .settings-section-counts { grid-column: auto; }
-  .draft-subpanel + .draft-subpanel, .auction-personal-area { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 1.25rem; }
+  #bag-divider { display: none; }
+  .draft-panel-grid { row-gap: 1.5rem; }
+  #bag-picks-panel, .auction-personal-area { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 1.25rem; }
   .auction-layout, .auction-layout.no-personal { grid-template-columns: minmax(0,1fr); grid-template-areas: 'action' 'items' 'recap' 'personal' 'others' 'bins'; }
   .auction-layout.no-personal { grid-template-areas: 'action' 'items' 'recap' 'others' 'bins'; }
   .mobile-jump { display: inline; font-size: .875rem; margin-left: auto; }

@@ -149,12 +149,16 @@ test('a private upload saved from its room pins the new defaults across reloads'
   const uploaded = await f.api('/api/pools/upload', { poolJson: tinyPool, savePool: false });
   assert.equal((await f.api('/api/pools')).pools.length, 1);
   const room = await f.room();
-  await f.api(`${room.base}/settings`, { ...room.auth, poolId: uploaded.pool.id, picksPerBag: 1 }, room.host.token);
+  const typeOrder = [...uploaded.pool.defaultParameters.typeOrder].reverse();
+  await f.api(`${room.base}/settings`, { ...room.auth, poolId: uploaded.pool.id, picksPerBag: 1, typeOrder }, room.host.token);
+  await f.restart();
+  assert.deepEqual((await room.connect(room.host)).room.draft.settings.typeOrder, typeOrder);
   await f.api(`${room.base}/pool/save`, { ...room.auth, poolName: 'Room saved pool' }, room.host.token);
   await f.restart();
   const view = await room.connect(room.host);
   assert.equal(view.room.draft.settings.pool.name, 'Room saved pool');
-  await room.start();
+  assert.deepEqual(view.room.draft.settings.pool.defaultParameters.typeOrder, typeOrder);
+  assert.deepEqual((await room.start()).draft.typeOrder, typeOrder);
   await f.restart();
   const exported = await f.raw(`${room.base}/draft/export?${new URLSearchParams(room.auth)}`, undefined, room.host.token);
   assert.equal(exported.status, 200);

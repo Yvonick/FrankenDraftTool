@@ -13,7 +13,7 @@ for (const [, source] of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) 
 await rm(resolve(root, "dist"), { recursive: true, force: true });
 await mkdir(resolve(root, "dist/server"), { recursive: true });
 await mkdir(resolve(root, "dist/client"), { recursive: true });
-for (const asset of ["favicon.svg", "pool-assets", "polish.css", "icons.js", "group-layout.js"]) {
+for (const asset of ["favicon.svg", "pool-assets", "polish.css", "icons.js", "group-layout.js", "draft-splitter.js"]) {
   await cp(resolve(root, "services/frontend", asset), resolve(root, "dist/client", asset), { recursive: true });
 }
 await build({
