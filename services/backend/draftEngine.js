@@ -141,7 +141,7 @@ function defaultDraftSettings() {
       poolId: null,
       methodId: method.id,
       maxSeats: defaultSeatLimit,
-      picksPerBag: 2,
+      picksPerBag: 3,
       auctionSpeakerMode: defaultAuctionSpeakerMode,
       typeOrder: [],
       itemsPerType: {}

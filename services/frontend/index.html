@@ -3106,10 +3106,16 @@
           ["Item limits", (settings.typeOrder || Object.keys(settings.itemsPerType || {})).map(type => [type, settings.itemsPerType?.[type] || 0]).filter(([, count]) => count > 0)]
         ];
         for (const [heading, values] of sections) {
-          const section = document.createElement("section"); section.className = "setup-summary";
+          const isCounts = heading === "Item limits";
+          const section = document.createElement("section"); section.className = isCounts ? "setup-summary setup-summary-counts" : "setup-summary";
           const title = document.createElement("h3"); title.textContent = heading;
           const list = document.createElement("dl");
-          for (const [label, value] of values) { const term = document.createElement("dt"); const detail = document.createElement("dd"); term.textContent = label; detail.textContent = value; list.append(term, detail); }
+          for (const [label, value] of values) {
+            const term = document.createElement("dt"); const detail = document.createElement("dd");
+            term.textContent = label; detail.textContent = value;
+            if (isCounts) { const pair = document.createElement("div"); pair.append(term, detail); list.append(pair); }
+            else list.append(term, detail);
+          }
           section.append(title, list); summary.append(section);
         }
       }

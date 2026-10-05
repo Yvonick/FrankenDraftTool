@@ -260,15 +260,20 @@ test('new pools default to two of each component, preserve speaker rules and exp
   const f = await fixture(t);
   const room = await f.room();
   const settings = (await f.api(room.base)).draft.settings;
+  assert.equal(settings.picksPerBag, 3);
   for (const [type, count] of Object.entries(settings.itemsPerType)) assert.equal(count, type === 'Speaker Order' ? 1 : 2);
   const { pool } = await f.api('/api/pools/upload', { poolJson: tinyPool, savePool: true });
   assert.equal(pool.defaultParameters.itemsPerType.Units, 2);
   assert.equal(pool.defaultParameters.itemsPerType.Abilities, 2);
   assert.equal(pool.defaultParameters.itemsPerType['Speaker Order'], 1);
-  await f.api(`/api/pools/${pool.id}`, { defaultParameters: { itemsPerType: { Units: 0, Abilities: 4, 'Speaker Order': 0 } } });
+  assert.equal(pool.defaultParameters.picksPerBag, 3);
+  await f.api(`/api/pools/${pool.id}`, { defaultParameters: { picksPerBag: 2, itemsPerType: { Units: 0, Abilities: 4, 'Speaker Order': 0 } } });
+  await f.api(`${room.base}/settings`, { ...room.auth, picksPerBag: 1 }, room.host.token);
   await f.restart();
   const saved = (await f.api('/api/pools')).pools.find(entry => entry.id === pool.id);
   assert.deepEqual(saved.defaultParameters.itemsPerType, { Units: 0, Abilities: 4, 'Speaker Order': 0 });
+  assert.equal(saved.defaultParameters.picksPerBag, 2);
+  assert.equal((await f.api(room.base)).draft.settings.picksPerBag, 1);
 });
 
 test('authenticated streams deliver other workers actions without leaking private bids', async t => {

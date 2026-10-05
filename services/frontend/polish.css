@@ -69,10 +69,14 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 .pool-upload-drop { background: var(--space-1); border-style: dashed; padding: .9rem; min-height: 4.5rem; }
 #creator-panel.readonly .settings-sections, #creator-panel.readonly > .actions { display: none; }
 #room-settings-summary { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 1.5rem; }
-.setup-summary { display: grid; gap: .5rem; align-content: start; }
-.setup-summary dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: .4rem 1rem; }
-.setup-summary dt { color: var(--muted); }
-.setup-summary dd { margin: 0; color: var(--text); }
+.setup-summary { display: grid; gap: .5rem; align-content: start; min-width: 0; }
+.setup-summary dl { margin: 0; display: grid; grid-template-columns: fit-content(12rem) minmax(0, 1fr); gap: .5rem 1rem; align-items: baseline; }
+.setup-summary dt { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.setup-summary dd { margin: 0; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.setup-summary-counts { grid-column: 1 / -1; }
+.setup-summary-counts dl { grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr)); gap: .5rem 1.5rem; }
+.setup-summary-counts dl > div { display: flex; align-items: baseline; gap: .75rem; padding: .4rem 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.setup-summary-counts dd { flex-shrink: 0; font-weight: 600; }
 .participants-footer { border-top: 1px solid var(--line); padding-top: 1.5rem; gap: 2rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .participants-footer > .panel { justify-items: stretch; align-content: start; text-align: left; min-width: 0; }
 #seating-panel, .participants-footer > #table-panel { grid-column: 1; grid-row: 1; }
@@ -146,21 +150,21 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 .auction-player-card { min-height: 0; background: var(--space-1); border-radius: 6px; padding: 1rem; box-shadow: none; }
 .auction-player-card.personal { min-height: 0; }
 .auction-player-card.waiting { border-color: var(--gold); box-shadow: inset 3px 0 var(--gold); }
-.auction-drafted-item { background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: .5rem 0; }
+.auction-drafted-item { grid-template-columns: 3.25rem minmax(0, 1fr); gap: .75rem; background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: .5rem 0; }
 .auction-drafted-item strong, .auction-drafted-item span { display: block; line-height: 1.4; overflow-wrap: anywhere; }
 .auction-drafted-item .item-image-frame { width: 3.25rem; }
 .auction-drafted-item .inspect-button { width: 1.75rem; height: 1.75rem; left: 0; bottom: 0; }
 .auction-drafted-item span { font-size: .875rem; }
 .auction-bid-recap { border: 0; border-top: 1px solid var(--line); padding: 1rem 0 0; background: none; }
-.auction-bid-recap table { font-size: .875rem; }
-.auction-bid-recap th, .auction-bid-recap td { padding: .5rem; }
+.auction-bid-recap table { width: auto; max-width: 100%; justify-self: start; font-size: .875rem; }
+.auction-bid-recap th, .auction-bid-recap td { padding: .5rem .75rem; }
 .auction-sticky-actions { box-shadow: none; border-radius: 6px; justify-content: space-between; background: #101b2bf5; }
 .auction-selection-summary { min-width: 0; flex: 1; font-size: .875rem; overflow-wrap: anywhere; }
 .auction-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 1rem; }
 .auction-roster-area { border-top: 1px solid var(--line); padding-top: 1.5rem; }
 .pool-admin-list { width: 100%; display: grid; gap: 0; }
 .pool-admin-card { display: grid; gap: .75rem; padding: 1.25rem 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: none; box-shadow: none; }
-.pool-admin-card header { align-items: center; gap: 1rem; }
+.pool-admin-card header { align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: .5rem 1rem; }
 .pool-library-actions { display: flex; align-items: center; gap: .5rem; margin-left: auto; }
 .pool-library-meta { color: var(--muted); font-size: .875rem; }
 .pool-editor { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 1rem; padding: 1rem 0; }
@@ -170,7 +174,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 .method-admin-list { width: 100%; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 2rem; }
 .method-admin-card { border: 0; border-top: 2px solid var(--accent); padding: 1.5rem 0; background: none; border-radius: 0; box-shadow: none; }
 .method-admin-card:nth-child(2) { border-top-color: var(--gold); }
-.method-admin-card header { justify-content: space-between; }
+.method-admin-card header { justify-content: flex-start; flex-wrap: wrap; gap: .5rem 1rem; }
 .method-section-list { display: block; }
 .method-section { border-top: 1px solid var(--line); padding: .75rem 0; }
 .method-section summary { font-weight: 600; cursor: pointer; padding: .25rem 0; }

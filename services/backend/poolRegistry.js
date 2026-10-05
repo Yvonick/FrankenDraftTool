@@ -416,7 +416,7 @@ function normalizeDefaultParameters(pool, parameters = {}) {
   const parsedPicksPerBag = Number(parameters.picksPerBag);
   const picksPerBag = Number.isInteger(parsedPicksPerBag)
     ? Math.min(Math.max(parsedPicksPerBag, 1), 8)
-    : 2;
+    : 3;
   const auctionSpeakerMode = auctionSpeakerModes.has(parameters.auctionSpeakerMode)
     ? parameters.auctionSpeakerMode
     : defaultAuctionSpeakerMode;
