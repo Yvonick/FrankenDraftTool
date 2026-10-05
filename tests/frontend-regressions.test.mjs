@@ -221,6 +221,52 @@ class Element {
   setAttribute(name, value) { this.attributes[name] = value; }
 }
 
+test('table roster groups player identity, status and admin controls in compact rows', () => {
+  const roundTable = new Element(), tableRoster = new Element(), tablePanel = new Element();
+  const context = load(['renderTable'], {
+    document: { createElement() { const element = new Element(); element.style = { setProperty() {} }; return element; } },
+    roundTable, tableRoster, tablePanel,
+    appendHostBadge() {}, appendAdminAction(card, player) { if (player.admin) card.append('admin control'); }
+  });
+  const draft = { status: 'active', engine: 'bag', table: [
+    { name: 'Alice', seat: 1, admin: true, lookingAtBag: true, queueLength: 2 },
+    { name: 'Bob', seat: 2, lookingAtBag: false, queueLength: 0 }
+  ] };
+  context.renderTable(draft);
+  assert.equal(roundTable.children[0].children[0].textContent, 2);
+  assert.equal(roundTable.children[0].children[1].textContent, 'players');
+  assert.equal(tableRoster.children[0].children[0].className, 'table-identity');
+  assert.equal(tableRoster.children[0].children[1].className, 'table-player-status choosing');
+  assert.equal(tableRoster.children[0].children[1].children[0].textContent, 'Choosing');
+  assert.equal(tableRoster.children[0].children[1].children[1].textContent, '2 bags queued');
+  assert.equal(tableRoster.children[0].children[2], 'admin control');
+  assert.equal(tableRoster.children[1].children[1].children[0].textContent, 'Waiting');
+  context.renderTable({ ...draft, status: 'complete' });
+  assert.equal(tableRoster.children[1].children[1].children[0].textContent, 'Finished');
+  context.renderTable({ status: 'not_started' });
+  assert.equal(tablePanel.hidden, true);
+  assert.equal(tableRoster.children.length, 0);
+});
+
+test('bag waiting state restores the current-bag heading and controls when a bag arrives', () => {
+  const heading = new Element(), instruction = new Element(), lockChoice = new Element();
+  const placements = [];
+  const context = load(['renderCurrentBag'], {
+    document: { querySelector: () => heading }, draftInstruction: instruction, lockChoice,
+    currentBag: new Element(), renderedCurrentBagKey: null, currentBagId: 'bag', selectedItemIds: new Set(),
+    latestRoom: { draft: {} }, placeTablePanel: inside => placements.push(inside),
+    getCurrentBagRenderKey: () => 'bag', renderTypeSections() {}, updateLockButton() {}
+  });
+  context.renderCurrentBag({ currentBag: null, queueLength: 0 });
+  assert.equal(heading.textContent, 'Waiting for next bag');
+  assert.equal(instruction.textContent, '0 bags queued');
+  assert.equal(lockChoice.hidden, true);
+  context.renderCurrentBag({ currentBag: { id: 'bag', items: [], eligibleItemIds: [], requiredPickCount: 3 }, queueLength: 1 });
+  assert.equal(heading.textContent, 'Current Bag');
+  assert.equal(lockChoice.hidden, false);
+  assert.deepEqual(placements, [true, false]);
+});
+
 test('setup renders and collects room-specific type order, including hidden speaker settings', () => {
   const list = new Element();
   list.querySelectorAll = selector => selector === '.room-type-row' ? list.children

@@ -3826,7 +3826,11 @@
 
         const center = document.createElement("div");
         center.className = "table-center";
-        center.textContent = `${latestRoom.spectators} watching`;
+        const count = document.createElement("strong");
+        count.textContent = draft.table.length;
+        const label = document.createElement("span");
+        label.textContent = draft.table.length === 1 ? "player" : "players";
+        center.append(count, label);
         roundTable.append(center);
 
         const total = draft.table.length;
@@ -3842,20 +3846,26 @@
           marker.setAttribute("aria-label", `Seat ${player.seat}: ${player.name}`);
           roundTable.append(marker);
           const card = document.createElement("li");
+          const identity = document.createElement("div");
+          identity.className = "table-identity";
           const name = document.createElement("strong");
           name.textContent = player.name;
           appendHostBadge(name, player);
           const seat = document.createElement("span");
           seat.textContent = `${player.admin && !player.host ? "Admin / " : ""}Seat ${player.seat}`;
+          identity.append(name, seat);
+          const status = document.createElement("div");
+          status.className = `table-player-status${player.lookingAtBag ? " choosing" : ""}`;
           const queue = document.createElement("span");
           queue.textContent = draft.engine === "auction"
             ? `${player.credits} credits`
             : `${player.queueLength} bag${player.queueLength === 1 ? "" : "s"} queued`;
           const looking = document.createElement("span");
           looking.textContent = draft.engine === "auction"
-            ? `${player.mulliganTokens}M / ${player.banTokens}B`
-            : (player.lookingAtBag ? "Looking at a bag" : "No current bag");
-          card.append(name, seat, queue, looking);
+            ? `${player.mulliganTokens} mulligan / ${player.banTokens} ban`
+            : (draft.status === "complete" ? "Finished" : player.lookingAtBag ? "Choosing" : "Waiting");
+          status.append(looking, queue);
+          card.append(identity, status);
           appendAdminAction(card, player);
           tableRoster.append(card);
         }
@@ -3977,6 +3987,7 @@
       }
 
       function renderCurrentBag(currentPlayer, priorDraftStatus = null) {
+        document.querySelector("#bag-heading").textContent = currentPlayer.currentBag ? "Current Bag" : "Waiting for next bag";
         if (!currentPlayer.currentBag) {
           if (renderedCurrentBagKey !== null) {
             currentBag.replaceChildren();
@@ -3984,9 +3995,7 @@
           }
 
           placeTablePanel(true);
-          draftInstruction.textContent = currentPlayer.queueLength === 0
-            ? "No bags in your queue."
-            : `${currentPlayer.queueLength} bag${currentPlayer.queueLength === 1 ? "" : "s"} in your queue. Waiting for your next bag.`;
+          draftInstruction.textContent = `${currentPlayer.queueLength} bag${currentPlayer.queueLength === 1 ? "" : "s"} queued`;
           lockChoice.hidden = true;
           return;
         }
