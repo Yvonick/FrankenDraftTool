@@ -13,6 +13,7 @@ const port = Number(process.env.SITES_DEV_PORT || 4173);
 const host = process.env.SITES_DEV_HOST || '127.0.0.1';
 const types = { ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp" };
 const env = {
+  DRAFT_HISTORY_PASSKEY: process.env.DRAFT_HISTORY_PASSKEY,
   ...await localStorageBindings(resolve(import.meta.dirname, "../.sites-runtime/storage")),
   ASSETS: {
     async fetch(request) {
@@ -32,7 +33,8 @@ const server = createServer(async (incoming, outgoing) => {
   outgoing.on("close", () => abort.abort());
   try {
     const html = await readFile(resolve(frontend, "index.html"), "utf8");
-    const worker = createWorker({ html });
+    const historyHtml = await readFile(resolve(frontend, "history.html"), "utf8");
+    const worker = createWorker({ html, historyHtml });
     const request = new Request(new URL(incoming.url, `http://127.0.0.1:${port}`), {
       method: incoming.method,
       headers: incoming.headers,

@@ -37,3 +37,19 @@ export const directory = sqliteTable("room_directory", {
   status: text("status").notNull(),
   summary: text("summary").notNull()
 }, table => [index("idx_directory_listed_status").on(table.listed, table.status)]);
+
+export const draftHistory = sqliteTable("draft_history", {
+  id: text("id").primaryKey(),
+  roomId: text("room_id").notNull(),
+  status: text("status").notNull(),
+  completedAt: integer("completed_at"),
+  summary: text("summary").notNull(),
+  eventCount: integer("event_count").notNull(),
+  results: blob("results", { mode: "buffer" })
+}, table => [index("idx_draft_history_finished").on(table.status, table.completedAt, table.id)]);
+
+export const draftEvents = sqliteTable("draft_events", {
+  draftId: text("draft_id").notNull(),
+  sequence: integer("sequence").notNull(),
+  event: text("event").notNull()
+}, table => [primaryKey({ columns: [table.draftId, table.sequence] })]);

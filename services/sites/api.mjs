@@ -3,6 +3,8 @@ import registryModule from '../backend/poolRegistry.js';
 import { builtinPool, assetOverrides } from './builtin.mjs';
 import { createStorage, ConflictError, RequestError } from './storage.mjs';
 import { roomStream } from './room-stream.mjs';
+import { captureHistoryBefore, recordDraftAction } from './draft-history.mjs';
+import { handleHistoryApi } from './history-api.mjs';
 
 const encoder = new TextEncoder();
 const validId = value => typeof value === 'string' && /^[a-zA-Z0-9-]{8,80}$/.test(value);
@@ -61,6 +63,7 @@ async function loadPool(store, key) {
 export async function handleApi(request, env) {
   try {
     const url = new URL(request.url);
+    if (url.pathname.startsWith('/api/draft-history')) return await handleHistoryApi(request, env);
     if (!['GET', 'HEAD', 'POST'].includes(request.method)) return response({ error: 'method_not_allowed' }, 405);
     const store = createStorage(env);
     if (!initialized.has(env.DB)) {
@@ -125,6 +128,8 @@ export async function handleApi(request, env) {
       if (body.poolId && (!selectedRow || selectedRow.deleted)) return response({ error: 'invalid_pool' }, 400);
       const pools = registryModule.createPoolRegistry({ initialPools, assetOverrides });
       const engine = engineModule.createDraftEngine({ pools, roomEntries: storedRoom ? [[roomId, storedRoom.state]] : [] });
+      const historyAction = request.method === 'POST' ? url.pathname.match(/^\/api\/rooms\/\d{6}\/draft\/(start|restart|pick|auction\/[a-z-]+)$/)?.[1] : null;
+      const historyBefore = captureHistoryBefore(engine.rooms.get(roomId), body, historyAction);
       const out = capture();
       let session;
       let active = new Set();
@@ -182,7 +187,9 @@ export async function handleApi(request, env) {
       try {
         const id = roomId || (url.pathname === '/api/rooms' && request.method === 'POST' ? JSON.parse(out.body).roomNumber : null);
         let room;
+        let history;
         if (id && changed) {
+          if (historyAction) history = recordDraftAction({ before: historyBefore, room: engine.rooms.get(id), roomId: id, actorId, action: historyAction, body, pools });
           const state = engine.serializeRoom(id);
           // Presence expiry is not revocation. Keep offline identities and their
           // permissions while snapshots/counts continue to use live participants.
@@ -194,7 +201,7 @@ export async function handleApi(request, env) {
           room = { id, expected: storedRoom?.revision ?? null, state, summary };
         }
         const poolChanges = [...pools.changes].map(([id, pool]) => ({ id, pool, expected: poolRows.get(id)?.revision ?? null, previousKey: poolRows.get(id)?.object_key, summary: pool && pools.getPoolSummary(pool) }));
-        await store.commit({ room, poolChanges, session });
+        await store.commit({ room, poolChanges, session, history });
         if (joined) {
           // Presence changes can happen without a draft revision changing.
           joined.room.revision = `${(storedRoom.revision || 0) + (changed ? 1 : 0)}:${[...active].sort().join(',')}`;

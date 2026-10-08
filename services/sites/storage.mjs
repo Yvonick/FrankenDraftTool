@@ -44,6 +44,22 @@ export function createStorage(env) {
     async roomRevision(id) {
       return (await statement("SELECT revision FROM rooms WHERE id = ?", id).first())?.revision ?? null;
     },
+    async finishedDrafts(cursor) {
+      const rows = (await statement("SELECT id, completed_at, summary, event_count FROM draft_history WHERE status = 'complete' AND (completed_at < ? OR (completed_at = ? AND id < ?)) ORDER BY completed_at DESC, id DESC LIMIT 26", cursor?.at ?? Number.MAX_SAFE_INTEGER, cursor?.at ?? Number.MAX_SAFE_INTEGER, cursor?.id ?? '').all()).results;
+      const page = rows.slice(0, 25);
+      return { drafts: page.map(row => ({ ...JSON.parse(row.summary), id: row.id, completedAt: row.completed_at, eventCount: row.event_count })),
+        nextCursor: rows.length > 25 ? `${page.at(-1).completed_at}.${page.at(-1).id}` : null };
+    },
+    async finishedDraft(id) {
+      const row = await statement("SELECT summary, results, completed_at, event_count FROM draft_history WHERE id = ? AND status = 'complete'", id).first();
+      return row ? { ...JSON.parse(row.summary), id, completedAt: row.completed_at, eventCount: row.event_count,
+        results: row.results ? await decompress(row.results) : null } : null;
+    },
+    async draftEvents(id, after) {
+      const rows = (await statement("SELECT event FROM draft_events WHERE draft_id = ? AND sequence > ? AND EXISTS (SELECT 1 FROM draft_history WHERE id = ? AND status = 'complete') ORDER BY sequence LIMIT 101", id, after, id).all()).results;
+      const events = rows.slice(0, 100).map(row => JSON.parse(row.event));
+      return { events, nextAfter: rows.length > 100 ? events.at(-1).sequence : null };
+    },
     async pool(key) {
       const object = await env.BUCKET.get(key);
       if (!object) throw new Error("Pool object is unavailable");
@@ -67,7 +83,7 @@ export function createStorage(env) {
       ]);
       return (await statement("SELECT count(*) AS count FROM page_presence WHERE last_seen > ?", now - 60000).first()).count;
     },
-    async commit({ room, poolChanges = [], session }) {
+    async commit({ room, poolChanges = [], session, history }) {
       const checks = [];
       const values = [];
       const writes = [];
@@ -97,6 +113,12 @@ export function createStorage(env) {
           checks.push("(SELECT token_hash FROM room_sessions WHERE room_id = ? AND participant_id = ?) IS NOT ?");
           values.push(session.roomId, session.participantId, session.expected);
           writes.push(statement("INSERT INTO room_sessions (room_id, participant_id, token_hash, last_seen) VALUES (?, ?, ?, ?) ON CONFLICT(room_id, participant_id) DO UPDATE SET last_seen = excluded.last_seen", session.roomId, session.participantId, session.hash, Date.now()));
+        }
+        if (history) {
+          const results = history.results ? await compress(history.results) : null;
+          writes.push(statement(`INSERT INTO draft_history (id, room_id, status, completed_at, summary, event_count, results) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, completed_at = excluded.completed_at, event_count = excluded.event_count, results = ${history.preserveResults ? 'draft_history.results' : 'excluded.results'}`,
+            history.id, history.roomId, history.status, history.completedAt, JSON.stringify(history.summary), history.eventCount, results));
+          for (const event of history.events) writes.push(statement("INSERT INTO draft_events (draft_id, sequence, event) VALUES (?, ?, ?)", history.id, event.sequence, JSON.stringify(event)));
         }
         if (!writes.length) return;
         await db.batch([

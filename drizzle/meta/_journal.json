@@ -15,6 +15,13 @@
       "when": 1791148828996,
       "tag": "0001_spotty_malice",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791494027418,
+      "tag": "0002_omniscient_white_queen",
+      "breakpoints": true
     }
   ]
 }

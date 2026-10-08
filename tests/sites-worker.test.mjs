@@ -5,12 +5,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { localStorageBindings } from '../scripts/local-storage.mjs';
 import { createWorker } from '../services/sites/worker.mjs';
+import { createStorage } from '../services/sites/storage.mjs';
 
 export const tinyPool = { ObjectStates: [{ Name: 'Bag', Nickname: 'Persistence Test', ContainedObjects: ['Units', 'Abilities'].map(type => ({ Name: 'Bag', Nickname: type, ContainedObjects: Array.from({ length: 12 }, (_, index) => ({ Name: 'Custom_Tile', Nickname: `${type} ${index}`, GUID: `${type === 'Units' ? 'a' : 'b'}${String(index).padStart(5, '0')}`, CustomImage: { ImageURL: `https://example.test/${type}/${index}.png` } })) })) }] };
 
 export async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'franken-native-'));
   let env = await localStorageBindings(directory);
+  env.DRAFT_HISTORY_PASSKEY = 'test-only-history-passkey';
+  let historyCookie = '';
   let worker = createWorker({ html: '<!doctype html><title>FrankenDraftTool</title>' });
   t.after(async () => { env.close(); await rm(directory, { recursive: true, force: true }); });
   const raw = (path, body, token = crypto.randomUUID(), method = body === undefined ? 'GET' : 'POST') => worker.fetch(new Request(`https://draft.test${path}`, { method, headers: { 'content-type': 'application/json', 'x-franken-session': token }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }), env);
@@ -20,9 +23,22 @@ export async function fixture(t) {
     assert.ok(result.ok, `${path}: ${result.status} ${JSON.stringify(data)}`);
     return data;
   };
+  const historyRaw = (path = '', body, cookie = historyCookie, extraHeaders = {}) => worker.fetch(new Request(`https://draft.test/api/draft-history${path}`, {
+    method: body === undefined ? 'GET' : 'POST', headers: { 'content-type': 'application/json', cookie, ...extraHeaders },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
+  }), env);
+  const history = async (path = '') => {
+    if (!historyCookie) {
+      const login = await historyRaw('/login', { passkey: env.DRAFT_HISTORY_PASSKEY });
+      assert.equal(login.status, 200); historyCookie = login.headers.get('set-cookie').split(';')[0];
+    }
+    const result = await historyRaw(path);
+    assert.equal(result.status, 200);
+    return result.json();
+  };
   return {
-    api, raw, get env() { return env; },
-    async restart() { env.close(); env = await localStorageBindings(directory); worker = createWorker({ html: 'restarted' }); },
+    api, raw, history, historyRaw, get env() { return env; },
+    async restart() { env.close(); env = await localStorageBindings(directory); env.DRAFT_HISTORY_PASSKEY = 'test-only-history-passkey'; worker = createWorker({ html: 'restarted' }); },
     async room(methodId = 'bag-passing-default', maxSeats = 2) {
       const room = await api('/api/rooms', {});
       const base = `/api/rooms/${room.roomNumber}`;
@@ -114,6 +130,8 @@ test('concurrent joins and picks preserve every player; private bags reject impe
   }));
   const after = await Promise.all(room.players.map(player => room.connect(player)));
   assert.deepEqual(after.flatMap(view => view.room.draft.currentPlayer.draftedItems.map(item => item.id)).sort(), pickedIds.sort());
+  const journal = (await f.env.DB.prepare('SELECT sequence FROM draft_events ORDER BY sequence').all()).results;
+  assert.deepEqual(journal.map(event => event.sequence), [1, 2, 3, 4, 5, 6, 7]);
   const forged = await f.raw(`${room.base}/presence?participantId=${room.host.id}&role=seated`, undefined, room.players[1].token);
   assert.equal(forged.status, 403);
   const anonymous = await f.api(room.base);
@@ -253,7 +271,101 @@ test('complete bag and auction drafts reveal every pick and export after repeate
     assert.equal(new Set(state.draft.revealedDrafts.flatMap(player => player.items.map(item => item.id))).size, 4);
     const exported = await f.api(`${room.base}/draft/export`);
     assert.ok(exported.ObjectStates.length > 0);
+    const entry = (await f.history()).drafts.find(entry => entry.roomNumber === room.roomNumber);
+    assert.ok(entry);
+    const archive = await f.history(`/${entry.id}`);
+    assert.equal(archive.results.players.flatMap(player => player.items).length, 4);
+    assert.deepEqual(archive.results.players.flatMap(player => player.items.map(item => item.id)).sort(), state.draft.revealedDrafts.flatMap(player => player.items.map(item => item.id)).sort());
+    const log = await f.history(`/${entry.id}/events`);
+    assert.equal(log.events[0].kind, 'draft_started');
+    assert.equal(log.events.at(-1).completed, true);
+    assert.deepEqual(log.events.map(event => event.sequence), Array.from({length: entry.eventCount}, (_, i) => i + 1));
+    assert.ok(!JSON.stringify({archive, log}).includes(room.creatorToken));
+    assert.doesNotMatch(JSON.stringify({archive, log}), /ttsObject|undoStack|connectionToken|token_hash/);
+    if (method === 'nomination-auction') {
+      assert.ok(log.events.some(event => event.kind === 'mulligan' && event.removed.length));
+      assert.ok(log.events.some(event => event.kind === 'ban' && event.replacements.length));
+      assert.ok(log.events.some(event => event.bidRecap?.bids.length === 2));
+      assert.ok(log.events.some(event => event.binned?.length));
+    } else assert.ok(log.events.some(event => event.kind === 'bag_pick'));
+    await f.api(`${room.base}/draft/restart`, room.auth, room.host.token);
+    await f.restart();
+    assert.deepEqual((await f.history(`/${entry.id}`)).results, archive.results);
+    await room.start();
+    assert.equal((await f.history()).drafts.filter(entry => entry.roomNumber === room.roomNumber).length, 1);
   }
+});
+
+test('history is passkey-protected, read-only, no-store and hides active drafts', async t => {
+  const f = await fixture(t);
+  assert.equal((await f.historyRaw('', undefined, '')).status, 401);
+  assert.equal((await f.historyRaw('/login', {passkey: 'wrong'})).status, 401);
+  assert.equal((await f.historyRaw('/login', {passkey: f.env.DRAFT_HISTORY_PASSKEY}, '', {origin: 'https://elsewhere.test'})).status, 403);
+  const login = await f.historyRaw('/login', {passkey: f.env.DRAFT_HISTORY_PASSKEY});
+  assert.equal(login.status, 200);
+  assert.match(login.headers.get('set-cookie'), /HttpOnly; SameSite=Strict/);
+  assert.match(login.headers.get('set-cookie'), /Secure/);
+  assert.equal(login.headers.get('cache-control'), 'no-store');
+  const room = await f.room(); await room.start();
+  const id = (await f.env.DB.prepare('SELECT id FROM draft_history').first()).id;
+  assert.equal((await f.history()).drafts.length, 0);
+  assert.equal((await f.historyRaw(`/${id}`)).status, 404);
+  assert.deepEqual((await f.history(`/${id}/events`)).events, []);
+  assert.equal((await f.historyRaw(`/${id}`, {})).status, 405);
+  assert.equal((await f.historyRaw('', undefined, 'franken_history=9999999999999.' + 'a'.repeat(64))).status, 401);
+  const logout = await f.historyRaw('/logout', {});
+  assert.match(logout.headers.get('set-cookie'), /Max-Age=0/);
+  f.env.DRAFT_HISTORY_PASSKEY = 'rotated-test-history-key';
+  assert.equal((await f.historyRaw()).status, 401);
+  delete f.env.DRAFT_HISTORY_PASSKEY;
+  assert.equal((await f.historyRaw()).status, 503);
+  assert.equal((await f.raw('/draft-history')).headers.get('x-robots-tag'), 'noindex, nofollow');
+});
+
+test('history and room updates roll back together when event storage fails', async t => {
+  const f = await fixture(t), room = await f.room();
+  const prepare = f.env.DB.prepare;
+  f.env.DB.prepare = sql => {
+    const statement = prepare(sql);
+    if (!sql.startsWith('INSERT INTO draft_events')) return statement;
+    return { bind(...args) { const bound = statement.bind(...args); bound.runSync = () => { throw new Error('Simulated journal failure'); }; return bound; } };
+  };
+  assert.equal((await f.raw(`${room.base}/draft/start`, room.auth, room.host.token)).status, 503);
+  f.env.DB.prepare = prepare;
+  assert.equal((await f.api(room.base)).draft.status, 'not_started');
+  assert.equal((await f.env.DB.prepare('SELECT count(*) AS n FROM draft_history').first()).n, 0);
+  await room.start();
+  assert.equal((await f.env.DB.prepare('SELECT count(*) AS n FROM draft_events').first()).n, 1);
+});
+
+test('auction undo reopens the same history, preserves reversed actions, and saves corrected results', async t => {
+  const f = await fixture(t), room = await f.room('nomination-auction', 1);
+  const { pool } = await f.api('/api/pools/upload', {poolJson: tinyPool, savePool: true});
+  await f.api(`${room.base}/settings`, {...room.auth, poolId: pool.id, auctionSpeakerMode: 'none', itemsPerType: {Units: 1, Abilities: 0}}, room.host.token);
+  await room.start();
+  const run = (action, data = {}) => f.api(`${room.base}/draft/auction/${action}`, {playerId: room.host.id, ...data}, room.host.token);
+  await run('no-ban-preset', {noBanPreset: true});
+  await run('nominate', {type: 'Units'});
+  await run('mulligan', {mulligan: false});
+  let state = await run('bid', {first: 4, second: 0, tie: 0});
+  const ids = state.draft.auction.currentNomination.items.map(item => item.id);
+  await run('pick', {itemId: ids[0]});
+  const entry = (await f.history()).drafts[0];
+  let events = (await f.history(`/${entry.id}/events`)).events;
+  const originalPick = events.at(-1).sequence;
+  await f.api(`${room.base}/draft/auction/undo`, room.auth, room.host.token);
+  assert.equal((await f.history()).drafts.length, 0);
+  await f.restart();
+  await run('pick', {itemId: ids[1]});
+  const result = await f.history(`/${entry.id}`);
+  assert.equal(result.results.players[0].items[0].id, ids[1]);
+  assert.equal(result.results.players[0].items[0].cost, 4);
+  events = (await f.history(`/${entry.id}/events`)).events;
+  assert.equal(events.find(event => event.kind === 'undo').targetSequence, originalPick);
+  assert.equal(events.filter(event => event.kind === 'auction_pick').length, 2);
+  await f.api(`/api/pools/${pool.id}/delete`, {});
+  await f.api(`${room.base}/draft/restart`, room.auth, room.host.token);
+  assert.equal((await f.history(`/${entry.id}`)).results.players[0].items[0].id, ids[1]);
 });
 
 test('new pools default to two of each component, preserve speaker rules and explicit saved parameters', async t => {
@@ -274,6 +386,40 @@ test('new pools default to two of each component, preserve speaker rules and exp
   assert.deepEqual(saved.defaultParameters.itemsPerType, { Units: 0, Abilities: 4, 'Speaker Order': 0 });
   assert.equal(saved.defaultParameters.picksPerBag, 2);
   assert.equal((await f.api(room.base)).draft.settings.picksPerBag, 1);
+});
+
+test('history pages use stable cursors and bounded event batches', async t => {
+  const f = await fixture(t);
+  const ids = Array.from({length: 27}, () => crypto.randomUUID());
+  const completed = Date.now();
+  await f.env.DB.batch(ids.map(id => f.env.DB.prepare("INSERT INTO draft_history (id, room_id, status, completed_at, summary, event_count) VALUES (?, '123456', 'complete', ?, '{}', 105)").bind(id, completed)));
+  await f.env.DB.batch(Array.from({length: 105}, (_, i) => f.env.DB.prepare('INSERT INTO draft_events (draft_id, sequence, event) VALUES (?, ?, ?)').bind(ids[0], i + 1, JSON.stringify({sequence: i + 1}))));
+  const first = await f.history();
+  assert.equal(first.drafts.length, 25);
+  const second = await f.history(`?cursor=${first.nextCursor}`);
+  assert.equal(second.drafts.length, 2);
+  assert.equal(new Set([...first.drafts, ...second.drafts].map(draft => draft.id)).size, 27);
+  assert.equal(second.nextCursor, null);
+  const events = await f.history(`/${ids[0]}/events`);
+  assert.equal(events.events.length, 100);
+  const rest = await f.history(`/${ids[0]}/events?after=${events.nextAfter}`);
+  assert.equal(rest.events.length, 5);
+  assert.equal(rest.events[0].sequence, 101);
+  assert.equal(rest.nextAfter, null);
+  assert.equal((await f.historyRaw('?cursor=invalid')).status, 400);
+});
+
+test('drafts already running when recording is enabled receive an explicitly partial history', async t => {
+  const f = await fixture(t), room = await f.room('bag-passing-default', 1);
+  await room.start();
+  const store = createStorage(f.env), saved = await store.room(room.roomNumber);
+  delete saved.state.history;
+  await store.commit({ room: {id: room.roomNumber, expected: saved.revision, state: saved.state} });
+  await f.api(`${room.base}/draft/restart`, room.auth, room.host.token);
+  const histories = (await f.env.DB.prepare("SELECT summary, status FROM draft_history WHERE status = 'abandoned'").all()).results;
+  assert.equal(histories.length, 1);
+  assert.equal(JSON.parse(histories[0].summary).partial, true);
+  assert.equal(JSON.parse(histories[0].summary).startedAt, null);
 });
 
 test('authenticated streams deliver other workers actions without leaking private bids', async t => {
