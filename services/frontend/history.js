@@ -23,8 +23,8 @@
     const data = await response.json();
     if (!response.ok) {
       if (response.status === 401) lock();
-      const error = new Error(data.error === 'incorrect_passkey' ? 'Incorrect passkey.' : response.status === 401 ? 'Enter the archive passkey to continue.'
-        : data.error === 'draft_not_found' ? 'This draft is not available as a finished draft.' : 'The archive is unavailable. Please try again.');
+      const error = new Error(data.error === 'incorrect_passkey' ? 'Incorrect password.' : response.status === 401 ? 'Enter the password to access the logs'
+        : data.error === 'draft_not_found' ? 'This draft is not available as a finished draft.' : 'The logs are unavailable. Please try again.');
       error.status = response.status;
       throw error;
     }
@@ -170,7 +170,7 @@
     await run(async () => { await api('/login', { passkey: $('#passkey').value }); $('#passkey').value = ''; await openArchive(); });
     button.disabled = false;
   });
-  $('#logout').addEventListener('click', () => run(async () => { await api('/logout', {}); lock(); showMessage('Archive locked.'); }));
+  $('#logout').addEventListener('click', () => run(async () => { await api('/logout', {}); lock(); showMessage('Logs locked.'); }));
   $('#more-drafts').addEventListener('click', () => pageAction($('#more-drafts'), () => loadList(true)));
   $('#retry').addEventListener('click', () => run(retry));
   run(openArchive);

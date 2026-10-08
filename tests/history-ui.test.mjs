@@ -4,6 +4,16 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
 const source = await readFile(new URL('../services/frontend/history.js', import.meta.url), 'utf8');
+test('logs login uses compact wording and keeps an accessible password field', async () => {
+  const html = await readFile(new URL('../services/frontend/history.html', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../services/frontend/history.css', import.meta.url), 'utf8');
+  assert.match(html, /<h1>Draft Logs<\/h1>/);
+  assert.match(html, /aria-label="Password" type="password"/);
+  assert.match(html, /<button>Submit<\/button>/);
+  assert.doesNotMatch(html, /Archive passkey|Unlock Archive|<label/);
+  assert.match(source, /Enter the password to access the logs/);
+  assert.match(css, /#login \{ max-width: 32rem; margin: 0; \}/);
+});
 class Element {
   constructor(tag = 'div') { this.tag = tag; this.children = []; this.textContent = ''; this.className = ''; this.hidden = false; }
   append(...values) { this.children.push(...values); }

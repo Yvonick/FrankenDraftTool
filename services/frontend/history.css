@@ -17,7 +17,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
 .page-heading { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-bottom: 1rem; }
 .page-heading a { margin-left: auto; }
 #message { color: var(--muted); margin-bottom: 1rem; } #message.error { color: #ffb3ae; }
-#login { max-width: 32rem; margin-top: 2rem; display: grid; gap: .5rem; }
+#login { max-width: 32rem; margin: 0; }
 .login-fields { display: flex; gap: .75rem; } .login-fields button { flex-shrink: 0; background: var(--accent); color: #071622; font-weight: 650; }
 .table-scroll { overflow-x: auto; }
 table { border-collapse: collapse; text-align: left; width: 100%; font-size: .875rem; }

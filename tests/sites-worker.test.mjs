@@ -296,6 +296,17 @@ test('complete bag and auction drafts reveal every pick and export after repeate
   }
 });
 
+test('history accepts a short configured password, checks case and rejects empty configuration', async t => {
+  const f = await fixture(t);
+  f.env.DRAFT_HISTORY_PASSKEY = 'TestKey';
+  assert.equal((await f.historyRaw('/login', {passkey: 'TestKey'})).status, 200);
+  assert.equal((await f.historyRaw('/login', {passkey: 'testkey'})).status, 401);
+  for (const value of ['', '   ', undefined]) {
+    f.env.DRAFT_HISTORY_PASSKEY = value;
+    assert.equal((await f.historyRaw('/login', {passkey: ''})).status, 503);
+  }
+});
+
 test('history is passkey-protected, read-only, no-store and hides active drafts', async t => {
   const f = await fixture(t);
   assert.equal((await f.historyRaw('', undefined, '')).status, 401);

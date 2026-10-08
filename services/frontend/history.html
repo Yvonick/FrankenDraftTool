@@ -4,19 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Draft history - FrankenDraft</title>
+  <title>Draft Logs - FrankenDraft</title>
   <link rel="icon" href="/favicon.svg">
   <link rel="stylesheet" href="/history.css">
   <script src="/history.js" defer></script>
 </head>
 <body>
-  <header><a class="brand" href="/">Franken<span>Draft</span></a><span>Draft archive</span><button id="logout" hidden>Lock Archive</button></header>
+  <header><a class="brand" href="/">Franken<span>Draft</span></a><span>Draft Logs</span><button id="logout" hidden>Lock Logs</button></header>
   <main>
-    <div class="page-heading"><h1>Draft history</h1><a id="back" href="/draft-history" hidden>All finished drafts</a></div>
+    <div class="page-heading"><h1>Draft Logs</h1><a id="back" href="/draft-history" hidden>All finished drafts</a></div>
     <p id="message" role="status">Loading...</p>
     <form id="login" hidden>
-      <label for="passkey">Archive passkey</label>
-      <div class="login-fields"><input id="passkey" type="password" autocomplete="current-password" required maxlength="256"><button>Unlock Archive</button></div>
+      <div class="login-fields"><input id="passkey" aria-label="Password" type="password" autocomplete="current-password" required maxlength="256"><button>Submit</button></div>
     </form>
     <section id="listing" aria-label="Finished drafts" hidden>
       <div class="table-scroll"><table><thead><tr><th>Finished</th><th>Room / pool</th><th>Method</th><th>Players</th><th></th></tr></thead><tbody id="draft-list"></tbody></table></div>

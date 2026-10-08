@@ -36,7 +36,7 @@ async function loginBody(request) {
 export async function handleHistoryApi(request, env) {
   const url = new URL(request.url);
   const secret = env.DRAFT_HISTORY_PASSKEY;
-  if (typeof secret !== 'string' || secret.length < 16) return reply({ error: 'history_not_configured' }, 503);
+  if (typeof secret !== 'string' || !secret.trim()) return reply({ error: 'history_not_configured' }, 503);
   if (request.method === 'POST') {
     if (request.headers.get('origin') && request.headers.get('origin') !== url.origin) return reply({ error: 'invalid_origin' }, 403);
     if (!request.headers.get('content-type')?.includes('application/json')) return reply({ error: 'json_required' }, 415);
