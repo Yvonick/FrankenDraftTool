@@ -1,6 +1,7 @@
 (() => {
   const $ = selector => document.querySelector(selector);
   let cursor = null, nextAfter = null, currentId = null, retry = null;
+  let bagRequest = 0;
   const undone = new Map();
   const rows = new Map();
   const node = (tag, text, className) => {
@@ -12,6 +13,7 @@
   const date = value => value ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Unknown';
   const showMessage = (text = '', error = false) => { $('#message').textContent = text; $('#message').className = error ? 'error' : ''; };
   function lock() {
+    closeBag();
     for (const id of ['listing', 'detail', 'logout', 'back', 'retry']) $(`#${id}`).hidden = true;
     $('#login').hidden = false;
     $('#draft-list').replaceChildren(); $('#detail').replaceChildren(); rows.clear(); undone.clear();
@@ -48,6 +50,54 @@
   function names(label, items) {
     return node('p', `${label}: ${items.map(item => item.name).join(', ') || 'None'}`, 'item-names');
   }
+  function closeBag() {
+    bagRequest++;
+    if ($('#bag-dialog').open) $('#bag-dialog').close();
+    $('#bag-title').textContent = 'Bag contents'; $('#bag-content').replaceChildren();
+  }
+  function renderBag(data) {
+    const body = node('div');
+    if (!data.available) {
+      body.append(node('p', 'Bag contents are unavailable: this history did not record the opening bags.', 'notice'));
+      return body;
+    }
+    const picked = data.items.filter(item => item.selected).length;
+    body.append(node('p', `${data.items.length} items${data.opening ? '' : ` / ${picked} picked this turn`}`, 'bag-meta'));
+    const groups = node('div', null, 'bag-groups');
+    const types = [...new Set([...(data.typeOrder || []), ...data.items.map(item => item.type)])];
+    for (const type of types) {
+      const items = data.items.filter(item => item.type === type);
+      if (!items.length) continue;
+      const group = node('section', null, 'bag-group'); group.append(node('h3', `${type} (${items.length})`));
+      const list = node('ul');
+      for (const item of items) {
+        const entry = node('li', null, item.selected ? 'picked' : ''); entry.append(node('span', item.name));
+        if (item.selected) entry.append(node('span', 'Picked', 'pick-marker'));
+        list.append(entry);
+      }
+      group.append(list); groups.append(group);
+    }
+    body.append(groups);
+    return body;
+  }
+  async function openBag(query, draftId = currentId) {
+    const request = ++bagRequest;
+    $('#bag-title').textContent = 'Bag contents'; $('#bag-content').replaceChildren(node('p', 'Loading...'));
+    if (!$('#bag-dialog').open) $('#bag-dialog').showModal();
+    try {
+      const data = await api(`/${encodeURIComponent(draftId)}/bag?${new URLSearchParams(query)}`);
+      if (request !== bagRequest) return;
+      $('#bag-title').textContent = data.available ? `${data.player} / ${data.opening ? 'Opening bag' : `Bag before ${data.kind === 'bag_pass' ? 'pass' : 'pick'} #${data.sequence}`}` : 'Bag contents';
+      $('#bag-content').replaceChildren(renderBag(data));
+    } catch (error) {
+      if (error.status === 401) showMessage(error.message);
+      else if (request === bagRequest) $('#bag-content').replaceChildren(node('p', 'Unable to load this bag. Close and try again.', 'notice'));
+    }
+  }
+  function bagButton(label, query, draftId = currentId) {
+    const button = node('button', label, 'bag-view'); button.type = 'button';
+    button.addEventListener('click', () => openBag(query, draftId)); return button;
+  }
   async function loadList(append = false) {
     const data = await api(cursor && append ? `?cursor=${encodeURIComponent(cursor)}` : '');
     if (!append) $('#draft-list').replaceChildren();
@@ -83,6 +133,7 @@
         }
         group.append(list); types.append(group);
       }
+      if (draft.engine === 'bag-pass') card.append(bagButton('View Opening Bag', { player: player.id }, draft.id));
       card.append(types); grid.append(card);
     }
     section.append(grid);
@@ -113,9 +164,11 @@
       if (event[key]?.length) content.append(names(label, event[key]));
     }
     if (event.bags) {
-      const bags = node('div'); for (const bag of event.bags) bags.append(names(bag.player.name, bag.items));
+      const bags = node('div', null, 'opening-bags');
+      for (const bag of event.bags) bags.append(bagButton(`${bag.player.name} / Seat ${bag.player.seat}`, { player: bag.player.id }));
       content.append(details(`Starting bags (${event.bags.length})`, bags));
     }
+    if (event.kind === 'bag_pick' || event.kind === 'bag_pass') content.append(bagButton('View Bag', { sequence: event.sequence }));
     if (event.players) content.append(node('p', `Seats: ${event.players.map(player => `${player.seat}. ${player.name}`).join(', ')}`));
     if (event.passedTo) content.append(node('p', `Bag passed to ${event.passedTo}.`));
     if (event.bids) content.append(node('p', `First: ${event.bids.first} / Second: ${event.bids.second} / Tie: ${event.bids.tie}`));
@@ -145,6 +198,7 @@
     nextAfter = data.nextAfter; $('#more-events').hidden = nextAfter === null; markUndone();
   }
   async function loadDetail(id) {
+    closeBag();
     const draft = await api(`/${encodeURIComponent(id)}`); currentId = draft.id; nextAfter = null; rows.clear(); undone.clear();
     const detail = $('#detail'); detail.replaceChildren(node('h2', `Room ${draft.roomNumber} / ${draft.poolName}`));
     const meta = node('div', null, 'draft-meta');
@@ -173,5 +227,6 @@
   $('#logout').addEventListener('click', () => run(async () => { await api('/logout', {}); lock(); showMessage('Logs locked.'); }));
   $('#more-drafts').addEventListener('click', () => pageAction($('#more-drafts'), () => loadList(true)));
   $('#retry').addEventListener('click', () => run(retry));
+  $('#bag-dialog').addEventListener('close', closeBag);
   run(openArchive);
 })();

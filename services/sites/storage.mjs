@@ -60,6 +60,44 @@ export function createStorage(env) {
       const events = rows.slice(0, 100).map(row => JSON.parse(row.event));
       return { events, nextAfter: rows.length > 100 ? events.at(-1).sequence : null };
     },
+    async draftBag(id, { playerId, sequence }) {
+      const row = await statement("SELECT summary FROM draft_history WHERE id = ? AND status = 'complete'", id).first();
+      if (!row) throw new RequestError(404, 'draft_not_found');
+      const summary = JSON.parse(row.summary);
+      if (summary.engine !== 'bag-pass') throw new RequestError(400, 'not_a_bag_draft');
+      const readEvent = async number => {
+        const record = await statement('SELECT event FROM draft_events WHERE draft_id = ? AND sequence = ?', id, number).first();
+        return record ? JSON.parse(record.event) : null;
+      };
+      const opening = await readEvent(1);
+      const target = sequence ? await readEvent(sequence) : null;
+      if (sequence && !['bag_pick', 'bag_pass'].includes(target?.kind)) throw new RequestError(404, 'bag_not_found');
+      if (playerId && !summary.players.some(player => player.id === playerId)) throw new RequestError(404, 'player_not_found');
+      const bag = opening?.kind === 'draft_started' && opening.bags?.find(bag => playerId ? bag.player.id === playerId : bag.bagId === target.bagId);
+      if (!bag) return { available: false };
+
+      // Reconstruct only the requested bag, in bounded batches. No room or pool
+      // blobs are loaded, and no per-pick snapshots need to be stored.
+      const removed = new Set();
+      if (target) {
+        let after = 1;
+        for (;;) {
+          const records = (await statement("SELECT sequence, event FROM draft_events WHERE draft_id = ? AND sequence > ? AND sequence < ? AND json_extract(event, '$.bagId') = ? ORDER BY sequence LIMIT 100", id, after, sequence, bag.bagId).all()).results;
+          for (const record of records) {
+            const event = JSON.parse(record.event);
+            if (event.kind === 'bag_pick' || event.kind === 'bag_pass') {
+              for (const value of [...(event.items || []), ...(event.binned || [])]) removed.add(value.id);
+            }
+          }
+          if (records.length < 100) break;
+          after = records.at(-1).sequence;
+        }
+      }
+      const selected = new Set((target?.items || []).map(value => value.id));
+      return { available: true, opening: !target, player: target?.actor || bag.player.name, sequence: target?.sequence ?? null,
+        kind: target?.kind, bagId: bag.bagId, typeOrder: summary.settings.typeOrder,
+        items: bag.items.filter(value => !removed.has(value.id)).map(value => ({ ...value, selected: selected.has(value.id) })) };
+    },
     async pool(key) {
       const object = await env.BUCKET.get(key);
       if (!object) throw new Error("Pool object is unavailable");

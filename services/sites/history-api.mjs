@@ -63,9 +63,19 @@ export async function handleHistoryApi(request, env) {
     if (rawCursor && !cursor) return reply({ error: 'invalid_cursor' }, 400);
     return reply(await store.finishedDrafts(cursor ? { at: Number(cursor[1]), id: cursor[2] } : null));
   }
-  const match = url.pathname.match(/^\/api\/draft-history\/([a-f0-9-]{36})(\/events)?$/);
+  const match = url.pathname.match(/^\/api\/draft-history\/([a-f0-9-]{36})(\/events|\/bag)?$/);
   if (!match) return reply({ error: 'not_found' }, 404);
-  if (match[2]) {
+  if (match[2] === '/bag') {
+    const playerId = url.searchParams.get('player');
+    const rawSequence = url.searchParams.get('sequence');
+    const sequence = rawSequence === null ? null : Number(rawSequence);
+    if ((playerId === null) === (rawSequence === null) || (playerId !== null && (!playerId || playerId.length > 128))
+      || (rawSequence !== null && (!/^\d+$/.test(rawSequence) || !Number.isSafeInteger(sequence) || sequence < 1))) {
+      return reply({ error: 'invalid_bag_query' }, 400);
+    }
+    return reply(await store.draftBag(match[1], { playerId, sequence }));
+  }
+  if (match[2] === '/events') {
     const after = Number(url.searchParams.get('after') || 0);
     if (!Number.isSafeInteger(after) || after < 0) return reply({ error: 'invalid_cursor' }, 400);
     return reply(await store.draftEvents(match[1], after));

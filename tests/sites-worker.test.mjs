@@ -231,6 +231,7 @@ test('complete bag and auction drafts reveal every pick and export after repeate
     const room = await f.room(method);
     await f.api(`${room.base}/settings`, { ...room.auth, poolId: pool.id, picksPerBag: 1, auctionSpeakerMode: 'none', itemsPerType: { Units: 1, Abilities: 1, 'Speaker Order': 0 } }, room.host.token);
     let state = await room.start();
+    const bagSnapshots = [];
     let usedMulligan = false;
     let usedBan = false;
     for (let step = 0; step < 50 && state.draft.status === 'active'; step++) {
@@ -239,7 +240,10 @@ test('complete bag and auction drafts reveal every pick and export after repeate
           state = (await room.connect(player)).room;
           if (state.draft.status === 'complete') break;
           const bag = state.draft.currentPlayer.currentBag;
-          if (bag) state = await f.api(`${room.base}/draft/pick`, { playerId: player.id, bagId: bag.id, itemIds: bag.eligibleItemIds.slice(0, bag.requiredPickCount) }, player.token);
+          if (bag) {
+            bagSnapshots.push({bagId: bag.id, items: bag.items.map(item => ({id: item.id, name: item.name, type: item.type}))});
+            state = await f.api(`${room.base}/draft/pick`, { playerId: player.id, bagId: bag.id, itemIds: bag.eligibleItemIds.slice(0, bag.requiredPickCount) }, player.token);
+          }
         }
       } else {
         const auction = state.draft.auction;
@@ -287,13 +291,99 @@ test('complete bag and auction drafts reveal every pick and export after repeate
       assert.ok(log.events.some(event => event.kind === 'ban' && event.replacements.length));
       assert.ok(log.events.some(event => event.bidRecap?.bids.length === 2));
       assert.ok(log.events.some(event => event.binned?.length));
-    } else assert.ok(log.events.some(event => event.kind === 'bag_pick'));
+      assert.equal((await f.historyRaw(`/${entry.id}/bag?player=${room.host.id}`)).status, 400);
+    } else {
+      const picks = log.events.filter(event => ['bag_pick', 'bag_pass'].includes(event.kind));
+      assert.equal(picks.length, bagSnapshots.length);
+      for (const [index, pick] of picks.entries()) {
+        const bag = await f.history(`/${entry.id}/bag?sequence=${pick.sequence}`);
+        assert.deepEqual(bag.items.map(({selected, ...item}) => item), bagSnapshots[index].items);
+        assert.deepEqual(bag.items.filter(item => item.selected).map(item => item.id), pick.items.map(item => item.id));
+      }
+      for (const initial of log.events[0].bags) {
+        const opening = await f.history(`/${entry.id}/bag?player=${initial.player.id}`);
+        assert.deepEqual(opening.items.map(({selected, ...item}) => item), initial.items);
+        assert.ok(opening.items.every(item => !item.selected));
+      }
+      assert.equal((await f.historyRaw(`/${entry.id}/bag?sequence=2`, undefined, '')).status, 401);
+      assert.equal((await f.historyRaw(`/${entry.id}/bag?sequence=1`)).status, 404);
+      assert.equal((await f.historyRaw(`/${entry.id}/bag?player=unknown`)).status, 404);
+      for (const query of ['', 'sequence=0', 'sequence=-1', 'sequence=1.5', 'sequence=9007199254740992', 'player=', 'sequence=2&player=x']) {
+        assert.equal((await f.historyRaw(`/${entry.id}/bag?${query}`)).status, 400);
+      }
+    }
     await f.api(`${room.base}/draft/restart`, room.auth, room.host.token);
     await f.restart();
     assert.deepEqual((await f.history(`/${entry.id}`)).results, archive.results);
     await room.start();
     assert.equal((await f.history()).drafts.filter(entry => entry.roomNumber === room.roomNumber).length, 1);
   }
+});
+
+test('solo draft history shows the opening bag unchanged and the shrinking bag before each pick', async t => {
+  const f = await fixture(t), room = await f.room('bag-passing-default', 1);
+  const {pool} = await f.api('/api/pools/upload', {poolJson: tinyPool, savePool: true});
+  await f.api(`${room.base}/settings`, {...room.auth, poolId: pool.id, picksPerBag: 1, itemsPerType: {Units: 2, Abilities: 2, 'Speaker Order': 0}}, room.host.token);
+  await room.start();
+  const snapshots = [];
+  for (let step = 0; step < 12; step++) {
+    const state = (await room.connect(room.host)).room;
+    if (state.draft.status === 'complete') break;
+    const bag = state.draft.currentPlayer.currentBag;
+    snapshots.push(bag.items.map(item => item.id));
+    await f.api(`${room.base}/draft/pick`, {playerId: room.host.id, bagId: bag.id, itemIds: bag.eligibleItemIds.slice(0, bag.requiredPickCount)}, room.host.token);
+  }
+  const entry = (await f.history()).drafts[0];
+  assert.ok(entry);
+  const events = (await f.history(`/${entry.id}/events`)).events.filter(event => event.kind === 'bag_pick');
+  assert.equal(events.length, 4);
+  for (const [index, event] of events.entries()) {
+    const bag = await f.history(`/${entry.id}/bag?sequence=${event.sequence}`);
+    assert.deepEqual(bag.items.map(item => item.id), snapshots[index]);
+  }
+  await f.api(`${room.base}/draft/restart`, room.auth, room.host.token);
+  await f.restart();
+  const opening = await f.history(`/${entry.id}/bag?player=${room.host.id}`);
+  assert.deepEqual(opening.items.map(item => item.id), snapshots[0]);
+});
+
+test('bag history reconstructs old logs across batches, handles passes and missing baselines, and never reads room or pool blobs', async t => {
+  const f = await fixture(t), id = crypto.randomUUID();
+  const players = [{id: 'a', name: 'Same', seat: 1}, {id: 'b', name: 'Same', seat: 2}];
+  const items = Array.from({length: 130}, (_, i) => ({id: `item-${i}`, name: 'Repeated name', type: 'Units'}));
+  const summary = {engine: 'bag-pass', players, settings: {typeOrder: ['Units']}};
+  const events = [
+    {sequence: 1, kind: 'draft_started', bags: [
+      {player: players[0], bagId: 'bag-a', items}, {player: players[1], bagId: 'bag-b', items: [{id: 'other', name: 'Other bag', type: 'Units'}]}
+    ]},
+    ...items.slice(0, 105).map((item, i) => ({sequence: i + 2, kind: 'bag_pick', bagId: 'bag-a', actor: 'Same', items: [item]})),
+    {sequence: 107, kind: 'bag_pass', bagId: 'bag-a', actor: 'Same', items: []},
+    {sequence: 108, kind: 'bag_pick', bagId: 'bag-a', actor: 'Same', items: [items[105]]}
+  ];
+  await f.env.DB.prepare("INSERT INTO draft_history (id, room_id, status, completed_at, summary, event_count) VALUES (?, '123456', 'complete', ?, ?, 108)").bind(id, Date.now(), JSON.stringify(summary)).run();
+  await f.env.DB.batch(events.map(event => f.env.DB.prepare('INSERT INTO draft_events (draft_id, sequence, event) VALUES (?, ?, ?)').bind(id, event.sequence, JSON.stringify(event))));
+  const original = f.env.DB.prepare;
+  f.env.DB.prepare = sql => {
+    assert.doesNotMatch(sql, /FROM rooms|FROM pools|SELECT summary, results/);
+    return original(sql);
+  };
+  const bag = await f.history(`/${id}/bag?sequence=108`);
+  assert.equal(bag.items.length, 25);
+  assert.equal(bag.items[0].id, items[105].id);
+  assert.equal(bag.items.filter(item => item.selected).length, 1);
+  const pass = await f.history(`/${id}/bag?sequence=107`);
+  assert.equal(pass.items.length, 25);
+  assert.ok(pass.items.every(item => !item.selected));
+  assert.deepEqual((await f.history(`/${id}/bag?player=b`)).items.map(item => item.id), ['other']);
+  const response = await f.historyRaw(`/${id}/bag?sequence=108`);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  f.env.DB.prepare = original;
+  await f.env.DB.prepare("UPDATE draft_history SET status = 'active' WHERE id = ?").bind(id).run();
+  assert.equal((await f.historyRaw(`/${id}/bag?sequence=108`)).status, 404);
+  await f.env.DB.prepare("UPDATE draft_history SET status = 'complete' WHERE id = ?").bind(id).run();
+  await f.env.DB.prepare('UPDATE draft_events SET event = ? WHERE draft_id = ? AND sequence = 1').bind(JSON.stringify({sequence: 1, kind: 'recording_started'}), id).run();
+  assert.deepEqual(await f.history(`/${id}/bag?sequence=108`), {available: false});
+  assert.deepEqual(await f.history(`/${id}/bag?player=a`), {available: false});
 });
 
 test('history accepts a short configured password, checks case and rejects empty configuration', async t => {
