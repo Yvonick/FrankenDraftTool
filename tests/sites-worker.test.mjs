@@ -54,6 +54,110 @@ export async function fixture(t) {
   };
 }
 
+test('room-wide super visibility is admin-controlled, persistent and independent of individual promotions', async t => {
+  const f = await fixture(t), room = await f.room();
+  const spectator = { id: crypto.randomUUID(), token: crypto.randomUUID() };
+  const second = { id: crypto.randomUUID(), token: crypto.randomUUID() };
+  const spectate = person => room.connect(person, { role: 'spectator', name: person === spectator ? 'Observer' : '' });
+  assert.equal((await spectate(spectator)).viewer.superSpectator, true);
+  await spectate(second);
+  await f.api(`${room.base}/settings`, { ...room.auth, superSpectators: false }, room.host.token);
+  assert.equal((await spectate(spectator)).viewer.superSpectator, false);
+  await room.start();
+  assert.equal((await spectate(spectator)).room.draft.superSpectator, null);
+  const path = `${room.base}/spectators/visibility`;
+  assert.equal((await f.raw(path, { actorId: spectator.id, superSpectators: true }, spectator.token)).status, 403);
+  assert.equal((await f.raw(path, { ...room.auth, superSpectators: 'true' }, room.host.token)).status, 400);
+  await f.api(`${room.base}/participants/admin`, { ...room.auth, participantId: room.players[1].id, admin: true }, room.host.token);
+  await f.api(path, { actorId: room.players[1].id, superSpectators: true }, room.players[1].token);
+  await f.restart();
+  for (const person of [spectator, second]) {
+    const view = await spectate(person);
+    assert.equal(view.viewer.superSpectator, true);
+    assert.equal(view.room.draft.superSpectator.players.length, 2);
+    assert.ok(view.room.draft.superSpectator.players.every(player => player.currentBag.items.length));
+    assert.equal(view.room.draft.currentPlayer, null);
+  }
+  assert.equal((await room.connect(room.host)).room.draft.superSpectator, null, 'seated players cannot use the spectator permission');
+  await f.api(`${room.base}/spectators/promote`, { ...room.auth, participantId: spectator.id, superSpectator: true }, room.host.token);
+  await f.api(path, { ...room.auth, superSpectators: false }, room.host.token);
+  assert.ok((await spectate(spectator)).room.draft.superSpectator);
+  assert.equal((await spectate(second)).room.draft.superSpectator, null);
+  const store = createStorage(f.env), saved = await store.room(room.roomNumber);
+  delete saved.state.superSpectators;
+  await store.commit({room: {id: room.roomNumber, expected: saved.revision, state: saved.state}});
+  assert.equal((await spectate(second)).viewer.superSpectator, false, 'legacy rooms retain restricted visibility');
+});
+
+test('live room logs require that rooms session and redact bag picks when visibility is revoked', async t => {
+  const f = await fixture(t), room = await f.room('bag-passing-default', 1);
+  const observer = { id: crypto.randomUUID(), token: crypto.randomUUID() };
+  await room.connect(observer, {role: 'spectator', name: 'Observer'});
+  const logs = `${room.base}/logs?viewerId=${observer.id}`;
+  assert.equal((await f.raw(`${room.base}/logs`)).status, 401);
+  assert.equal((await f.raw(logs)).status, 403);
+  assert.equal((await f.raw(logs + '&after=-1', undefined, observer.token)).status, 400);
+  const start = await room.start();
+  const bag = start.draft.currentPlayer.currentBag;
+  const picks = [...new Map(bag.items.filter(item => bag.eligibleItemIds.includes(item.id)).map(item => [item.type, item])).values()].slice(0, bag.requiredPickCount);
+  await f.api(`${room.base}/draft/pick`, {playerId: room.host.id, bagId: bag.id, itemIds: picks.map(item => item.id)}, room.host.token);
+  const revealed = await f.api(logs, undefined, observer.token);
+  assert.equal(revealed.events.length, 2);
+  assert.equal(revealed.events[0].bags, undefined);
+  assert.deepEqual(revealed.events[1].items.map(item => item.id).sort(), picks.map(item => item.id).sort());
+  assert.equal(revealed.events[1].items[0].ttsObject, undefined);
+  assert.equal((await f.raw(logs, undefined, observer.token)).headers.get('cache-control'), 'no-store');
+  await f.api(`${room.base}/spectators/visibility`, {...room.auth, superSpectators: false}, room.host.token);
+  const hidden = await f.api(logs, undefined, observer.token);
+  assert.equal(hidden.revealPicks, false);
+  assert.equal(hidden.events[1].items, undefined);
+  assert.equal(hidden.events[1].itemCount, picks.length);
+  assert.equal((await f.api(`${room.base}/logs?viewerId=${room.host.id}`, undefined, room.host.token)).events[1].items, undefined);
+  await f.api(`${room.base}/draft/restart`, room.auth, room.host.token);
+  assert.equal((await f.api(logs, undefined, observer.token)).draftId, null);
+  await room.start();
+  assert.notEqual((await f.api(logs, undefined, observer.token)).draftId, revealed.draftId);
+});
+
+test('super spectators live auction logs never expose sealed bids but include revealed recaps and undo', async t => {
+  const f = await fixture(t), room = await f.room('nomination-auction');
+  const observer = {id: crypto.randomUUID(), token: crypto.randomUUID()};
+  await room.connect(observer, {role: 'spectator', name: 'Observer'});
+  await room.start();
+  const logs = `${room.base}/logs?viewerId=${observer.id}`;
+  await f.api(`${room.base}/draft/auction/bid`, {playerId: room.host.id, first: 13, second: 0, tie: 7}, room.host.token);
+  const secret = await f.api(logs, undefined, observer.token);
+  assert.equal(secret.events.at(-1).kind, 'bid_locked');
+  assert.equal(secret.events.at(-1).bids, undefined);
+  assert.equal(secret.events.at(-1).bidRecap, undefined);
+  const view = (await room.connect(observer, {role: 'spectator'})).room;
+  assert.ok(view.draft.superSpectator.players.every(player => player.currentBids === null));
+  await f.api(`${room.base}/draft/auction/bid`, {playerId: room.players[1].id, first: 3, second: 0, tie: 1}, room.players[1].token);
+  const revealed = await f.api(logs + '&after=2', undefined, observer.token);
+  assert.equal(revealed.events[0].bidRecap.bids.find(bid => bid.playerId === room.host.id).first, 13);
+  await f.api(`${room.base}/draft/auction/undo`, room.auth, room.host.token);
+  const undo = await f.api(logs, undefined, observer.token);
+  assert.equal(undo.events.at(-1).targetSequence, 3);
+  assert.ok(undo.events.every(event => event.bids === undefined));
+});
+
+test('room logs use bounded event pages without loading pool assets', async t => {
+  const f = await fixture(t), room = await f.room();
+  await room.start();
+  const store = createStorage(f.env), saved = await store.room(room.roomNumber);
+  const id = saved.state.history.id;
+  saved.state.history.sequence = 105;
+  await store.commit({room: {id: room.roomNumber, expected: saved.revision, state: saved.state}});
+  await f.env.DB.batch(Array.from({length: 104}, (_, i) => f.env.DB.prepare('INSERT INTO draft_events (draft_id, sequence, event) VALUES (?, ?, ?)').bind(id, i + 2, JSON.stringify({sequence: i + 2, kind: 'bag_pass'}))));
+  f.env.BUCKET.get = () => { throw new Error('Logs must not load assets'); };
+  const first = await f.api(`${room.base}/logs?viewerId=${room.host.id}`, undefined, room.host.token);
+  assert.equal(first.events.length, 100);
+  assert.equal(first.nextAfter, 100);
+  const rest = await f.api(`${room.base}/logs?viewerId=${room.host.id}&after=100`, undefined, room.host.token);
+  assert.equal(rest.events.length, 5);
+  assert.equal(rest.nextAfter, null);
+});
+
 test('server name preferences survive restarts and never grant room identity', async t => {
   const f = await fixture(t);
   const token = crypto.randomUUID();

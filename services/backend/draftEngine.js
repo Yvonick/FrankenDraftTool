@@ -174,6 +174,7 @@ function createRoom() {
     creatorId: null,
     maxSeats: draftSettings.maxSeats,
     allowSpectators: true,
+    superSpectators: true,
     listed: true,
     draftSettings,
     draft: null,
@@ -237,7 +238,7 @@ function getRoomViewerSnapshot(room, viewerId) {
     name: viewer.name,
     admin: Boolean(viewer.admin),
     host: isRoomHost(room, viewer.id),
-    superSpectator: viewer.role === "spectator" && Boolean(viewer.superSpectator)
+    superSpectator: viewer.role === "spectator" && Boolean(viewer.superSpectator || room.superSpectators)
   };
 }
 
@@ -268,6 +269,7 @@ function getRoomSnapshot(roomNumber, viewerId = null) {
     revision: room.revision || 0,
     maxSeats: room.maxSeats,
     allowSpectators: room.allowSpectators !== false,
+    superSpectators: room.superSpectators === true,
     listed: room.listed === true,
     seated: getSeatedParticipants(room),
     spectators: [...room.participants.values()]
@@ -278,7 +280,7 @@ function getRoomSnapshot(roomNumber, viewerId = null) {
       .map((participant) => ({
         id: participant.id,
         name: participant.name,
-        superSpectator: Boolean(participant.superSpectator),
+        superSpectator: Boolean(participant.superSpectator || room.superSpectators),
         admin: Boolean(participant.admin),
         host: isRoomHost(room, participant.id)
       })),
@@ -1235,6 +1237,7 @@ async function handleRoomSettings(roomNumber, request, response) {
 
   room.maxSeats = maxSeats;
   room.allowSpectators = allowSpectators;
+  if (typeof body.superSpectators === "boolean") room.superSpectators = body.superSpectators;
   if (typeof body.listed === "boolean") room.listed = body.listed;
   room.draftSettings = {
     poolId: pool.id,
@@ -1248,6 +1251,21 @@ async function handleRoomSettings(roomNumber, request, response) {
 
   broadcastRoom(roomNumber);
   sendJson(response, 200, getRoomSnapshot(roomNumber, body.viewerId || body.actorId || body.participantId));
+}
+
+async function handleSpectatorVisibility(roomNumber, request, response) {
+  const room = rooms.get(roomNumber);
+  if (!room) return sendJson(response, 404, { error: "room_not_found" });
+  let body;
+  try { body = await readJsonBody(request); }
+  catch (error) { return sendJson(response, 400, { error: error.message }); }
+  if (!hasRoomAdminRights(room, body)) return sendAdminRequired(response);
+  if (typeof body.superSpectators !== "boolean") {
+    return sendJson(response, 400, { error: "invalid_spectator_visibility" });
+  }
+  room.superSpectators = body.superSpectators;
+  broadcastRoom(roomNumber);
+  sendJson(response, 200, getRoomSnapshot(roomNumber, body.viewerId || body.actorId));
 }
 
 function saveRoomPoolWithDefaults(room, poolName) {
@@ -1649,7 +1667,7 @@ function getDraftSnapshot(room, viewerId) {
   const draft = room.draft;
   const method = getDraftMethod(draft.methodId) || getDefaultDraftMethod();
   const viewer = room.participants.get(viewerId);
-  const isSuperSpectator = viewer?.role === "spectator" && viewer.superSpectator;
+  const isSuperSpectator = viewer?.role === "spectator" && (viewer.superSpectator || room.superSpectators);
   const table = draft.players.map((player) => getTablePlayerSnapshot(player, room));
 
   if (draft.status === "complete") {
@@ -3301,6 +3319,11 @@ async function handleRequest(request, response) {
   }
 
   const promoteSpectatorMatch = url.pathname.match(/^\/api\/rooms\/(\d{6})\/spectators\/promote$/);
+  const spectatorVisibilityMatch = url.pathname.match(/^\/api\/rooms\/(\d{6})\/spectators\/visibility$/);
+  if (spectatorVisibilityMatch && request.method === "POST") {
+    await handleSpectatorVisibility(spectatorVisibilityMatch[1], request, response);
+    return;
+  }
 
   if (promoteSpectatorMatch && request.method === "POST") {
     await handlePromoteSpectator(promoteSpectatorMatch[1], request, response);

@@ -164,7 +164,7 @@ test('same-revision personalized snapshots render after public snapshots and per
 test('auction player rendering and pending bids are scoped to the viewer', () => {
   const rendered = new Error('render reached');
   const context = load(['renderAuctionPlayers', 'auctionBiddingKey'], {
-    currentViewerId: null, getAuctionWaitingPlayerIds: () => new Set(),
+    currentViewerId: null, currentRole: null, getAuctionWaitingPlayerIds: () => new Set(),
     draftGrouping: { value: 'type' }, expandedAuctionPlayerIds: new Set(),
     otherAuctionAreasExpanded: false, auctionPlayersRenderKey: '',
     auctionPlayers: { replaceChildren() { throw rendered; } }
@@ -401,7 +401,7 @@ test('table roster groups player identity, status and admin controls in compact 
   const roundTable = new Element(), tableRoster = new Element(), tablePanel = new Element();
   const context = load(['renderTable'], {
     document: { createElement() { const element = new Element(); element.style = { setProperty() {} }; return element; } },
-    roundTable, tableRoster, tablePanel,
+    roundTable, tableRoster, tablePanel, hasHostRights: () => true,
     appendHostBadge() {}, appendAdminAction(card, player) { if (player.admin) card.append('admin control'); }
   });
   const draft = { status: 'active', engine: 'bag', table: [
@@ -417,11 +417,29 @@ test('table roster groups player identity, status and admin controls in compact 
   assert.equal(tableRoster.children[0].children[1].children[1].textContent, '2 bags queued');
   assert.equal(tableRoster.children[0].children[2], 'admin control');
   assert.equal(tableRoster.children[1].children[1].children[0].textContent, 'Waiting');
+  const unchangedRow = tableRoster.children[0];
+  context.renderTable(draft);
+  assert.equal(tableRoster.children[0], unchangedRow, 'unrelated updates retain roster nodes');
   context.renderTable({ ...draft, status: 'complete' });
   assert.equal(tableRoster.children[1].children[1].children[0].textContent, 'Finished');
   context.renderTable({ status: 'not_started' });
   assert.equal(tablePanel.hidden, true);
   assert.equal(tableRoster.children.length, 0);
+});
+
+test('room updates never reparent controls or a waiting table that are already in the right place', () => {
+  const moves=[];
+  const slot={append(node){node.parentElement=this;moves.push('slot');}};
+  const footer={insertBefore(node){node.parentElement=this;moves.push('footer');}};
+  const table={parentElement:slot,classList:{add(){},remove(){}}};
+  const context=load(['placeTablePanel','placeControl'],{currentBagTableSlot:slot,participantsFooter:footer,tablePanel:table,spectatorPanel:{}});
+  context.placeTablePanel(true); context.placeTablePanel(true);
+  assert.deepEqual(moves,[]);
+  context.placeTablePanel(false); context.placeTablePanel(false);
+  assert.deepEqual(moves,['footer']);
+  const parent={append(node){node.parentElement=this;moves.push('control');}}, control={parentElement:parent};
+  context.placeControl(parent,control);
+  assert.deepEqual(moves,['footer']);
 });
 
 test('bag waiting state restores the current-bag heading and controls when a bag arrives', () => {
@@ -452,7 +470,7 @@ test('setup renders and collects room-specific type order, including hidden spea
   let auction = true;
   const context = load(['renderTypeInputs', 'collectDraftSettings'], {
     document: { createElement: () => new Element() }, window: {}, itemTypeSettings: list,
-    selectedMethodIsAuction: () => auction, seatLimitInput: {value: 6}, allowSpectatorsInput: {checked: true},
+    selectedMethodIsAuction: () => auction, seatLimitInput: {value: 6}, allowSpectatorsInput: {checked: true}, superSpectatorsInput: {checked: true},
     listedInput: {checked: true}, poolSelect: {value: 'pool'}, draftMethodSelect: {value: 'auction'},
     picksPerBagInput: {value: 2}, auctionSpeakerModeSelect: {value: 'none'}, auctionSpeakerModeValue: x => x
   });
@@ -462,6 +480,7 @@ test('setup renders and collects room-specific type order, including hidden spea
   assert.equal(list.children[1].hidden, true);
   const settings = JSON.parse(JSON.stringify(context.collectDraftSettings()));
   assert.deepEqual(settings.typeOrder, order);
+  assert.equal(settings.superSpectators, true);
   assert.deepEqual(settings.itemsPerType, { Techs: 0, 'Speaker Order': 1, Units: 3 });
   auction = false;
   context.renderTypeInputs(pool, settings.itemsPerType, settings.typeOrder);

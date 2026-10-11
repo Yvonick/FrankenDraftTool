@@ -60,6 +60,11 @@ export function createStorage(env) {
       const events = rows.slice(0, 100).map(row => JSON.parse(row.event));
       return { events, nextAfter: rows.length > 100 ? events.at(-1).sequence : null };
     },
+    async roomDraftEvents(id, after, through) {
+      const rows = (await statement('SELECT event FROM draft_events WHERE draft_id = ? AND sequence > ? AND sequence <= ? ORDER BY sequence LIMIT 101', id, after, through).all()).results;
+      const events = rows.slice(0, 100).map(row => JSON.parse(row.event));
+      return { events, nextAfter: rows.length > 100 ? events.at(-1).sequence : null };
+    },
     async draftBag(id, { playerId, sequence }) {
       const row = await statement("SELECT summary FROM draft_history WHERE id = ? AND status = 'complete'", id).first();
       if (!row) throw new RequestError(404, 'draft_not_found');

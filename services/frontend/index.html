@@ -1706,6 +1706,7 @@
           <button id="auction-undo-top" class="secondary icon-button" type="button" aria-label="Undo Last Action" title="Undo Last Action" data-icon="undo-2" hidden></button>
           <button id="auction-shuffle-top" class="secondary icon-button" type="button" aria-label="Shuffle Pool" title="Shuffle Pool" data-icon="shuffle" hidden></button>
           <button id="restart-draft" class="secondary" type="button" hidden>Restart Draft</button>
+          <button id="spectator-visibility-toggle" class="secondary" type="button" aria-pressed="false" hidden>Super visibility: Off</button>
           <button id="export-draft" class="secondary" type="button" hidden>Export TTS JSON</button>
         </div>
       </div>
@@ -1726,6 +1727,7 @@
                 <input id="allow-spectators-input" type="checkbox">
                 Allow spectators
               </label>
+              <label class="toggle-row"><input id="super-spectators-input" type="checkbox">Super visibility for all spectators</label>
               <label class="toggle-row"><input id="listed-input" type="checkbox">List on homepage</label>
             </div>
           </section>
@@ -1785,6 +1787,18 @@
 
       <div class="draft-page-grid">
         <div class="draft-main-stack">
+          <div id="spectator-toolbar" class="spectator-toolbar" hidden>
+            <label for="spectator-view">Spectating</label>
+            <select id="spectator-view"><option value="all">All players</option><option value="logs">Logs</option></select>
+            <span id="spectator-visibility-status"></span>
+            <div class="draft-section-tools" id="spectator-tools"></div>
+          </div>
+          <section id="room-logs-panel" hidden>
+            <h3>Draft logs</h3>
+            <p id="room-logs-status" role="status"></p>
+            <ol id="room-log-events" class="room-log-events"></ol>
+            <button id="room-logs-more" class="secondary" type="button" hidden>Load more actions</button>
+          </section>
           <section class="panel draft-toolbar" id="draft-display-panel" hidden>
             <h3>Draft Controls</h3>
             <label class="draft-grouping-control" id="draft-grouping-control">
@@ -1866,8 +1880,7 @@
           </section>
 
           <section class="panel" id="super-draft-panel" hidden>
-            <h3>Super Spectator View</h3>
-            <div class="reveal-grid" id="super-draft-areas"></div>
+            <div id="super-draft-areas" class="spectator-players"></div>
           </section>
 
           <section class="panel" id="reveal-panel" hidden>
@@ -1968,6 +1981,7 @@
     <script src="/icons.js"></script>
     <script src="/group-layout.js" defer></script>
     <script src="/draft-splitter.js" defer></script>
+    <script src="/room-logs.js" defer></script>
 
     <script>
       const apiUrl = (path) => path;
@@ -2101,6 +2115,11 @@
       const creatorPanel = document.querySelector("#creator-panel");
       const seatLimitInput = document.querySelector("#seat-limit-input");
       const allowSpectatorsInput = document.querySelector("#allow-spectators-input");
+      const superSpectatorsInput = document.querySelector("#super-spectators-input");
+      const spectatorVisibilityToggle = document.querySelector("#spectator-visibility-toggle");
+      const spectatorToolbar = document.querySelector("#spectator-toolbar");
+      const spectatorView = document.querySelector("#spectator-view");
+      const spectatorTools = document.querySelector("#spectator-tools");
       const poolSelect = document.querySelector("#pool-select");
       const draftMethodSelect = document.querySelector("#draft-method-select");
       const poolUploadDrop = document.querySelector("#pool-upload-drop");
@@ -2613,6 +2632,9 @@
       }
 
       function renderSeated(players) {
+        const key = JSON.stringify([players, hasHostRights()]);
+        if (seatedPeople.dataset.key === key) return;
+        seatedPeople.dataset.key = key;
         seatedPeople.replaceChildren();
 
         if (players.length === 0) {
@@ -3107,6 +3129,7 @@
         return {
           maxSeats: Number(seatLimitInput.value),
           allowSpectators: allowSpectatorsInput.checked,
+          superSpectators: superSpectatorsInput.checked,
           listed: listedInput.checked,
           poolId: poolSelect.value,
           methodId: draftMethodSelect.value,
@@ -3144,14 +3167,14 @@
         document.querySelector("#pool-visibility").textContent = pool?.public ? "Public pool" : "Room-only pool";
         document.querySelector("#setup-readiness").textContent = latestRoom.seated.length ? `${latestRoom.seated.length} player${latestRoom.seated.length === 1 ? "" : "s"} seated / Ready to start` : "Waiting for a seated player";
         if (canEdit || !settings) return;
-        const key = JSON.stringify([settings, latestRoom.maxSeats, latestRoom.allowSpectators, latestRoom.listed]);
+        const key = JSON.stringify([settings, latestRoom.maxSeats, latestRoom.allowSpectators, latestRoom.superSpectators, latestRoom.listed]);
         if (summary.dataset.key === key) return;
         summary.dataset.key = key;
         summary.replaceChildren();
         const sections = [
           ["Pool & method", [["Pool", pool?.name || "No pool"], ["Method", draftMethodById(settings.methodId)?.name || "Bag Passing"],
             ...(settings.methodId === "nomination-auction" ? [["Speaker order", {none: "Random", autopick: "Automatic after bidding", "bid-and-pick": "Bid and pick"}[settings.auctionSpeakerMode] || "Bid and pick"]] : [["Picks per bag", settings.picksPerBag]])]],
-          ["Room", [["Seat limit", latestRoom.maxSeats], ["Spectators", latestRoom.allowSpectators === false ? "Disabled" : "Allowed"], ["Homepage", latestRoom.listed ? "Listed" : "Unlisted"]]],
+          ["Room", [["Seat limit", latestRoom.maxSeats], ["Spectators", latestRoom.allowSpectators === false ? "Disabled" : "Allowed"], ["Super visibility", latestRoom.superSpectators ? "All spectators" : "Promoted spectators only"], ["Homepage", latestRoom.listed ? "Listed" : "Unlisted"]]],
           ["Item limits", (settings.typeOrder || Object.keys(settings.itemsPerType || {})).map(type => [type, settings.itemsPerType?.[type] || 0]).filter(([, count]) => count > 0)]
         ];
         for (const [heading, values] of sections) {
@@ -3830,6 +3853,9 @@
       }
 
       function renderSpectators(room) {
+        const key = JSON.stringify([room.spectators, room.namedSpectators, room.superSpectators, hasHostRights()]);
+        if (namedSpectators.dataset.key === key) return;
+        namedSpectators.dataset.key = key;
         spectatorSummary.textContent = `${room.spectators} spectator${room.spectators === 1 ? "" : "s"}`;
         namedSpectators.replaceChildren();
 
@@ -3852,7 +3878,7 @@
 
           appendAdminAction(card, spectator);
 
-          if (hasHostRights()) {
+          if (hasHostRights() && !room.superSpectators) {
             const actions = card.querySelector(".participant-actions") || document.createElement("div");
             actions.className = "participant-actions";
             const button = document.createElement("button");
@@ -3873,6 +3899,9 @@
       }
 
       function renderTable(draft) {
+        const key = JSON.stringify([draft.status, draft.engine, draft.table, hasHostRights()]);
+        if (tableRoster.dataset.key === key) return;
+        tableRoster.dataset.key = key;
         tablePanel.hidden = draft.status === "not_started";
         roundTable.replaceChildren();
         tableRoster.replaceChildren();
@@ -3929,6 +3958,8 @@
       }
 
       function placeTablePanel(inCurrentBag) {
+        const target = inCurrentBag ? currentBagTableSlot : participantsFooter;
+        if (tablePanel.parentElement === target) return;
         if (inCurrentBag) {
           currentBagTableSlot.append(tablePanel);
           tablePanel.classList.add("in-current-bag");
@@ -4310,7 +4341,7 @@
         ].filter(Boolean).join(" ");
         const header = document.createElement("header");
         const name = document.createElement("strong");
-        name.append(options.personal ? `${player.name} (me)` : player.name);
+        name.append(player.playerId === currentViewerId ? `${player.name} (me)` : player.name);
         appendHostBadge(name, player);
 
         if (player.isSpeaker) {
@@ -4374,6 +4405,7 @@
         const waitingIds = getAuctionWaitingPlayerIds(auction);
         const playersRenderKey = JSON.stringify({
           viewerId: currentViewerId,
+          spectatorView: currentRole === "spectator" ? spectatorView.value : null,
           stage: auction.stage,
           grouping: draftGrouping.value,
           waiting: [...waitingIds].sort(),
@@ -4401,13 +4433,17 @@
         auctionPlayersRenderKey = playersRenderKey;
         auctionPlayers.replaceChildren();
         auctionPersonalPlayer.replaceChildren();
-        const personalPlayer = auction.players.find((player) => player.playerId === currentViewerId);
-        const otherPlayers = personalPlayer
+        const spectating = currentRole === "spectator";
+        const personalPlayer = auction.players.find((player) => player.playerId === (spectating ? spectatorView.value : currentViewerId));
+        const otherPlayers = spectating && personalPlayer ? [] : personalPlayer
           ? auction.players.filter((player) => player.playerId !== currentViewerId)
           : auction.players;
 
         auctionLayout.classList.toggle("no-personal", !personalPlayer);
         auctionPersonalArea.hidden = !personalPlayer;
+        auctionPersonalArea.querySelector("h4").textContent = spectating && personalPlayer ? `${personalPlayer.name}'s Picks` : "Your Picks";
+        document.querySelector(".auction-roster-area").hidden = spectating && Boolean(personalPlayer);
+        document.querySelector(".auction-roster-area > h4").textContent = spectating ? "All Players" : "Other Players";
 
         if (personalPlayer) {
           renderDraftChecklist(getDraftTypeProgress({
@@ -5050,37 +5086,84 @@
       }
 
       function renderSuperSpectatorDraft(draft) {
-        superDraftPanel.hidden = draft.status !== "active" || draft.engine === "auction" || !draft.superSpectator;
-        superDraftAreas.replaceChildren();
-
-        if (superDraftPanel.hidden) {
-          return;
+        const visible = currentRole === "spectator" && draft.status === "active"
+          && draft.engine !== "auction" && spectatorView.value !== "logs";
+        superDraftPanel.hidden = !visible;
+        if (!visible) { superDraftAreas.replaceChildren(); return; }
+        const views = new Map((draft.superSpectator?.players || []).map(player => [player.playerId, player]));
+        const players = draft.table.filter(player => spectatorView.value === "all" || player.id === spectatorView.value);
+        const retained = new Set(players.map(player => player.id));
+        for (const section of [...superDraftAreas.children]) {
+          if (!retained.has(section.dataset.playerId)) section.remove();
         }
-
-        for (const player of draft.superSpectator.players) {
-          const section = document.createElement("section");
-          section.className = "item-card";
-          const title = document.createElement("h4");
-          title.textContent = `${player.name} (${player.queueLength} bag${player.queueLength === 1 ? "" : "s"})`;
-          const bagTitle = document.createElement("p");
-          bagTitle.textContent = player.currentBag ? "Current bag" : "No current bag";
-          const bagGrid = document.createElement("div");
-          bagGrid.className = "item-grid";
-          const draftedTitle = document.createElement("p");
-          draftedTitle.textContent = "Drafted";
-          const draftedGrid = document.createElement("div");
-          draftedGrid.className = "item-grid";
-          section.append(title, bagTitle, bagGrid, draftedTitle, draftedGrid);
-          renderTypeSections(bagGrid, player.currentBag?.items || [], {
-            typeOrder: latestRoom?.draft.typeOrder
-          });
-          renderGroupedItems(draftedGrid, player.draftedItems, player.draftedGroups);
-          superDraftAreas.append(section);
+        for (const [index, record] of players.entries()) {
+          const player = views.get(record.id);
+          let section = [...superDraftAreas.children].find(node => node.dataset.playerId === record.id);
+          if (!section) {
+            section = document.createElement("section");
+            section.className = "spectator-player";
+            section.dataset.playerId = record.id;
+            const heading = document.createElement("div"); heading.className = "draft-section-header";
+            heading.append(document.createElement("h3"), document.createElement("span"));
+            const zones = document.createElement("div"); zones.className = "spectator-player-zones";
+            for (const title of ["Current Bag", "Drafted Items"]) {
+              const zone = document.createElement("section"); zone.className = "draft-subpanel";
+              const label = document.createElement("h4"); label.textContent = title;
+              const grid = document.createElement("div"); grid.className = "item-grid";
+              zone.append(label, grid); zones.append(zone);
+            }
+            section.append(heading, zones); superDraftAreas.append(section);
+          }
+          if (superDraftAreas.children[index] !== section) superDraftAreas.insertBefore(section, superDraftAreas.children[index]);
+          section.querySelector("h3").textContent = record.name;
+          section.querySelector(".draft-section-header > span").textContent = `${record.queueLength} bag${record.queueLength === 1 ? "" : "s"} queued / ${record.lookingAtBag ? "Choosing" : "Waiting"}`;
+          const [bagGrid, draftedGrid] = section.querySelectorAll(".item-grid");
+          const bagKey = player ? getCurrentBagRenderKey(player.currentBag) + JSON.stringify(draft.typeOrder) : "private";
+          if (bagGrid.dataset.key !== bagKey) {
+            renderTypeSections(bagGrid, player?.currentBag?.items || [], {
+              typeOrder: draft.typeOrder,
+              emptyText: player ? "Waiting for next bag" : "Bag contents are private."
+            });
+            bagGrid.dataset.key = bagKey;
+          }
+          const picksKey = player ? getDraftedItemsRenderKey(player, draft) : "private";
+          if (draftedGrid.dataset.key !== picksKey) {
+            if (player) renderGroupedItems(draftedGrid, player.draftedItems, player.draftedGroups, {
+              typeOrder: draft.typeOrder, titleForType: makeTypeProgressTitle(getDraftTypeProgress(player, draft))
+            });
+            else { const text = document.createElement("p"); text.textContent = "Picks are private until the draft ends."; draftedGrid.replaceChildren(text); }
+            draftedGrid.dataset.key = picksKey;
+          }
         }
       }
 
+      function renderSpectatorToolbar(draft) {
+        spectatorToolbar.hidden = currentRole !== "spectator" || draft.status === "not_started";
+        if (spectatorToolbar.hidden) return;
+        const key = JSON.stringify([currentRoomNumber, draft.table.map(player => [player.id, player.name])]);
+        if (spectatorView.dataset.key !== key) {
+          const selected = spectatorView.value;
+          spectatorView.replaceChildren();
+          for (const [value, label] of [["all", "All players"], ...draft.table.map(player => [player.id, player.name]), ["logs", "Logs"]]) {
+            const option = document.createElement("option"); option.value = value; option.textContent = label; spectatorView.append(option);
+          }
+          spectatorView.value = [...spectatorView.options].some(option => option.value === selected) ? selected : "all";
+          spectatorView.dataset.key = key;
+        }
+        document.querySelector("#spectator-visibility-status").textContent = draft.engine === "auction" ? "Sealed bids stay private"
+          : draft.status === "complete" ? "All picks revealed" : latestRoom.viewer?.superSpectator ? "Super visibility" : "Public visibility";
+      }
+
+      function placeControl(parent, control) {
+        if (control.parentElement !== parent) parent.append(control);
+      }
+
       function renderReveal(draft) {
+        const key = JSON.stringify([draft.status, draft.revealedDrafts?.map(player => [player.playerId, player.name,
+          getDraftedItemsRenderKey({ draftedItems: player.items, draftedGroups: player.groups }, draft)]), currentRole === "spectator" ? spectatorView.value : "all"]);
         revealPanel.hidden = draft.status !== "complete";
+        if (revealedDrafts.dataset.key === key) return;
+        revealedDrafts.dataset.key = key;
         revealedDrafts.replaceChildren();
         document.querySelector("#results-navigation").replaceChildren();
 
@@ -5090,6 +5173,7 @@
 
         document.querySelector("#completion-summary").textContent = `${draft.revealedDrafts.length} players / ${draft.revealedDrafts.reduce((total, player) => total + player.items.length, 0)} drafted items`;
         for (const player of draft.revealedDrafts) {
+          if (currentRole === "spectator" && !["all", player.playerId].includes(spectatorView.value)) continue;
           const section = document.createElement("section");
           section.className = "item-card final-draft-card";
           section.id = `result-${revealedDrafts.children.length + 1}`;
@@ -5124,6 +5208,12 @@
       }
 
       function placeDraftGroupingControl(draft, hasDraftedAreas) {
+        if (currentRole === "spectator" && draft.status !== "not_started") {
+          placeControl(spectatorTools, draftGroupingControl);
+          spectatorTools.hidden = spectatorView.value === "logs";
+          draftDisplayPanel.hidden = true;
+          return;
+        }
         const bagDraftActive = draft.status === "active"
           && draft.engine !== "auction"
           && Boolean(draft.currentPlayer);
@@ -5131,27 +5221,27 @@
           && draft.engine === "auction";
 
         if (bagDraftActive) {
-          bagDraftedTools.append(draftGroupingControl);
-          bagDraftedTools.append(draftChecklistControl);
+          placeControl(bagDraftedTools, draftGroupingControl);
+          placeControl(bagDraftedTools, draftChecklistControl);
           draftDisplayPanel.hidden = true;
           return;
         }
 
         if (auctionDraftActive) {
-          auctionPersonalTools.append(draftGroupingControl);
-          auctionPersonalTools.append(draftChecklistControl);
+          placeControl(auctionPersonalTools, draftGroupingControl);
+          placeControl(auctionPersonalTools, draftChecklistControl);
           draftDisplayPanel.hidden = true;
           return;
         }
 
         if (draft.status === "complete") {
-          revealTools.append(draftGroupingControl);
+          placeControl(revealTools, draftGroupingControl);
           draftDisplayPanel.hidden = true;
           return;
         }
 
         if (draft.status !== "not_started" && hasDraftedAreas) {
-          draftDisplayPanel.append(draftGroupingControl);
+          placeControl(draftDisplayPanel, draftGroupingControl);
           draftDisplayPanel.hidden = false;
           return;
         }
@@ -5160,18 +5250,26 @@
       }
 
       function renderDraft(draft, priorDraftStatus = null) {
+        renderSpectatorToolbar(draft);
         const hasDraftedAreas = draft.status === "complete"
           || draft.engine === "auction"
           || Boolean(draft.currentPlayer)
           || Boolean(draft.superSpectator);
         placeDraftGroupingControl(draft, hasDraftedAreas);
         updateAuctionTopControls(draft);
-        placeTablePanel(false);
+        placeTablePanel(draft.status === "active" && draft.engine !== "auction"
+          && Boolean(draft.currentPlayer) && !draft.currentPlayer.currentBag);
         renderTable(draft);
         renderPlayerDraft(draft, priorDraftStatus);
         renderAuctionDraft(draft);
         renderSuperSpectatorDraft(draft);
         renderReveal(draft);
+        const logsVisible = currentRole === "spectator" && draft.status !== "not_started" && spectatorView.value === "logs";
+        document.querySelector("#room-logs-panel").hidden = !logsVisible;
+        participantsFooter.hidden = logsVisible;
+        if (logsVisible) { auctionPanel.hidden = true; revealPanel.hidden = true; }
+        window.frankenRoomLogs?.update({ visible: logsVisible, roomNumber: currentRoomNumber, viewerId: currentViewerId,
+          revision: latestRoom.revision, status: draft.status, revealPicks: draft.status === "complete" || Boolean(latestRoom.viewer?.superSpectator) });
 
         if (draft.status === "active" && !draft.currentPlayer) {
           roomMessage.textContent = currentRole === "spectator" ? "Spectating draft." : roomMessage.textContent;
@@ -5219,6 +5317,7 @@
         if (!roomSettingsDirty && !roomSettingsSavePromise) {
           seatLimitInput.value = data.maxSeats;
           allowSpectatorsInput.checked = data.allowSpectators !== false;
+          superSpectatorsInput.checked = data.superSpectators === true;
           listedInput.checked = data.listed === true;
         }
         updateJoinOptions();
@@ -5231,6 +5330,9 @@
         creatorPanel.hidden = !draftNotStarted;
         setRoomSettingsEditable(hasHostRights());
         restartDraft.hidden = !hasHostRights() || draftNotStarted;
+        spectatorVisibilityToggle.hidden = !hasHostRights() || draftNotStarted;
+        spectatorVisibilityToggle.setAttribute("aria-pressed", String(data.superSpectators === true));
+        spectatorVisibilityToggle.textContent = `Super visibility: ${data.superSpectators ? "On" : "Off"}`;
         exportDraft.hidden = data.draft.status !== "active" || !hasHostRights();
         exportDraft.classList.toggle("secondary", data.draft.status !== "complete");
         seatingPanel.hidden = !draftNotStarted;
@@ -6064,6 +6166,21 @@
         moveRoomTypeWithKeyboard(handle, event.key);
       });
 
+      spectatorView.addEventListener("change", () => {
+        if (latestRoom) renderRoom(latestRoom, { force: true });
+      });
+      spectatorVisibilityToggle.addEventListener("click", async () => {
+        spectatorVisibilityToggle.disabled = true;
+        try {
+          const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/spectators/visibility`), {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(hostPayload({ superSpectators: !latestRoom.superSpectators }))
+          });
+          if (!response.ok) throw new Error();
+          renderRoom(await response.json());
+        } catch { roomMessage.textContent = "Could not change spectator visibility. Please retry."; }
+        finally { spectatorVisibilityToggle.disabled = false; }
+      });
       creatorPanel.addEventListener("input", markRoomSettingsDirty);
       creatorPanel.addEventListener("change", scheduleRoomSettingsSave);
 

@@ -5,6 +5,7 @@ import { createStorage, ConflictError, RequestError } from './storage.mjs';
 import { roomStream } from './room-stream.mjs';
 import { captureHistoryBefore, recordDraftAction } from './draft-history.mjs';
 import { handleHistoryApi } from './history-api.mjs';
+import { readRoomLogs } from './room-logs.mjs';
 
 const encoder = new TextEncoder();
 const validId = value => typeof value === 'string' && /^[a-zA-Z0-9-]{8,80}$/.test(value);
@@ -99,6 +100,9 @@ export async function handleApi(request, env) {
     const actorId = presence ? url.searchParams.get('participantId') : body.playerId || body.actorId || body.viewerId || body.participantId || url.searchParams.get('actorId') || url.searchParams.get('viewerId') || url.searchParams.get('participantId');
     if (presence && !validId(actorId)) return response({ error: 'invalid_participant' }, 400);
     const hash = (presence || (roomId && actorId)) ? await tokenHash(request) : null;
+    if (roomId && url.pathname === `/api/rooms/${roomId}/logs` && request.method === 'GET') {
+      return response(await readRoomLogs(store, roomId, actorId, hash, Number(url.searchParams.get('after') || 0)));
+    }
     const participantIsTarget = /\/(participants\/admin|spectators\/promote)$/.test(url.pathname);
     if (roomId && !presence && actorId) {
       const identities = [body.playerId, body.actorId, body.viewerId, !participantIsTarget && body.participantId,
