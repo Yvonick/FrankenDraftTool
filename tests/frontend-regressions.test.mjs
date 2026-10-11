@@ -277,6 +277,44 @@ test('back and attachment icons are omitted when irrelevant, but alternate textu
   assert.deepEqual(views({...item, imageSheet: {columns: 2, rows: 1, index: 1}, imageSecondarySheet: {columns: 2, rows: 1, index: 1}}), ['zoom']);
 });
 
+test('descriptions are only available through the item toolbar, without changing selection', () => {
+  const {context, nodes} = itemViewFixture();
+  const content = 'Base Unit: Unit I\nNon-draft: Token\n<script>plain text</script>';
+  const item = {id: 'unit', name: 'Unit II', type: 'Tech', content, imageUrl: 'front'};
+  const card = context.renderItemCard(item, {checkable: true});
+  assert.equal(card.querySelectorAll('p').length, 0);
+  const button = card.querySelectorAll('button').find(button => button.dataset.itemView === 'description');
+  assert.ok(button.title.includes('Show description'));
+  let prevented = false, stopped = false;
+  button.listeners.click({preventDefault() { prevented = true; }, stopPropagation() { stopped = true; }});
+  assert.ok(prevented && stopped);
+  assert.equal(card.querySelector('input').checked, false);
+  assert.equal(nodes.get('#inspector-description').textContent, content);
+  assert.equal(nodes.get('#inspector-images').hidden, true);
+  assert.equal(nodes.get('#inspector-images').children.length, 0);
+  assert.match(nodes.get('#inspector-title').textContent, /Description/);
+  assert.ok(context.renderAuctionDraftedItem(item, {cost: 1}).querySelectorAll('button').some(button => button.dataset.itemView === 'description'));
+  for (const empty of [undefined, '', '  \n ']) {
+    assert.ok(!context.renderItemTools({...item, content: empty}).children.some(button => button.dataset.itemView === 'description'));
+  }
+  context.inspectItem(item);
+  assert.equal(nodes.get('#inspector-images').hidden, false, 'image views remain available after reading a description');
+  assert.equal(nodes.get('#inspector-images').children.length, 1);
+});
+
+test('speaker order stays at its configured position and uses a same-sized numbered face', () => {
+  const {context} = itemViewFixture();
+  const item = {id: 'speaker-order-2', name: 'Speaker Order 2', type: 'Speaker Order', metaType: 'speaker-order', order: 2, content: 'Position 2'};
+  const card = context.renderItemCard(item);
+  assert.equal(card.children[0].className, 'item-image-frame speaker-order-face');
+  assert.equal(card.children[0].textContent, 2);
+  const groups = load(['groupItemsByType']);
+  const items = [item, {type: 'Techs'}, {type: 'Abilities'}];
+  for (const order of [['Abilities', 'Techs', 'Speaker Order'], ['Speaker Order', 'Abilities', 'Techs']]) {
+    assert.deepEqual(Array.from(groups.groupItemsByType(items, order), group => group.label), order);
+  }
+});
+
 test('zoom, back and attachments show distinct views with the proper crop and no source mutation', () => {
   const {context, nodes} = itemViewFixture();
   const item = {name: 'System', content: 'Non-draft: Token', imageUrl: 'texture', imageSheet: {columns: 2, rows: 1, index: 0}, imageSecondaryUrl: 'texture', imageSecondarySheet: {columns: 2, rows: 1, index: 1}, linkedItems: [{name: 'Token', imageUrl: 'token'}]};

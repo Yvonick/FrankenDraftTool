@@ -1,6 +1,5 @@
 (() => {
   const layouts = new Map();
-  const rowHeight = 4;
   const gap = 16;
 
   function groupColumns(width, minimum) {
@@ -19,11 +18,6 @@
       for (const nested of group.querySelectorAll('.group-section')) {
         nested.style.setProperty('--group-span', Math.min(span, Number(nested.style.getPropertyValue('--group-columns')) || 1));
       }
-    }
-    // Natural group heights are independent of row spans. Image loads can change
-    // heights without replacing cards, stealing focus, or clearing selections.
-    for (const group of groups) {
-      group.style.gridRowEnd = `span ${Math.max(1, Math.ceil((group.getBoundingClientRect().height + gap) / rowHeight))}`;
     }
   }
 

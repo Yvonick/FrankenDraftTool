@@ -42,15 +42,15 @@ function fixture() {
   };
 }
 
-test('group layout fills the available width and measures each group independently', () => {
+test('group layout fits available columns without masonry row spans or replacing cards', () => {
   const f = fixture();
   assert.equal(f.container.style.getPropertyValue('--layout-columns'), 6);
   assert.equal(f.first.style.getPropertyValue('--group-span'), 2);
-  assert.equal(f.first.style.gridRowEnd, 'span 99');
-  assert.equal(f.second.style.gridRowEnd, 'span 39');
+  assert.equal(f.first.style.gridRowEnd, undefined);
+  assert.equal(f.second.style.gridRowEnd, undefined);
   f.second.height = 240;
   f.observers[0].callback();
-  assert.equal(f.second.style.gridRowEnd, 'span 64');
+  assert.equal(f.second.style.gridRowEnd, undefined);
   assert.equal(f.container.children[0], f.first, 'cards are never replaced during layout');
   f.container.clientWidth = 343; f.context.window.innerWidth = 390;
   f.observers[0].callback();
@@ -58,6 +58,14 @@ test('group layout fills the available width and measures each group independent
   f.container.clientWidth = 210;
   f.observers[0].callback();
   assert.equal(f.first.style.getPropertyValue('--group-span'), 1);
+});
+
+test('group grids keep source order instead of filling earlier holes with later types', async () => {
+  const css = await readFile(new URL('../services/frontend/polish.css', import.meta.url), 'utf8');
+  const rule = css.match(/\.item-grid\.compact-groups\s*\{([^}]+)\}/)[1];
+  assert.match(rule, /grid-auto-flow:\s*row\s*;/);
+  assert.doesNotMatch(rule, /dense|grid-auto-rows:\s*4px/);
+  assert.match(rule, /justify-content:\s*start/);
 });
 
 test('bag, drafted items and nomination use the same card scale', () => {
