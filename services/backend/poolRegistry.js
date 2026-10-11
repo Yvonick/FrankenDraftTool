@@ -248,9 +248,21 @@ function appendBaseUnitLink(item, linkedItems, baseUnits) {
   return base && !alreadyLinked(linkedItems) ? [...linkedItems, base] : linkedItems;
 }
 
-function restoreBaseUnitLinks(pool, rawJson) {
+function getExportBagColors(root) {
+  const color = object => {
+    const value = object?.ColorDiffuse;
+    return value && [value.r, value.g, value.b].every(Number.isFinite) ? cloneJson(value) : null;
+  };
+  return {
+    root: color(root),
+    types: Object.fromEntries((root.ContainedObjects || []).filter(shouldUseTtsBag)
+      .map(bag => [bag.Nickname || bag.Name, color(bag)]).filter(([, value]) => value))
+  };
+}
+
+function restorePoolSourceMetadata(pool, rawJson) {
   const root = rawJson?.ObjectStates?.[0];
-  if (!root?.ContainedObjects) return null;
+  if (!Array.isArray(root?.ContainedObjects)) return null;
   const objectKey = (type, item) => JSON.stringify([type, item]);
   const originals = new Set(root.ContainedObjects.filter(shouldUseTtsBag).flatMap(bag =>
     bag.ContainedObjects.map(item => objectKey(bag.Nickname || bag.Name, item))));
@@ -258,7 +270,7 @@ function restoreBaseUnitLinks(pool, rawJson) {
   // This cannot replace their contents, IDs, order, or explicit linked parts.
   if (!pool.items.every(item => item.ttsObject && originals.has(objectKey(item.type, item.ttsObject)))) return null;
   const baseUnits = createBaseUnitIndex(root, pool.id);
-  return { ...pool, items: pool.items.map(item => ({
+  return { ...pool, exportBagColors: getExportBagColors(root), items: pool.items.map(item => ({
     ...item, linkedItems: appendBaseUnitLink(item.ttsObject, item.linkedItems || [], baseUnits)
   })) };
 }
@@ -328,6 +340,7 @@ function parseTtsPool(rawJson, fallbackName) {
     source: "tts",
     types,
     items,
+    exportBagColors: getExportBagColors(root),
     unmatchedLinkedBags: [...linkedItemIndex].filter(([key]) => !draftableNames.has(key)).map(([, bag]) => bag.name)
   };
 }
@@ -468,6 +481,7 @@ function serializePool(pool) {
     public: Boolean(pool.public),
     types: normalizedPool.types,
     items: normalizedPool.items,
+    ...(normalizedPool.exportBagColors ? { exportBagColors: cloneJson(normalizedPool.exportBagColors) } : {}),
     unmatchedLinkedBags: normalizedPool.unmatchedLinkedBags || [],
     defaultParameters: normalizeDefaultParameters(normalizedPool, pool.defaultParameters)
   };
@@ -537,8 +551,9 @@ function registerUploadedTtsPool(rawJson, fallbackName, options = {}) {
 
 function savePool(poolId, options = {}) {
   const existing = getPool(poolId);
-  const pool = existing && options.baseUnitSource !== undefined
-    ? restoreBaseUnitLinks(existing, options.baseUnitSource) : existing;
+  const sourceJson = options.sourceJson === undefined ? options.baseUnitSource : options.sourceJson;
+  const pool = existing && sourceJson !== undefined
+    ? restorePoolSourceMetadata(existing, sourceJson) : existing;
 
   if (!pool) {
     return null;
@@ -570,6 +585,7 @@ function updatePublicPool(poolId, options = {}) {
   return savePool(poolId, {
     name: options.name === undefined ? pool.name : options.name,
     baseUnitSource: options.baseUnitSource,
+    sourceJson: options.sourceJson,
     defaultParameters: options.defaultParameters || pool.defaultParameters
   });
 }

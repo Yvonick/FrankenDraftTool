@@ -372,11 +372,58 @@ test('named linked contents and automatic base units preview and export intact a
     await f.restart();
     const exported = await f.api(`${room.base}/draft/export`);
     const playerBag = exported.ObjectStates.find(object => object.Nickname === 'Player 1');
-    assert.equal(playerBag.ContainedObjects.length, 2 + contents.length);
-    assert.deepEqual(playerBag.ContainedObjects.slice(1, -1), contents, 'export originals exactly once, including both token copies and intact nested containers');
-    assert.deepEqual(playerBag.ContainedObjects.at(-1), baseUnits.find(unit => unit.Nickname === playerBag.ContainedObjects[0].Nickname.slice(0, -1)));
+    assert.equal(playerBag.ContainedObjects.length, 2);
+    const nonDraft = playerBag.ContainedObjects[1];
+    assert.equal(nonDraft.Name, 'Bag');
+    assert.equal(nonDraft.Nickname, 'Non-draft parts');
+    assert.equal(nonDraft.Value, contents.length + 1);
+    assert.deepEqual(nonDraft.ContainedObjects.slice(0, -1), contents, 'export originals exactly once, including both token copies and intact nested containers');
+    assert.deepEqual(nonDraft.ContainedObjects.at(-1), baseUnits.find(unit => unit.Nickname === playerBag.ContainedObjects[0].Nickname.slice(0, -1)));
     assert.ok(units.some(unit => unit.Nickname === playerBag.ContainedObjects[0].Nickname));
   }
+});
+
+test('active exports put each players linked parts in their own sub-bag without changing queues or source objects', async t => {
+  const f = await fixture(t);
+  const raw = structuredClone(tinyPool);
+  const units = raw.ObjectStates[0].ContainedObjects[0].ContainedObjects;
+  const token = {Name: 'Custom_Tile', Nickname: 'Linked token', GUID: 'abcdef', CustomImage: {ImageURL: 'https://example.test/linked.png'}};
+  raw.ObjectStates[0].ContainedObjects.push({Name: 'Bag', Nickname: 'Non-draft parts', ContainedObjects:
+    units.map(item => ({Name: 'Bag', Nickname: item.Nickname, ContainedObjects: [structuredClone(token)]}))});
+  const {pool} = await f.api('/api/pools/upload', {poolJson: raw, savePool: true});
+  const store = createStorage(f.env), row = (await store.catalog()).find(row => row.id === pool.id);
+  const original = await store.pool(row.object_key);
+  const room = await f.room('bag-passing-default', 2);
+  await f.api(`${room.base}/settings`, {...room.auth, poolId: pool.id, picksPerBag: 1, itemsPerType: {Units: 1, Abilities: 0, 'Speaker Order': 0}}, room.host.token);
+  await room.start();
+  for (const [index, player] of room.players.entries()) {
+    const current = (await room.connect(player)).room.draft.currentPlayer.currentBag;
+    await f.api(`${room.base}/draft/pick`, {playerId: player.id, bagId: current.id, itemIds: [current.items[0].id]}, player.token);
+    const exported = await f.api(`${room.base}/draft/export?${new URLSearchParams(room.auth)}`, undefined, room.host.token);
+    for (let owner = 0; owner < 2; owner++) {
+      const playerBag = exported.ObjectStates.find(item => item.Nickname === `Player ${owner + 1}`);
+      const parts = playerBag.ContainedObjects.filter(item => item.Nickname === 'Non-draft parts');
+      assert.equal(parts.length, owner <= index ? 1 : 0);
+      if (parts.length) {
+        assert.equal(playerBag.ContainedObjects.length, 2);
+        assert.equal(parts[0].Value, 1);
+        assert.deepEqual(parts[0].ContainedObjects.map(item => item.Nickname), ['Linked token']);
+      }
+    }
+    const guids = [];
+    const collect = object => {if (object.GUID) guids.push(object.GUID); for (const child of object.ContainedObjects || []) collect(child);};
+    exported.ObjectStates.forEach(collect);
+    assert.equal(new Set(guids).size, guids.length, 'container and component GUIDs are unique across players');
+    const remaining = exported.ObjectStates.find(item => item.Nickname === 'Remaining Draftable Pool');
+    assert.deepEqual(remaining.ColorDiffuse, {r: 0.08, g: 0.16, b: 0.32}, 'old sources without colors retain the fallback');
+    assert.ok(remaining.ContainedObjects.every(bag => bag.ContainedObjects.every(item => item.Nickname !== 'Linked token')));
+    if (index === 0) {
+      const queues = exported.ObjectStates.find(item => item.Nickname === 'Current Bag Draft Queues');
+      assert.equal(queues.ContainedObjects.length, 1);
+      assert.equal(queues.ContainedObjects[0].ContainedObjects.length, 1, 'unpicked items do not export linked components');
+    }
+  }
+  assert.deepEqual(await store.pool(row.object_key), original, 'export does not mutate stored TTS objects');
 });
 
 test('base-unit source repair updates the saved pool durably without replacing draftables or pinned rooms', async t => {
@@ -390,8 +437,10 @@ test('base-unit source repair updates the saved pool durably without replacing d
   await room.start();
   const baseUnit = tile('Unit I');
   raw.ObjectStates[0].ContainedObjects.push(bag('Base Units', [baseUnit]));
+  raw.ObjectStates[0].ColorDiffuse = {r: 0, g: 0, b: 0};
+  raw.ObjectStates[0].ContainedObjects[0].ColorDiffuse = {r: 0.2, g: 0.6, b: 0.9, a: 0.8};
   const path = `/api/pools/${pool.id}`;
-  const repaired = await f.api(path, {baseUnitSource: raw});
+  const repaired = await f.api(path, {sourceJson: raw});
   assert.equal(repaired.baseUnitLinksAdded, 1);
   assert.deepEqual(repaired.pool, pool, 'catalog defaults and metadata are preserved');
   assert.equal((await f.api(path, {baseUnitSource: raw})).baseUnitLinksAdded, 0);
@@ -400,6 +449,7 @@ test('base-unit source repair updates the saved pool durably without replacing d
   const row = (await store.catalog()).find(row => row.id === pool.id);
   const saved = await store.pool(row.object_key);
   assert.deepEqual(saved.items[0].linkedItems[0].ttsObject, baseUnit);
+  assert.deepEqual(saved.exportBagColors, {root: raw.ObjectStates[0].ColorDiffuse, types: {Units: raw.ObjectStates[0].ContainedObjects[0].ColorDiffuse}});
   assert.deepEqual((await room.connect(room.host)).room.draft.currentPlayer.currentBag.items[0].linkedItems, [], 'a running draft retains its pinned source');
   raw.ObjectStates[0].ContainedObjects[0].ContainedObjects[0].Description = 'Not the same source';
   const rejected = await f.raw(path, {baseUnitSource: raw, name: 'Should not change'});
@@ -475,12 +525,29 @@ test('failed pool writes leave the catalog intact and existing rooms remain usab
 
 test('complete bag and auction drafts reveal every pick and export after repeated reloads', async t => {
   const f = await fixture(t);
-  const { pool } = await f.api('/api/pools/upload', { poolJson: tinyPool, savePool: true });
+  const raw = structuredClone(tinyPool);
+  raw.ObjectStates[0].ColorDiffuse = {r: 0, g: 0, b: 0};
+  raw.ObjectStates[0].ContainedObjects[0].ColorDiffuse = {r: 1, g: 0.05, b: 0.125, a: 0.7};
+  raw.ObjectStates[0].ContainedObjects[1].ColorDiffuse = {r: 0.1, g: 0.6, b: 0.9};
+  const checkColors = exported => {
+    const leftover = exported.ObjectStates.find(item => item.Nickname === 'Remaining Draftable Pool');
+    assert.deepEqual(leftover.ColorDiffuse, raw.ObjectStates[0].ColorDiffuse);
+    assert.equal(leftover.ContainedObjects.length, 2);
+    for (const typeBag of leftover.ContainedObjects) {
+      assert.deepEqual(typeBag.ColorDiffuse, raw.ObjectStates[0].ContainedObjects.find(item => item.Nickname === typeBag.Nickname).ColorDiffuse);
+      assert.equal(typeBag.Value, typeBag.ContainedObjects.length);
+    }
+    for (const player of exported.ObjectStates.filter(item => ['Player 1', 'Player 2'].includes(item.Nickname))) {
+      assert.ok(player.ContainedObjects.every(item => item.Nickname !== 'Non-draft parts'), 'no empty non-draft bag');
+    }
+  };
+  const { pool } = await f.api('/api/pools/upload', { poolJson: raw, savePool: true });
   for (const method of ['bag-passing-default', 'nomination-auction']) {
     const room = await f.room(method);
     await f.api(`${room.base}/settings`, { ...room.auth, poolId: pool.id, picksPerBag: 1, auctionSpeakerMode: 'none', itemsPerType: { Units: 1, Abilities: 1, 'Speaker Order': 0 } }, room.host.token);
     let state = await room.start();
     const bagSnapshots = [];
+    checkColors(await f.api(`${room.base}/draft/export?${new URLSearchParams(room.auth)}`, undefined, room.host.token));
     let usedMulligan = false;
     let usedBan = false;
     for (let step = 0; step < 50 && state.draft.status === 'active'; step++) {
@@ -523,6 +590,7 @@ test('complete bag and auction drafts reveal every pick and export after repeate
     for (const player of state.draft.revealedDrafts) assert.equal(player.items.length, 2);
     assert.equal(new Set(state.draft.revealedDrafts.flatMap(player => player.items.map(item => item.id))).size, 4);
     const exported = await f.api(`${room.base}/draft/export`);
+    checkColors(exported);
     assert.ok(exported.ObjectStates.length > 0);
     const entry = (await f.history()).drafts.find(entry => entry.roomNumber === room.roomNumber);
     assert.ok(entry);

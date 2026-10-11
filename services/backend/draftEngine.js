@@ -730,15 +730,25 @@ function createTtsContainerBag({ nickname, description, containedObjects, index,
 }
 
 function createTtsBag(player, index, usedGuids, pool) {
+  const sourceItems = player.draftedItems.map(item => resolvePoolItemForExport(pool, item));
+  const containedObjects = sourceItems.map(item => createTtsDraftItem(item, usedGuids)).filter(Boolean);
+  const linkedObjects = sourceItems.flatMap(item => item.linkedItems || [])
+    .map(item => createTtsDraftItem(item, usedGuids)).filter(Boolean);
+  if (linkedObjects.length) {
+    containedObjects.push(createTtsContainerBag({
+      nickname: "Non-draft parts",
+      description: `Linked components and base units for ${player.name}`,
+      index: 0,
+      usedGuids,
+      containedObjects: linkedObjects
+    }));
+  }
   return createTtsContainerBag({
     nickname: player.name,
     description: `Drafted items for ${player.name}`,
     index,
     usedGuids,
-    containedObjects: player.draftedItems
-      .flatMap((item) => getResolvedDraftItemExportItems(pool, item)
-        .map((exportItem) => createTtsDraftItem(exportItem, usedGuids)))
-      .filter(Boolean)
+    containedObjects
   });
 }
 
@@ -920,13 +930,13 @@ function getRemainingItemsByType(pool, draft) {
   return itemsByType;
 }
 
-function createTtsRemainingTypeBag(type, items, index, usedGuids) {
+function createTtsRemainingTypeBag(type, items, index, usedGuids, pool) {
   return createTtsContainerBag({
     nickname: type,
     description: `Remaining draftable ${type}`,
     index,
     usedGuids,
-    color: { r: 0.1, g: 0.28, b: 0.45 },
+    color: pool.exportBagColors?.types?.[type] || { r: 0.1, g: 0.28, b: 0.45 },
     containedObjects: items
       .map((item) => createTtsDraftItem(item, usedGuids))
       .filter(Boolean)
@@ -940,7 +950,7 @@ function createTtsRemainingPoolBag(pool, draft, index, usedGuids) {
     ...[...itemsByType.keys()].filter((type) => !pool.types.includes(type))
   ];
   const typeBags = orderedTypes
-    .map((type, typeIndex) => createTtsRemainingTypeBag(type, itemsByType.get(type), typeIndex, usedGuids))
+    .map((type, typeIndex) => createTtsRemainingTypeBag(type, itemsByType.get(type), typeIndex, usedGuids, pool))
     .filter((bag) => bag.ContainedObjects.length > 0);
 
   return createTtsContainerBag({
@@ -948,7 +958,7 @@ function createTtsRemainingPoolBag(pool, draft, index, usedGuids) {
     description: "Draftable pool items not used during this draft",
     index,
     usedGuids,
-    color: { r: 0.08, g: 0.16, b: 0.32 },
+    color: pool.exportBagColors?.root || { r: 0.08, g: 0.16, b: 0.32 },
     containedObjects: typeBags
   });
 }
@@ -1119,6 +1129,7 @@ async function handleUpdatePublicPool(poolId, request, response) {
   const updatedPool = updatePublicPool(pool.id, {
     name: body.name === undefined ? pool.name : cleanOptionalName(body.name),
     baseUnitSource: body.baseUnitSource,
+    sourceJson: body.sourceJson,
     defaultParameters: {
       maxSeats,
       picksPerBag,
@@ -1137,7 +1148,7 @@ async function handleUpdatePublicPool(poolId, request, response) {
     count + (item.linkedItems?.length || 0) - (pool.items[index].linkedItems?.length || 0), 0);
   sendJson(response, 200, {
     pool: getPoolSummary(updatedPool),
-    ...(body.baseUnitSource !== undefined ? { baseUnitLinksAdded } : {}),
+    ...(body.baseUnitSource !== undefined || body.sourceJson !== undefined ? { baseUnitLinksAdded } : {}),
     pools: listPublicPools().map(getPoolSummary)
   });
 }
