@@ -52,3 +52,52 @@ test('existing saved links are preserved rather than reinterpreted using new imp
   assert.equal(restored.items[0].linkedItems[0].name, 'Old token');
   assert.deepEqual(restored.items[0].linkedItems[0].ttsObject, tile('Old token'));
 });
+
+test('Base Unit bags link exact I/II names across types without drafting the base units', () => {
+  const base = tile('  SUPER-DREADNOUGHT   I  ', {LuaScript: 'original base script'});
+  const raw = pool([
+    bag('Techs', [tile('Super-Dreadnought II'), tile('Unit III'), tile('Missing II'), tile('Unit I')]),
+    bag('Mechs', [tile('Other II')]),
+    bag('Base Unit Tiles', [base, tile('Unit I'), bag('Nested', [tile('Other I')])]),
+    bag('Non-draft parts', [bag('Super-Dreadnought II', [tile('Token')])])
+  ]);
+  const before = structuredClone(raw);
+  const parsed = registry().parseTtsPool(raw);
+  assert.deepEqual(parsed.types, ['Techs', 'Mechs']);
+  assert.deepEqual(parsed.items.map(item => item.linkedItems.map(link => link.name)), [
+    ['Token', 'SUPER-DREADNOUGHT   I'], [], [], [], ['Other I']
+  ]);
+  assert.deepEqual(parsed.items[0].linkedItems[1].ttsObject, base);
+  assert.equal(parsed.items[0].linkedItems[1].type, 'Base Unit');
+  assert.deepEqual(raw, before);
+});
+
+test('explicit linked base units take precedence, including nested contents; ambiguous bases are not guessed', () => {
+  const parsed = registry().parseTtsPool(pool([
+    bag('Techs', [tile('Direct II'), tile('Nested II'), tile('Ambiguous II')]),
+    bag('Non-draft parts', [bag('Direct II', [tile('Direct I'), tile('Direct I')]), bag('Nested II', [bag('Parts', [tile('Nested I')])])]),
+    bag('Base Units', [tile('Direct I'), tile('Nested I'), tile('Ambiguous I'), tile('Ambiguous I', {Description: 'Another variant'})])
+  ]));
+  assert.deepEqual(parsed.items.map(item => item.linkedItems.length), [2, 1, 0]);
+});
+
+test('saved pool base-unit repair preserves IDs, explicit parts and settings, is idempotent and rejects unrelated sources', () => {
+  const raw = pool([bag('Techs', [tile('Unit II')]), bag('Non-draft parts', [bag('Unit II', [tile('Token')])])]);
+  const pools = registry();
+  const saved = pools.registerUploadedTtsPool(raw, 'test', {public: true, name: 'Renamed', defaultParameters: {maxSeats: 4, picksPerBag: 2, typeOrder: ['Speaker Order', 'Techs']}});
+  const before = structuredClone(saved);
+  raw.ObjectStates[0].ContainedObjects.push(bag('Base Unit Tiles', [tile('Unit I')]));
+  const repaired = pools.updatePublicPool(saved.id, {baseUnitSource: raw});
+  assert.deepEqual(repaired.items[0].linkedItems.map(item => item.name), ['Token', 'Unit I']);
+  assert.equal(repaired.id, saved.id);
+  assert.equal(repaired.items[0].id, saved.items[0].id);
+  assert.deepEqual(repaired.defaultParameters, saved.defaultParameters);
+  assert.equal(repaired.name, 'Renamed');
+  assert.deepEqual(saved, before, 'an already-pinned pool is immutable');
+  assert.deepEqual(pools.updatePublicPool(saved.id, {baseUnitSource: raw}), repaired);
+  raw.ObjectStates[0].ContainedObjects[0].ContainedObjects[0].Nickname = 'Different II';
+  assert.equal(pools.updatePublicPool(saved.id, {baseUnitSource: raw}), null);
+  assert.deepEqual(pools.getPool(saved.id), repaired);
+  const restored = registryModule.createPoolRegistry({initialPools: [pools.serializePool(repaired)]}).getPool(saved.id);
+  assert.deepEqual(restored.items[0].linkedItems, repaired.items[0].linkedItems);
+});

@@ -216,6 +216,53 @@ function getLinkedItemsForTtsItem(item, linkedItemIndex) {
   return linkedItemIndex.get(normalizeReferenceName(item.Nickname))?.items || [];
 }
 
+function createBaseUnitIndex(root, poolId) {
+  const index = new Map();
+  let nextId = 0;
+  function visit(item) {
+    const key = normalizeReferenceName(item.Nickname);
+    if (/\s+i$/.test(key)) {
+      const parsed = extractTtsItem(item, "Base Unit", poolId, nextId++, { allowMissingImage: true });
+      // Duplicate names may be different variants. Do not guess which one belongs
+      // to an upgrade; an explicit Non-draft parts bag can resolve that ambiguity.
+      index.set(key, index.has(key) ? null : parsed);
+    } else {
+      for (const child of item.ContainedObjects || []) visit(child);
+    }
+  }
+  for (const bag of root.ContainedObjects || []) {
+    if (bag.Name === "Bag" && isBaseUnitBagName(bag.Nickname)) {
+      for (const item of bag.ContainedObjects || []) visit(item);
+    }
+  }
+  return index;
+}
+
+function appendBaseUnitLink(item, linkedItems, baseUnits) {
+  const name = normalizeReferenceName(item.Nickname);
+  if (!/\s+ii$/.test(name)) return linkedItems;
+  const baseName = name.slice(0, -1);
+  const base = baseUnits.get(baseName);
+  const alreadyLinked = items => items.some(link =>
+    normalizeReferenceName(link.name) === baseName || alreadyLinked(link.containedItems || []));
+  return base && !alreadyLinked(linkedItems) ? [...linkedItems, base] : linkedItems;
+}
+
+function restoreBaseUnitLinks(pool, rawJson) {
+  const root = rawJson?.ObjectStates?.[0];
+  if (!root?.ContainedObjects) return null;
+  const objectKey = (type, item) => JSON.stringify([type, item]);
+  const originals = new Set(root.ContainedObjects.filter(shouldUseTtsBag).flatMap(bag =>
+    bag.ContainedObjects.map(item => objectKey(bag.Nickname || bag.Name, item))));
+  // Only repair from a source containing the exact existing draftable objects.
+  // This cannot replace their contents, IDs, order, or explicit linked parts.
+  if (!pool.items.every(item => item.ttsObject && originals.has(objectKey(item.type, item.ttsObject)))) return null;
+  const baseUnits = createBaseUnitIndex(root, pool.id);
+  return { ...pool, items: pool.items.map(item => ({
+    ...item, linkedItems: appendBaseUnitLink(item.ttsObject, item.linkedItems || [], baseUnits)
+  })) };
+}
+
 function shouldUseTtsBag(bag) {
   const name = bag.Nickname || bag.Name || "";
 
@@ -238,6 +285,7 @@ function parseTtsPool(rawJson, fallbackName) {
   const types = [];
   const items = [];
   const linkedItemIndex = createLinkedItemIndex(root, poolId);
+  const baseUnits = createBaseUnitIndex(root, poolId);
 
   for (const bag of root.ContainedObjects.filter(shouldUseTtsBag)) {
     const type = bag.Nickname || bag.Name;
@@ -256,7 +304,7 @@ function parseTtsPool(rawJson, fallbackName) {
 
         return {
           ...parsed,
-          linkedItems: getLinkedItemsForTtsItem(item, linkedItemIndex)
+          linkedItems: appendBaseUnitLink(item, getLinkedItemsForTtsItem(item, linkedItemIndex), baseUnits)
         };
       })
       .filter(Boolean);
@@ -488,7 +536,9 @@ function registerUploadedTtsPool(rawJson, fallbackName, options = {}) {
 }
 
 function savePool(poolId, options = {}) {
-  const pool = getPool(poolId);
+  const existing = getPool(poolId);
+  const pool = existing && options.baseUnitSource !== undefined
+    ? restoreBaseUnitLinks(existing, options.baseUnitSource) : existing;
 
   if (!pool) {
     return null;
@@ -519,6 +569,7 @@ function updatePublicPool(poolId, options = {}) {
 
   return savePool(poolId, {
     name: options.name === undefined ? pool.name : options.name,
+    baseUnitSource: options.baseUnitSource,
     defaultParameters: options.defaultParameters || pool.defaultParameters
   });
 }

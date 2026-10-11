@@ -270,13 +270,16 @@ test('back images and attached components survive bag drafts, auctions, legacy r
   const f = await fixture(t);
   const raw = structuredClone(tinyPool);
   raw.ObjectStates[0].ContainedObjects[0].ContainedObjects = Array.from({length: 4}, (_, index) => ({
-    Name: 'CardCustom', Nickname: `Unit ${index}`, Description: 'Non-draft: Token', CardID: 100 + index,
+    Name: 'CardCustom', Nickname: `Unit ${index} II`, Description: 'Non-draft: Token', CardID: 100 + index,
     CustomDeck: {'1': {FaceURL: 'https://example.test/front.png', BackURL: 'https://example.test/back.png', NumWidth: 2, NumHeight: 2, UniqueBack: true}}
   }));
   raw.ObjectStates[0].ContainedObjects.push({Name: 'Bag', Nickname: 'Non-draft parts', ContainedObjects:
-    Array.from({length: 4}, (_, index) => ({Name: 'Bag', Nickname: `Unit ${index}`, ContainedObjects: [
+    Array.from({length: 4}, (_, index) => ({Name: 'Bag', Nickname: `Unit ${index} II`, ContainedObjects: [
       {Name: 'Custom_Tile', Nickname: 'Token', CustomImage: {ImageURL: 'https://example.test/token.png'}}
     ]}))
+  });
+  raw.ObjectStates[0].ContainedObjects.push({Name: 'Bag', Nickname: 'Base Unit Tiles', ContainedObjects:
+    Array.from({length: 4}, (_, index) => ({Name: 'Custom_Tile', Nickname: `Unit ${index} I`, CustomImage: {ImageURL: 'https://example.test/base.png'}}))
   });
   const {pool} = await f.api('/api/pools/upload', {poolJson: raw, savePool: true});
   const assertMedia = item => {
@@ -284,6 +287,9 @@ test('back images and attached components survive bag drafts, auctions, legacy r
     assert.deepEqual(item.imageSecondarySheet, item.imageSheet);
     assert.equal(item.linkedItems[0].name, 'Token');
     assert.equal(item.linkedItems[0].ttsObject, undefined);
+    assert.equal(item.linkedItems[1].name, item.name.slice(0, -1));
+    assert.equal(item.linkedItems[1].imageUrl, 'https://example.test/base.png');
+    assert.equal(item.linkedItems[1].ttsObject, undefined);
   };
   for (const method of ['bag-passing-default', 'nomination-auction']) {
     const room = await f.room(method, 1);
@@ -318,17 +324,18 @@ test('back images and attached components survive bag drafts, auctions, legacy r
   }
 });
 
-test('named linked contents preview and export intact after completed bag and auction drafts', async t => {
+test('named linked contents and automatic base units preview and export intact after completed bag and auction drafts', async t => {
   const f = await fixture(t);
   const bag = (Nickname, ContainedObjects) => ({Name: 'Bag', Nickname, ContainedObjects});
   const token = name => ({Name: 'Custom_Tile', Nickname: name, CustomImage: {ImageURL: 'https://example.test/token.png'}});
-  const units = Array.from({length: 4}, (_, i) => token(`Unit ${i}`));
+  const units = Array.from({length: 4}, (_, i) => token(`Unit ${i} II`));
+  const baseUnits = units.map(unit => token(unit.Nickname.slice(0, -1)));
   const contents = [token('Repeated token'), token('Repeated token'),
     {Name: 'Deck', Nickname: 'Deck', ContainedObjects: [token('Card A'), token('Card B')]},
     bag('Nested bag', [token('Inner token')]), {Name: 'Die_10', Nickname: 'Omen Die', RotationValues: []}];
   const raw = {ObjectStates: [bag('New links', [bag('Units', units), bag('Non-draft parts', [
     ...units.map(unit => bag(unit.Nickname, structuredClone(contents))), bag('Unmatched', [token('Never attached')])
-  ])])]};
+  ]), bag('Base Unit Tiles', baseUnits)])]};
   const {pool} = await f.api('/api/pools/upload', {poolJson: raw, savePool: true});
   assert.deepEqual(pool.unmatchedLinkedBags, ['Unmatched']);
   await f.restart();
@@ -338,7 +345,7 @@ test('named linked contents preview and export intact after completed bag and au
     await f.api(`${room.base}/settings`, {...room.auth, poolId: pool.id, picksPerBag: 1, auctionSpeakerMode: 'none', itemsPerType: {Units: 1, 'Speaker Order': 0}}, room.host.token);
     let state = await room.start();
     const checkPreview = item => {
-      assert.deepEqual(item.linkedItems.map(link => link.name), contents.map(object => object.Nickname));
+      assert.deepEqual(item.linkedItems.map(link => link.name), [...contents.map(object => object.Nickname), item.name.slice(0, -1)]);
       assert.deepEqual(item.linkedItems[2].containedItems.map(child => child.name), ['Card A', 'Card B']);
       assert.equal(item.linkedItems[3].containedItems[0].name, 'Inner token');
       assert.doesNotMatch(JSON.stringify(item), /ttsObject|ContainedObjects|RotationValues/);
@@ -365,10 +372,43 @@ test('named linked contents preview and export intact after completed bag and au
     await f.restart();
     const exported = await f.api(`${room.base}/draft/export`);
     const playerBag = exported.ObjectStates.find(object => object.Nickname === 'Player 1');
-    assert.equal(playerBag.ContainedObjects.length, 1 + contents.length);
-    assert.deepEqual(playerBag.ContainedObjects.slice(1), contents, 'export originals exactly once, including both token copies and intact nested containers');
+    assert.equal(playerBag.ContainedObjects.length, 2 + contents.length);
+    assert.deepEqual(playerBag.ContainedObjects.slice(1, -1), contents, 'export originals exactly once, including both token copies and intact nested containers');
+    assert.deepEqual(playerBag.ContainedObjects.at(-1), baseUnits.find(unit => unit.Nickname === playerBag.ContainedObjects[0].Nickname.slice(0, -1)));
     assert.ok(units.some(unit => unit.Nickname === playerBag.ContainedObjects[0].Nickname));
   }
+});
+
+test('base-unit source repair updates the saved pool durably without replacing draftables or pinned rooms', async t => {
+  const f = await fixture(t);
+  const bag = (Nickname, ContainedObjects) => ({Name: 'Bag', Nickname, ContainedObjects});
+  const tile = Nickname => ({Name: 'Custom_Tile', Nickname, CustomImage: {ImageURL: 'https://example.test/unit.png'}});
+  const raw = {ObjectStates: [bag('Repair source', [bag('Units', [tile('Unit II')])])]};
+  const {pool} = await f.api('/api/pools/upload', {poolJson: raw, savePool: true});
+  const room = await f.room('bag-passing-default', 1);
+  await f.api(`${room.base}/settings`, {...room.auth, poolId: pool.id, itemsPerType: {Units: 1, 'Speaker Order': 0}}, room.host.token);
+  await room.start();
+  const baseUnit = tile('Unit I');
+  raw.ObjectStates[0].ContainedObjects.push(bag('Base Units', [baseUnit]));
+  const path = `/api/pools/${pool.id}`;
+  const repaired = await f.api(path, {baseUnitSource: raw});
+  assert.equal(repaired.baseUnitLinksAdded, 1);
+  assert.deepEqual(repaired.pool, pool, 'catalog defaults and metadata are preserved');
+  assert.equal((await f.api(path, {baseUnitSource: raw})).baseUnitLinksAdded, 0);
+  await f.restart();
+  const store = createStorage(f.env);
+  const row = (await store.catalog()).find(row => row.id === pool.id);
+  const saved = await store.pool(row.object_key);
+  assert.deepEqual(saved.items[0].linkedItems[0].ttsObject, baseUnit);
+  assert.deepEqual((await room.connect(room.host)).room.draft.currentPlayer.currentBag.items[0].linkedItems, [], 'a running draft retains its pinned source');
+  raw.ObjectStates[0].ContainedObjects[0].ContainedObjects[0].Description = 'Not the same source';
+  const rejected = await f.raw(path, {baseUnitSource: raw, name: 'Should not change'});
+  assert.equal(rejected.status, 400);
+  assert.equal((await rejected.json()).error, 'pool_source_mismatch');
+  assert.equal((await f.api('/api/pools')).pools.find(item => item.id === pool.id).name, pool.name);
+  const newRoom = await f.room('bag-passing-default', 1);
+  await f.api(`${newRoom.base}/settings`, {...newRoom.auth, poolId: pool.id, itemsPerType: {Units: 1, 'Speaker Order': 0}}, newRoom.host.token);
+  assert.equal((await newRoom.start()).draft.currentPlayer.currentBag.items[0].linkedItems[0].name, 'Unit I');
 });
 
 test('a private upload saved from its room pins the new defaults across reloads', async t => {

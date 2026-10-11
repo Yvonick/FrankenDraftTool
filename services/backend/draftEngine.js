@@ -1078,7 +1078,7 @@ async function handleUpdatePublicPool(poolId, request, response) {
   let body;
 
   try {
-    body = await readJsonBody(request);
+    body = await readJsonBody(request, { maxBytes: poolUploadJsonBodyLimit });
   } catch (error) {
     sendJson(response, 400, { error: error.message });
     return;
@@ -1118,6 +1118,7 @@ async function handleUpdatePublicPool(poolId, request, response) {
 
   const updatedPool = updatePublicPool(pool.id, {
     name: body.name === undefined ? pool.name : cleanOptionalName(body.name),
+    baseUnitSource: body.baseUnitSource,
     defaultParameters: {
       maxSeats,
       picksPerBag,
@@ -1127,8 +1128,16 @@ async function handleUpdatePublicPool(poolId, request, response) {
     }
   });
 
+  if (!updatedPool) {
+    sendJson(response, 400, { error: "pool_source_mismatch" });
+    return;
+  }
+
+  const baseUnitLinksAdded = updatedPool.items.reduce((count, item, index) =>
+    count + (item.linkedItems?.length || 0) - (pool.items[index].linkedItems?.length || 0), 0);
   sendJson(response, 200, {
     pool: getPoolSummary(updatedPool),
+    ...(body.baseUnitSource !== undefined ? { baseUnitLinksAdded } : {}),
     pools: listPublicPools().map(getPoolSummary)
   });
 }
