@@ -233,7 +233,7 @@ function itemViewFixture() {
     querySelectorAll(tag) { return this.children.flatMap(child => [ ...(child.tag === tag ? [child] : []), ...child.querySelectorAll(tag) ]); }
     querySelector(tag) { return this.querySelectorAll(tag)[0]; }
   }
-  const context = load(['setIconButton', 'getImageAspect', 'getImageShape', 'setImageRatio', 'createImageCrop', 'renderLinkedPreviewItem', 'renderItemImage', 'inspectItem', 'hasDistinctItemBack', 'renderItemTools', 'renderItemCard', 'renderAuctionDraftedItem'], {
+  const context = load(['setIconButton', 'getImageAspect', 'getImageShape', 'setImageRatio', 'createImageCrop', 'renderLinkedPreviewItem', 'renderItemImage', 'componentPreviewItems', 'inspectItem', 'hasDistinctItemBack', 'renderItemTools', 'renderItemCard', 'renderAuctionDraftedItem'], {
     document: {createElement: tag => new MediaElement(tag), querySelector: id => {
       if (!nodes.has(id)) nodes.set(id, new MediaElement('div')); return nodes.get(id);
     }}, window: {innerWidth: 1200, innerHeight: 800, frankenIcon: () => new MediaElement('svg')},
@@ -369,6 +369,22 @@ test('image crops preserve loaded aspect ratios and thumbnails do not preload ba
   assert.equal(frame.properties['--crop-aspect'], '1');
   assert.equal(frame.properties['--image-ratio'], '1');
   assert.equal(frame.querySelectorAll('button').length, 0, 'actions are outside the picture and its hover target');
+});
+
+test('attached-component previews show cards inside decks and bags without duplicating the container', () => {
+  const {context, nodes} = itemViewFixture();
+  const token = {name: 'Token', imageUrl: 'token'};
+  const item = {name: 'Ability', linkedItems: [token, {...token, id: 'second-copy'},
+    {name: 'Deck', containedItems: [{name: 'Card', imageUrl: 'card'}]},
+    {name: 'Bag', containedItems: [{name: 'Nested bag', containedItems: [{name: 'Die', sourceObjectType: 'Die_10'}]}]}]};
+  context.inspectItem(item, 'components');
+  const sections = nodes.get('#inspector-images').children;
+  assert.deepEqual(Array.from(sections, section => section.children[0].textContent), ['Token', 'Token', 'Card', 'Die']);
+  assert.equal(sections.length, 4);
+  assert.equal(item.linkedItems[2].containedItems.length, 1);
+  const warnings = load(['linkedImportWarning']);
+  assert.equal(warnings.linkedImportWarning({}), '');
+  assert.match(warnings.linkedImportWarning({unmatchedLinkedBags: ['Inspired Initative']}), /Inspired Initative/);
 });
 
 test('table roster groups player identity, status and admin controls in compact rows', () => {

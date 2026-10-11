@@ -30,8 +30,10 @@ test('system fronts and backs remain separate crops and tile secondary images ar
 test('saved pools recover previously omitted backs without editing their original TTS objects or attachment rules', () => {
   const raw = wrap('Home Systems', [{...tile, Description: 'Non-draft: Token\nBase Unit: Unit I'}]);
   raw.ObjectStates[0].ContainedObjects.push(
-    {Name: 'Bag', Nickname: 'Non-draft', ContainedObjects: [{Name: 'Custom_Tile', Nickname: 'Token', CustomImage: {ImageURL: 'https://example.test/token.png'}}]},
-    {Name: 'Bag', Nickname: 'Base Units', ContainedObjects: [{...card(true), Nickname: 'Unit I'}]}
+    {Name: 'Bag', Nickname: 'Non-draft parts', ContainedObjects: [{Name: 'Bag', Nickname: 'Home system', ContainedObjects: [
+      {Name: 'Custom_Tile', Nickname: 'Token', CustomImage: {ImageURL: 'https://example.test/token.png'}},
+      {...card(true), Nickname: 'Unit I'}
+    ]}]}
   );
   const original = registry().parseTtsPool(raw);
   original.items[0].imageSecondaryUrl = null;

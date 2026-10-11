@@ -419,6 +419,7 @@ function cloneItem(item) {
     sourceObjectType: item.sourceObjectType,
     metaType: item.metaType,
     order: item.order,
+    ...(item.containedItems?.length ? { containedItems: item.containedItems.map(cloneItem) } : {}),
     linkedItems: Array.isArray(item.linkedItems)
       ? item.linkedItems.map(cloneItem)
       : []
@@ -472,6 +473,7 @@ function addItemsToIndex(index, items = []) {
 
     index.set(item.id, item);
     addItemsToIndex(index, item.linkedItems || []);
+    addItemsToIndex(index, item.containedItems || []);
   }
 }
 
@@ -553,6 +555,7 @@ function getItemSnapshot(item) {
     metaType: item.metaType,
     order: item.order,
     isWildcard: isWildcardItem(item),
+    ...(item.containedItems?.length ? { containedItems: item.containedItems.map(getItemSnapshot) } : {}),
     linkedItems: Array.isArray(item.linkedItems)
       ? item.linkedItems.map(getItemSnapshot)
       : []

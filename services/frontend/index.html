@@ -2291,6 +2291,10 @@
         } finally { homeRoomsPending = false; }
       }
 
+      function componentPreviewItems(items = []) {
+        return items.flatMap(item => item.containedItems?.length ? componentPreviewItems(item.containedItems) : [item]);
+      }
+
       function inspectItem(item, mode = "zoom") {
         const suffix = mode === "back" ? " / Front & Back" : mode === "components" ? " / Attached components" : mode === "description" ? " / Description" : "";
         document.querySelector("#inspector-title").textContent = item.name + suffix;
@@ -2300,7 +2304,7 @@
         const list = document.querySelector("#inspector-images"); list.replaceChildren();
         list.dataset.view = mode;
         list.hidden = mode === "description";
-        const components = mode === "description" ? [] : mode === "components" ? (item.linkedItems || []) : mode === "back"
+        const components = mode === "description" ? [] : mode === "components" ? componentPreviewItems(item.linkedItems) : mode === "back"
           ? (item.imageSecondaryUrl ? [item, { ...item, imageUrl: item.imageSecondaryUrl, imageSheet: item.imageSecondarySheet || null }] : [])
           : [item];
         if (!components.length && mode !== "description") {
@@ -3201,6 +3205,12 @@
         return "Pool upload failed.";
       }
 
+      function linkedImportWarning(pool) {
+        return pool.unmatchedLinkedBags?.length
+          ? ` Linked-component bags with no matching draftable item: ${pool.unmatchedLinkedBags.join(", ")}. Check their names in the JSON.`
+          : "";
+      }
+
       async function uploadPoolFile(file) {
         if (!file) {
           return;
@@ -3246,6 +3256,7 @@
           roomMessage.textContent = selected
             ? `${count} items across ${data.pool.itemTypes.length} types imported. This pool is room-only until you save it.`
             : "Pool uploaded, but selecting it was not confirmed. Retry saving the room settings.";
+          roomMessage.textContent += linkedImportWarning(data.pool);
         } catch (error) {
           poolUploadLabel.textContent = "Drop JSON or choose file";
           roomMessage.textContent = poolUploadErrorMessage(error.message);
@@ -3287,6 +3298,7 @@
           renderPublicPools();
           publicPoolUploadLabel.textContent = `${data.pool.name} uploaded`;
           poolsMessage.textContent = `${data.pool.itemTypes.reduce((total, type) => total + type.itemCount, 0)} items across ${data.pool.itemTypes.length} types imported and saved to the public library.`;
+          poolsMessage.textContent += linkedImportWarning(data.pool);
         } catch (error) {
           publicPoolUploadLabel.textContent = "Drop JSON or choose file";
           poolsMessage.textContent = poolUploadErrorMessage(error.message);

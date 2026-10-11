@@ -169,9 +169,11 @@ test('back images and attached components survive bag drafts, auctions, legacy r
     Name: 'CardCustom', Nickname: `Unit ${index}`, Description: 'Non-draft: Token', CardID: 100 + index,
     CustomDeck: {'1': {FaceURL: 'https://example.test/front.png', BackURL: 'https://example.test/back.png', NumWidth: 2, NumHeight: 2, UniqueBack: true}}
   }));
-  raw.ObjectStates[0].ContainedObjects.push({Name: 'Bag', Nickname: 'Non-draft', ContainedObjects: [
-    {Name: 'Custom_Tile', Nickname: 'Token', CustomImage: {ImageURL: 'https://example.test/token.png'}}
-  ]});
+  raw.ObjectStates[0].ContainedObjects.push({Name: 'Bag', Nickname: 'Non-draft parts', ContainedObjects:
+    Array.from({length: 4}, (_, index) => ({Name: 'Bag', Nickname: `Unit ${index}`, ContainedObjects: [
+      {Name: 'Custom_Tile', Nickname: 'Token', CustomImage: {ImageURL: 'https://example.test/token.png'}}
+    ]}))
+  });
   const {pool} = await f.api('/api/pools/upload', {poolJson: raw, savePool: true});
   const assertMedia = item => {
     assert.equal(item.imageSecondaryUrl, 'https://example.test/back.png');
@@ -209,6 +211,59 @@ test('back images and attached components survive bag drafts, auctions, legacy r
       state = await f.api(`${room.base}/draft/auction/undo`, room.auth, room.host.token);
       assertMedia(state.draft.auction.currentNomination.items.find(item => item.id === pick.id));
     }
+  }
+});
+
+test('named linked contents preview and export intact after completed bag and auction drafts', async t => {
+  const f = await fixture(t);
+  const bag = (Nickname, ContainedObjects) => ({Name: 'Bag', Nickname, ContainedObjects});
+  const token = name => ({Name: 'Custom_Tile', Nickname: name, CustomImage: {ImageURL: 'https://example.test/token.png'}});
+  const units = Array.from({length: 4}, (_, i) => token(`Unit ${i}`));
+  const contents = [token('Repeated token'), token('Repeated token'),
+    {Name: 'Deck', Nickname: 'Deck', ContainedObjects: [token('Card A'), token('Card B')]},
+    bag('Nested bag', [token('Inner token')]), {Name: 'Die_10', Nickname: 'Omen Die', RotationValues: []}];
+  const raw = {ObjectStates: [bag('New links', [bag('Units', units), bag('Non-draft parts', [
+    ...units.map(unit => bag(unit.Nickname, structuredClone(contents))), bag('Unmatched', [token('Never attached')])
+  ])])]};
+  const {pool} = await f.api('/api/pools/upload', {poolJson: raw, savePool: true});
+  assert.deepEqual(pool.unmatchedLinkedBags, ['Unmatched']);
+  await f.restart();
+  assert.deepEqual((await f.api('/api/pools')).pools.find(item => item.id === pool.id).unmatchedLinkedBags, ['Unmatched']);
+  for (const method of ['bag-passing-default', 'nomination-auction']) {
+    const room = await f.room(method, 1);
+    await f.api(`${room.base}/settings`, {...room.auth, poolId: pool.id, picksPerBag: 1, auctionSpeakerMode: 'none', itemsPerType: {Units: 1, 'Speaker Order': 0}}, room.host.token);
+    let state = await room.start();
+    const checkPreview = item => {
+      assert.deepEqual(item.linkedItems.map(link => link.name), contents.map(object => object.Nickname));
+      assert.deepEqual(item.linkedItems[2].containedItems.map(child => child.name), ['Card A', 'Card B']);
+      assert.equal(item.linkedItems[3].containedItems[0].name, 'Inner token');
+      assert.doesNotMatch(JSON.stringify(item), /ttsObject|ContainedObjects|RotationValues/);
+    };
+    if (method === 'bag-passing-default') {
+      const current = state.draft.currentPlayer.currentBag;
+      checkPreview(current.items[0]);
+      state = await f.api(`${room.base}/draft/pick`, {playerId: room.host.id, bagId: current.id, itemIds: [current.items[0].id]}, room.host.token);
+    } else {
+      const act = (action, data = {}) => f.api(`${room.base}/draft/auction/${action}`, {playerId: room.host.id, ...data}, room.host.token);
+      state = await act('nominate', {type: 'Units'});
+      checkPreview(state.draft.auction.currentNomination.items[0]);
+      state = await act('mulligan', {mulligan: false});
+      state = await act('ban', {itemId: null});
+      state = await act('bid', {first: 0, second: 0, tie: 0});
+      const picked = state.draft.auction.currentNomination.items[0];
+      await act('pick', {itemId: picked.id});
+      await f.restart();
+      state = await f.api(`${room.base}/draft/auction/undo`, room.auth, room.host.token);
+      checkPreview(state.draft.auction.currentNomination.items.find(item => item.id === picked.id));
+      state = await act('pick', {itemId: picked.id});
+    }
+    assert.equal(state.draft.status, 'complete');
+    await f.restart();
+    const exported = await f.api(`${room.base}/draft/export`);
+    const playerBag = exported.ObjectStates.find(object => object.Nickname === 'Player 1');
+    assert.equal(playerBag.ContainedObjects.length, 1 + contents.length);
+    assert.deepEqual(playerBag.ContainedObjects.slice(1), contents, 'export originals exactly once, including both token copies and intact nested containers');
+    assert.ok(units.some(unit => unit.Nickname === playerBag.ContainedObjects[0].Nickname));
   }
 });
 

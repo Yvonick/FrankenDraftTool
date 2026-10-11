@@ -174,85 +174,38 @@ function extractTtsItem(item, type, poolId, index, options = {}) {
     ...getBackImageData(type, item),
     imageSheet: getSystemTileImageSheet(type, item) || image.imageSheet,
     sourceObjectType: item.Name || "Unknown",
-    ttsObject: cloneJson(item)
+    ...(options.previewOnly ? {} : { ttsObject: cloneJson(item) })
   };
 }
 
-function parseLinkedItemReferences(description) {
-  const references = [];
-  const pattern = /(?:^|\n)\s*(Non-draft|Base Unit)\s*:\s*([^\n]+)/gi;
-  let match;
-
-  while ((match = pattern.exec(description || "")) !== null) {
-    const kind = /^non/i.test(match[1]) ? "nonDraft" : "baseUnit";
-    const names = match[2]
-      .split(/[,;]/)
-      .map((name) => name.trim())
-      .filter(Boolean);
-
-    for (const name of names) {
-      references.push({ kind, name });
-    }
-  }
-
-  return references;
-}
-
-function addLinkedItemToIndex(index, kind, poolId, item, counter) {
-  const name = objectDisplayName(item);
-
-  if (!name) {
-    return counter;
-  }
-
-  const parsed = extractTtsItem(item, kind === "baseUnit" ? "Base Unit" : "Non-draft", poolId, counter, {
+function extractLinkedComponent(item, poolId, counter, previewOnly = false) {
+  const parsed = extractTtsItem(item, "Non-draft", poolId, counter.value++, {
     allowMissingImage: true,
-    idPrefix: kind === "baseUnit" ? "base-unit" : "non-draft"
+    idPrefix: "non-draft",
+    previewOnly
   });
-
-  if (!parsed) {
-    return counter;
+  if (item.ContainedObjects?.length) {
+    // Keep each container intact for export; only lightweight child metadata is
+    // needed to preview its contents, not another copy of every raw TTS object.
+    parsed.containedItems = item.ContainedObjects.map(child => extractLinkedComponent(child, poolId, counter, true));
   }
-
-  const key = normalizeReferenceName(name);
-
-  if (!index[kind].has(key)) {
-    index[kind].set(key, []);
-  }
-
-  index[kind].get(key).push(parsed);
-  return counter + 1;
-}
-
-function collectLinkedItems(item, index, kind, poolId, counter) {
-  let nextCounter = addLinkedItemToIndex(index, kind, poolId, item, counter);
-
-  for (const child of item.ContainedObjects || []) {
-    nextCounter = collectLinkedItems(child, index, kind, poolId, nextCounter);
-  }
-
-  return nextCounter;
+  return parsed;
 }
 
 function createLinkedItemIndex(root, poolId) {
-  const index = {
-    nonDraft: new Map(),
-    baseUnit: new Map()
-  };
-  let counter = 1;
+  const index = new Map();
+  const counter = { value: 0 };
 
   for (const bag of root.ContainedObjects || []) {
-    const name = bag.Nickname || bag.Name || "";
-    const kind = isNonDraftBagName(name)
-      ? "nonDraft"
-      : (isBaseUnitBagName(name) ? "baseUnit" : null);
-
-    if (!kind || bag.Name !== "Bag" || !Array.isArray(bag.ContainedObjects)) {
+    if (!isNonDraftBagName(bag.Nickname) || bag.Name !== "Bag" || !Array.isArray(bag.ContainedObjects)) {
       continue;
     }
 
-    for (const item of bag.ContainedObjects) {
-      counter = collectLinkedItems(item, index, kind, poolId, counter);
+    for (const linkedBag of bag.ContainedObjects) {
+      const key = normalizeReferenceName(linkedBag.Nickname);
+      if (linkedBag.Name !== "Bag" || !key || !Array.isArray(linkedBag.ContainedObjects)) continue;
+      if (!index.has(key)) index.set(key, { name: linkedBag.Nickname.trim(), items: [] });
+      index.get(key).items.push(...linkedBag.ContainedObjects.map(item => extractLinkedComponent(item, poolId, counter)));
     }
   }
 
@@ -260,23 +213,7 @@ function createLinkedItemIndex(root, poolId) {
 }
 
 function getLinkedItemsForTtsItem(item, linkedItemIndex) {
-  const linkedItems = [];
-  const seenIds = new Set();
-
-  for (const reference of parseLinkedItemReferences(item.Description || "")) {
-    const matches = linkedItemIndex[reference.kind].get(normalizeReferenceName(reference.name)) || [];
-
-    for (const match of matches) {
-      if (seenIds.has(match.id)) {
-        continue;
-      }
-
-      seenIds.add(match.id);
-      linkedItems.push(match);
-    }
-  }
-
-  return linkedItems;
+  return linkedItemIndex.get(normalizeReferenceName(item.Nickname))?.items || [];
 }
 
 function shouldUseTtsBag(bag) {
@@ -336,12 +273,14 @@ function parseTtsPool(rawJson, fallbackName) {
     return null;
   }
 
+  const draftableNames = new Set(items.map(item => normalizeReferenceName(item.ttsObject.Nickname)));
   return {
     id: poolId,
     name: poolName,
     source: "tts",
     types,
-    items
+    items,
+    unmatchedLinkedBags: [...linkedItemIndex].filter(([key]) => !draftableNames.has(key)).map(([, bag]) => bag.name)
   };
 }
 
@@ -375,7 +314,8 @@ function normalizePoolItem(item) {
       imageSecondaryUrl: resolveAssetUrl(item.imageSecondaryUrl), imageSecondarySheet: item.imageSecondarySheet || null
     }),
     imageSheet,
-    linkedItems
+    linkedItems,
+    ...(item.containedItems?.length ? { containedItems: item.containedItems.map(normalizePoolItem) } : {})
   };
 }
 
@@ -480,6 +420,7 @@ function serializePool(pool) {
     public: Boolean(pool.public),
     types: normalizedPool.types,
     items: normalizedPool.items,
+    unmatchedLinkedBags: normalizedPool.unmatchedLinkedBags || [],
     defaultParameters: normalizeDefaultParameters(normalizedPool, pool.defaultParameters)
   };
 }
@@ -604,6 +545,7 @@ function getPoolSummary(pool) {
     name: pool.name,
     source: pool.source || "generated",
     public: Boolean(pool.public),
+    unmatchedLinkedBags: pool.unmatchedLinkedBags || [],
     itemTypes: defaultParameters.typeOrder.map((type) => ({
       type,
       itemCount: isSpeakerOrderType(type)
