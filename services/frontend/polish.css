@@ -208,14 +208,16 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 .modal { background: var(--space-1); border-radius: 8px; box-shadow: 0 16px 64px #0008; }
 .modal p { line-height: 1.5; }
 .secondary-copy { font-size: .875rem; }
-.inspector { width: min(100%, 68rem); }
-#inspector-images { display: flex; align-items: start; gap: 1rem; overflow-x: auto; }
-#inspector-images[data-view="components"] { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); overflow-x: visible; }
-#inspector-images:not([data-view="components"]) .inspector-component { flex: 0 1 42rem; margin: auto; }
-.inspector-component { flex: 1 0 min(100%, 15rem); display: grid; gap: .5rem; }
-.inspector-component:first-child { flex-basis: min(100%, 24rem); }
-.inspector-component .item-image-frame { max-height: 65dvh; width: min(100%, calc(65dvh * var(--image-ratio, 1))); justify-self: center; }
-#inspector-description { white-space: pre-wrap; }
+.inspector { width: fit-content; min-width: min(100%, 16rem); max-width: min(100%, 68rem); grid-template-columns: minmax(0, 1fr); padding: .875rem; gap: .75rem; }
+.inspector > .section-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; contain: inline-size; }
+#inspector-title { font-size: 1rem; overflow-wrap: anywhere; }
+#inspector-images { display: flex; align-items: start; gap: .75rem; width: max-content; max-width: 100%; }
+#inspector-images[data-view="components"] { flex-wrap: wrap; --inspector-image-width: 22rem; --inspector-image-height: 50dvh; }
+.inspector-component { flex: 0 1 auto; min-width: 0; max-width: 100%; display: grid; grid-template-columns: minmax(0, 1fr); gap: .375rem; }
+.inspector-component > strong { contain: inline-size; overflow-wrap: anywhere; font-size: .875rem; }
+.inspector-component .item-image-frame { width: min(var(--inspector-image-width, 36rem), calc(var(--inspector-image-height, 65dvh) * var(--image-ratio, 1))); max-width: 100%; }
+.inspector-component .item-image-frame:is(.failed, .without-image) { width: 16rem; min-height: 4rem; aspect-ratio: auto; }
+#inspector-description { contain: inline-size; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-size: .875rem; }
 .modal-backdrop:has(.inspector) .item-preview { display: none; }
 @media (max-width: 1050px) {
   .auction-layout { grid-template-columns: minmax(0,1.5fr) minmax(17rem,1fr); }

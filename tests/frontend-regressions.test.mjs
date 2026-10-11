@@ -283,12 +283,16 @@ test('zoom, back and attachments show distinct views with the proper crop and no
   const before = structuredClone(item);
   context.inspectItem(item, 'back');
   let list = nodes.get('#inspector-images');
-  assert.equal(list.children.length, 1);
-  assert.equal(list.querySelectorAll('img')[0].src, 'texture');
-  assert.equal(list.children[0].children[1].children[0].properties['--sheet-left'], '-100%');
-  assert.match(nodes.get('#inspector-title').textContent, /Back/);
+  assert.equal(list.children.length, 2);
+  assert.equal(list.dataset.view, 'back');
+  assert.deepEqual(Array.from(list.children, section => section.children[0].textContent), ['Front', 'Back']);
+  assert.deepEqual(Array.from(list.querySelectorAll('img'), image => image.src), ['texture', 'texture']);
+  assert.equal(list.children[0].children[1].children[0].properties['--sheet-left'], '0%');
+  assert.equal(list.children[1].children[1].children[0].properties['--sheet-left'], '-100%');
+  assert.match(nodes.get('#inspector-title').textContent, /Front & Back/);
   context.inspectItem({...item, imageSecondaryUrl: 'single-back', imageSecondarySheet: null}, 'back');
-  assert.equal(list.children[0].children[1].children[0].properties['--sheet-left'], undefined, 'a shared back is not cropped like the front');
+  assert.equal(list.querySelectorAll('img')[1].src, 'single-back');
+  assert.equal(list.children[1].children[1].children[0].properties['--sheet-left'], undefined, 'a shared back is not cropped like the front');
   context.inspectItem(item, 'zoom');
   assert.equal(list.children.length, 1);
   assert.equal(list.children[0].children[1].children[0].properties['--sheet-left'], '0%');
@@ -299,6 +303,23 @@ test('zoom, back and attachments show distinct views with the proper crop and no
   assert.deepEqual(item, before);
   context.inspectItem({name: 'Empty', linkedItems: []}, 'components');
   assert.match(list.children[0].textContent, /No attached components/);
+});
+
+test('item inspector hides empty descriptions and duplicate zoom captions without losing component labels', () => {
+  const {context, nodes} = itemViewFixture();
+  context.inspectItem({name: 'Item', content: '  ', imageUrl: 'front'});
+  const list = nodes.get('#inspector-images');
+  const description = nodes.get('#inspector-description');
+  assert.equal(description.hidden, true);
+  assert.equal(list.children[0].children[0].hidden, true);
+  context.inspectItem({name: 'Item', content: 'Non-draft: Token', linkedItems: [{name: 'Token'}]}, 'components');
+  assert.equal(description.hidden, false);
+  assert.equal(description.textContent, 'Non-draft: Token');
+  assert.equal(list.children[0].children[0].hidden, false);
+  assert.equal(list.children[0].children[0].textContent, 'Token');
+  assert.match(list.children[0].children[1].className, /without-image/);
+  context.inspectItem({name: 'Item', imageUrl: 'front'});
+  assert.equal(description.hidden, true, 'descriptions are cleared between items');
 });
 
 test('image crops preserve loaded aspect ratios and thumbnails do not preload backs', () => {

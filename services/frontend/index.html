@@ -2292,22 +2292,26 @@
       }
 
       function inspectItem(item, mode = "zoom") {
-        const suffix = mode === "back" ? " / Back" : mode === "components" ? " / Attached components" : "";
+        const suffix = mode === "back" ? " / Front & Back" : mode === "components" ? " / Attached components" : "";
         document.querySelector("#inspector-title").textContent = item.name + suffix;
-        document.querySelector("#inspector-description").textContent = item.content || "";
+        const description = document.querySelector("#inspector-description");
+        description.textContent = item.content || "";
+        description.hidden = !description.textContent.trim();
         const list = document.querySelector("#inspector-images"); list.replaceChildren();
         list.dataset.view = mode;
         const components = mode === "components" ? (item.linkedItems || []) : mode === "back"
-          ? (item.imageSecondaryUrl ? [{ ...item, imageUrl: item.imageSecondaryUrl, imageSheet: item.imageSecondarySheet || null }] : [])
+          ? (item.imageSecondaryUrl ? [item, { ...item, imageUrl: item.imageSecondaryUrl, imageSheet: item.imageSecondarySheet || null }] : [])
           : [item];
         if (!components.length) {
           const empty = document.createElement("p");
           empty.textContent = mode === "back" ? "No back image available." : "No attached components found.";
           list.append(empty);
         }
-        for (const component of components) {
+        for (const [index, component] of components.entries()) {
           const section = document.createElement("section"); section.className = "inspector-component";
-          const title = document.createElement("strong"); title.textContent = component.name;
+          const title = document.createElement("strong");
+          title.textContent = mode === "back" ? (index === 0 ? "Front" : "Back") : component.name;
+          title.hidden = mode === "zoom";
           const frame = document.createElement("div"); frame.className = `item-image-frame ${getImageShape(component)}`;
           const [width, height] = getImageAspect(component).split("/").map(Number);
           frame.style.setProperty("--image-aspect", getImageAspect(component));
@@ -2319,7 +2323,7 @@
             crop.querySelector("img").addEventListener("error", () => frame.classList.add("failed"));
             frame.append(crop, unavailable);
           }
-          else frame.textContent = "Image unavailable";
+          else { frame.classList.add("without-image"); frame.textContent = "Image unavailable"; }
           section.append(title, frame); list.append(section);
         }
         openModal(inspectorModal, inspectorClose);
