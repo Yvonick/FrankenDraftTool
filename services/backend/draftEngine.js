@@ -34,6 +34,7 @@ const sseHeartbeatMs = 25000;
 const emptyRoomTtlMs = 60 * 60 * 1000;
 const roomCleanupIntervalMs = 10 * 60 * 1000;
 const compactItemRefKey = "__frankenItemRef";
+let legacySnapshotItemIndex = null;
 
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, {
@@ -413,6 +414,7 @@ function cloneItem(item) {
     type: item.type,
     imageUrl: item.imageUrl,
     imageSecondaryUrl: item.imageSecondaryUrl,
+    imageSecondarySheet: item.imageSecondarySheet,
     imageSheet: item.imageSheet,
     sourceObjectType: item.sourceObjectType,
     metaType: item.metaType,
@@ -528,13 +530,24 @@ function hydrateAuctionUndoDraft(snapshot) {
 }
 
 function getItemSnapshot(item) {
+  let media = item;
+  // Rooms started before back-sheet metadata existed keep their draft state;
+  // recover only the missing presentation fields from their pinned pool.
+  if (item.imageSecondarySheet === undefined && !item.metaType) {
+    if (!legacySnapshotItemIndex) {
+      legacySnapshotItemIndex = new Map();
+      for (const room of rooms.values()) addItemsToIndex(legacySnapshotItemIndex, getPool(room.draft?.poolId)?.items || []);
+    }
+    media = legacySnapshotItemIndex.get(item.id) || item;
+  }
   const snapshot = {
     id: item.id,
     name: item.name,
     content: item.content,
     type: item.type,
     imageUrl: item.imageUrl,
-    imageSecondaryUrl: item.imageSecondaryUrl,
+    imageSecondaryUrl: media.imageSecondaryUrl,
+    imageSecondarySheet: media.imageSecondarySheet || null,
     imageSheet: item.imageSheet,
     sourceObjectType: item.sourceObjectType,
     metaType: item.metaType,

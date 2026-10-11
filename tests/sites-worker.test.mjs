@@ -162,6 +162,56 @@ test('pool uploads, edits, deletion and active draft pool versions survive resta
   assert.ok((await exported.json()).ObjectStates.length > 0);
 });
 
+test('back images and attached components survive bag drafts, auctions, legacy room reloads and undo', async t => {
+  const f = await fixture(t);
+  const raw = structuredClone(tinyPool);
+  raw.ObjectStates[0].ContainedObjects[0].ContainedObjects = Array.from({length: 4}, (_, index) => ({
+    Name: 'CardCustom', Nickname: `Unit ${index}`, Description: 'Non-draft: Token', CardID: 100 + index,
+    CustomDeck: {'1': {FaceURL: 'https://example.test/front.png', BackURL: 'https://example.test/back.png', NumWidth: 2, NumHeight: 2, UniqueBack: true}}
+  }));
+  raw.ObjectStates[0].ContainedObjects.push({Name: 'Bag', Nickname: 'Non-draft', ContainedObjects: [
+    {Name: 'Custom_Tile', Nickname: 'Token', CustomImage: {ImageURL: 'https://example.test/token.png'}}
+  ]});
+  const {pool} = await f.api('/api/pools/upload', {poolJson: raw, savePool: true});
+  const assertMedia = item => {
+    assert.equal(item.imageSecondaryUrl, 'https://example.test/back.png');
+    assert.deepEqual(item.imageSecondarySheet, item.imageSheet);
+    assert.equal(item.linkedItems[0].name, 'Token');
+    assert.equal(item.linkedItems[0].ttsObject, undefined);
+  };
+  for (const method of ['bag-passing-default', 'nomination-auction']) {
+    const room = await f.room(method, 1);
+    await f.api(`${room.base}/settings`, {...room.auth, poolId: pool.id, picksPerBag: 1, auctionSpeakerMode: 'none', itemsPerType: {Units: 1, Abilities: 1, 'Speaker Order': 0}}, room.host.token);
+    await room.start();
+    if (method === 'bag-passing-default') {
+      const initial = (await room.connect(room.host)).room.draft.currentPlayer.currentBag.items.find(item => item.type === 'Units');
+      assertMedia(initial);
+      const store = createStorage(f.env), saved = await store.room(room.roomNumber);
+      const stripMedia = value => {
+        if (!value || typeof value !== 'object') return;
+        if ('imageUrl' in value) { delete value.imageSecondarySheet; value.imageSecondaryUrl = null; }
+        for (const child of Object.values(value)) stripMedia(child);
+      };
+      stripMedia(saved.state.draft);
+      await store.commit({room: {id: room.roomNumber, expected: saved.revision, state: saved.state}});
+      await f.restart();
+      assertMedia((await room.connect(room.host)).room.draft.currentPlayer.currentBag.items.find(item => item.type === 'Units'));
+    } else {
+      const act = (action, body = {}) => f.api(`${room.base}/draft/auction/${action}`, {playerId: room.host.id, ...body}, room.host.token);
+      let state = await act('nominate', {type: 'Units'});
+      assertMedia(state.draft.auction.currentNomination.items[0]);
+      state = await act('mulligan', {mulligan: false});
+      state = await act('ban', {itemId: null});
+      state = await act('bid', {first: 0, second: 0, tie: 0});
+      const pick = state.draft.auction.currentNomination.items[0];
+      await act('pick', {itemId: pick.id});
+      await f.restart();
+      state = await f.api(`${room.base}/draft/auction/undo`, room.auth, room.host.token);
+      assertMedia(state.draft.auction.currentNomination.items.find(item => item.id === pick.id));
+    }
+  }
+});
+
 test('a private upload saved from its room pins the new defaults across reloads', async t => {
   const f = await fixture(t);
   const uploaded = await f.api('/api/pools/upload', { poolJson: tinyPool, savePool: false });

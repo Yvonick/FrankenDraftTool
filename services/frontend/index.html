@@ -2291,11 +2291,21 @@
         } finally { homeRoomsPending = false; }
       }
 
-      function inspectItem(item) {
-        document.querySelector("#inspector-title").textContent = item.name;
+      function inspectItem(item, mode = "zoom") {
+        const suffix = mode === "back" ? " / Back" : mode === "components" ? " / Attached components" : "";
+        document.querySelector("#inspector-title").textContent = item.name + suffix;
         document.querySelector("#inspector-description").textContent = item.content || "";
         const list = document.querySelector("#inspector-images"); list.replaceChildren();
-        for (const component of [item, ...(item.linkedItems || [])]) {
+        list.dataset.view = mode;
+        const components = mode === "components" ? (item.linkedItems || []) : mode === "back"
+          ? (item.imageSecondaryUrl ? [{ ...item, imageUrl: item.imageSecondaryUrl, imageSheet: item.imageSecondarySheet || null }] : [])
+          : [item];
+        if (!components.length) {
+          const empty = document.createElement("p");
+          empty.textContent = mode === "back" ? "No back image available." : "No attached components found.";
+          list.append(empty);
+        }
+        for (const component of components) {
           const section = document.createElement("section"); section.className = "inspector-component";
           const title = document.createElement("strong"); title.textContent = component.name;
           const frame = document.createElement("div"); frame.className = `item-image-frame ${getImageShape(component)}`;
@@ -2313,6 +2323,40 @@
           section.append(title, frame); list.append(section);
         }
         openModal(inspectorModal, inspectorClose);
+      }
+
+      function hasDistinctItemBack(item) {
+        if (!item.imageSecondaryUrl) return false;
+        const cropKey = sheet => [sheet?.columns || 1, sheet?.rows || 1, sheet?.index || 0].join(":");
+        return item.imageSecondaryUrl !== item.imageUrl || cropKey(item.imageSecondarySheet) !== cropKey(item.imageSheet);
+      }
+
+      function renderItemTools(item) {
+        const tools = document.createElement("div");
+        tools.className = "item-tools";
+        tools.setAttribute("role", "group");
+        tools.setAttribute("aria-label", `${item.name} views`);
+        for (const [mode, icon, label, available] of [
+          ["zoom", "zoom-in", "Zoom in", true],
+          ["back", "flip-horizontal", "Show back", hasDistinctItemBack(item)],
+          ["components", "layers", "Show attached components", Boolean(item.linkedItems?.length)]
+        ]) {
+          if (!available) continue;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "secondary item-tool";
+          button.dataset.itemView = mode;
+          setIconButton(button, icon, `${label}: ${item.name}`);
+          button.setAttribute("aria-haspopup", "dialog");
+          button.addEventListener("pointerdown", event => event.stopPropagation());
+          button.addEventListener("keydown", event => event.stopPropagation());
+          button.addEventListener("click", event => {
+            event.preventDefault(); event.stopPropagation();
+            inspectItem(item, mode);
+          });
+          tools.append(button);
+        }
+        return tools;
       }
 
       function installDisclosure(container, button, content) {
@@ -2588,6 +2632,7 @@
         }
 
         frame.style.setProperty("--crop-aspect", String(ratio));
+        frame.style.setProperty("--image-ratio", String(ratio));
         const maxWidth = Math.min(window.innerWidth * 0.92, 704, window.innerHeight * 0.88 * ratio);
         frame.style.setProperty("--preview-width", `${Math.max(180, maxWidth)}px`);
         frame.classList.toggle("portrait", ratio < 0.9);
@@ -2721,12 +2766,6 @@
         }
 
         frame.append(crop, preview, unavailable);
-        const inspect = document.createElement("button");
-        inspect.type = "button";
-        inspect.className = "secondary inspect-button";
-        setIconButton(inspect, "zoom-in", `Inspect ${item.name}`);
-        inspect.addEventListener("click", event => { event.preventDefault(); event.stopPropagation(); inspectItem(item); });
-        frame.append(inspect);
         return frame;
       }
 
@@ -2785,6 +2824,7 @@
           card.append(content);
         }
 
+        card.append(renderItemTools(item));
         return card;
       }
 
@@ -4171,7 +4211,7 @@
         const meta = document.createElement("span");
         const cost = group.cost ?? 0;
         meta.textContent = `${item.type} - ${cost} credit${cost === 1 ? "" : "s"}`;
-        details.append(name, meta);
+        details.append(name, meta, renderItemTools(item));
         row.append(details);
         return row;
       }
@@ -6232,6 +6272,7 @@
         event.currentTarget.setAttribute("aria-expanded", String(!panel.hidden));
       });
       inspectorClose.addEventListener("click", () => closeModal(inspectorModal));
+      inspectorModal.addEventListener("close", () => document.querySelector("#inspector-images").replaceChildren());
       profileOpen.addEventListener("click", () => { profileName.value = rememberedName; profileStatus.textContent = ""; openModal(profileModal, profileName); });
       document.querySelector("#profile-cancel").addEventListener("click", () => closeModal(profileModal));
       document.querySelector("#profile-form").addEventListener("submit", async event => {

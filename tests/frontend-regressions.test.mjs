@@ -221,6 +221,97 @@ class Element {
   setAttribute(name, value) { this.attributes[name] = value; }
 }
 
+function itemViewFixture() {
+  const nodes = new Map();
+  class MediaElement extends Element {
+    constructor(tag) {
+      super(); this.tag = tag; this.listeners = {}; this.properties = {};
+      this.style = {setProperty: (key, value) => { this.properties[key] = value; }};
+      this.classList = {add: value => { this.className += ` ${value}`; }, toggle() {}};
+    }
+    addEventListener(type, listener) { this.listeners[type] = listener; }
+    querySelectorAll(tag) { return this.children.flatMap(child => [ ...(child.tag === tag ? [child] : []), ...child.querySelectorAll(tag) ]); }
+    querySelector(tag) { return this.querySelectorAll(tag)[0]; }
+  }
+  const context = load(['setIconButton', 'getImageAspect', 'getImageShape', 'setImageRatio', 'createImageCrop', 'renderLinkedPreviewItem', 'renderItemImage', 'inspectItem', 'hasDistinctItemBack', 'renderItemTools', 'renderItemCard', 'renderAuctionDraftedItem'], {
+    document: {createElement: tag => new MediaElement(tag), querySelector: id => {
+      if (!nodes.has(id)) nodes.set(id, new MediaElement('div')); return nodes.get(id);
+    }}, window: {innerWidth: 1200, innerHeight: 800, frankenIcon: () => new MediaElement('svg')},
+    selectedItemIds: new Set(), inspectorModal: {}, inspectorClose: {}, openModal() {}
+  });
+  return {context, nodes};
+}
+
+test('three item icons are available in bag cards and auction rows without changing item selection', () => {
+  const {context} = itemViewFixture();
+  const inspected = [];
+  context.inspectItem = (item, mode) => inspected.push(mode);
+  const item = {id: 'item', name: 'Unit', type: 'Units', imageUrl: 'front', imageSecondaryUrl: 'back', linkedItems: [{name: 'Token'}]};
+  const card = context.renderItemCard(item, {checkable: true});
+  const buttons = card.querySelectorAll('button');
+  assert.deepEqual(Array.from(buttons, button => button.dataset.itemView), ['zoom', 'back', 'components']);
+  const checkbox = card.querySelector('input');
+  for (const button of buttons) {
+    let prevented = false, stopped = false;
+    button.listeners.click({preventDefault() { prevented = true; }, stopPropagation() { stopped = true; }});
+    assert.ok(prevented && stopped);
+    assert.ok(button.title.includes(item.name));
+    assert.equal(button.attributes['aria-haspopup'], 'dialog');
+  }
+  assert.deepEqual(inspected, ['zoom', 'back', 'components']);
+  assert.equal(checkbox.checked, false);
+  assert.equal(context.renderAuctionDraftedItem(item, {cost: 1}).querySelectorAll('button').length, 3);
+  const unavailable = context.renderItemCard({...item, imageUrl: null, imageSecondaryUrl: null, linkedItems: []});
+  assert.deepEqual(Array.from(unavailable.querySelectorAll('button'), button => button.dataset.itemView), ['zoom']);
+});
+
+test('back and attachment icons are omitted when irrelevant, but alternate texture crops count as different backs', () => {
+  const {context} = itemViewFixture();
+  const views = item => Array.from(context.renderItemTools(item).children, button => button.dataset.itemView);
+  const item = {name: 'Item', imageUrl: 'front', imageSecondaryUrl: 'front', linkedItems: []};
+  assert.deepEqual(views(item), ['zoom']);
+  assert.deepEqual(views({...item, imageSecondarySheet: {columns: 1, rows: 1, index: 0}}), ['zoom']);
+  assert.deepEqual(views({...item, imageSecondaryUrl: null, linkedItems: [{name: 'Token'}]}), ['zoom', 'components']);
+  assert.deepEqual(views({...item, imageSecondaryUrl: 'back'}), ['zoom', 'back']);
+  assert.deepEqual(views({...item, imageSheet: {columns: 2, rows: 1, index: 0}, imageSecondarySheet: {columns: 2, rows: 1, index: 1}}), ['zoom', 'back']);
+  assert.deepEqual(views({...item, imageSheet: {columns: 2, rows: 1, index: 1}, imageSecondarySheet: {columns: 2, rows: 1, index: 1}}), ['zoom']);
+});
+
+test('zoom, back and attachments show distinct views with the proper crop and no source mutation', () => {
+  const {context, nodes} = itemViewFixture();
+  const item = {name: 'System', content: 'Non-draft: Token', imageUrl: 'texture', imageSheet: {columns: 2, rows: 1, index: 0}, imageSecondaryUrl: 'texture', imageSecondarySheet: {columns: 2, rows: 1, index: 1}, linkedItems: [{name: 'Token', imageUrl: 'token'}]};
+  const before = structuredClone(item);
+  context.inspectItem(item, 'back');
+  let list = nodes.get('#inspector-images');
+  assert.equal(list.children.length, 1);
+  assert.equal(list.querySelectorAll('img')[0].src, 'texture');
+  assert.equal(list.children[0].children[1].children[0].properties['--sheet-left'], '-100%');
+  assert.match(nodes.get('#inspector-title').textContent, /Back/);
+  context.inspectItem({...item, imageSecondaryUrl: 'single-back', imageSecondarySheet: null}, 'back');
+  assert.equal(list.children[0].children[1].children[0].properties['--sheet-left'], undefined, 'a shared back is not cropped like the front');
+  context.inspectItem(item, 'zoom');
+  assert.equal(list.children.length, 1);
+  assert.equal(list.children[0].children[1].children[0].properties['--sheet-left'], '0%');
+  context.inspectItem(item, 'components');
+  assert.equal(list.dataset.view, 'components');
+  assert.equal(list.querySelectorAll('img')[0].src, 'token');
+  assert.equal(nodes.get('#inspector-description').textContent, item.content);
+  assert.deepEqual(item, before);
+  context.inspectItem({name: 'Empty', linkedItems: []}, 'components');
+  assert.match(list.children[0].textContent, /No attached components/);
+});
+
+test('image crops preserve loaded aspect ratios and thumbnails do not preload backs', () => {
+  const {context} = itemViewFixture();
+  const frame = context.renderItemImage({name: 'System', imageUrl: 'front', imageSecondaryUrl: 'back', imageSheet: {columns: 2, rows: 1, index: 0}});
+  assert.ok(frame.querySelectorAll('img').every(image => image.src === 'front'));
+  const image = frame.querySelector('img');
+  image.naturalWidth = 1600; image.naturalHeight = 800; image.listeners.load();
+  assert.equal(frame.properties['--crop-aspect'], '1');
+  assert.equal(frame.properties['--image-ratio'], '1');
+  assert.equal(frame.querySelectorAll('button').length, 0, 'actions are outside the picture and its hover target');
+});
+
 test('table roster groups player identity, status and admin controls in compact rows', () => {
   const roundTable = new Element(), tableRoster = new Element(), tablePanel = new Element();
   const context = load(['renderTable'], {

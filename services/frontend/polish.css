@@ -143,8 +143,10 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 .item-card.unavailable > strong { color: var(--muted); }
 .item-banner { position: static; overflow-wrap: anywhere; }
 .item-card:has(.item-banner) .selection-control { display: none; }
-.inspect-button { position: absolute; left: .35rem; bottom: .35rem; z-index: 4; width: 2rem; height: 2rem; padding: .4rem; background: #0b1424e8 !important; border-color: #5d6d80 !important; }
-.inspect-button svg { width: 1rem; height: 1rem; }
+.item-tools { display: flex; align-items: center; justify-content: flex-end; gap: .25rem; max-width: 100%; }
+.item-tool.icon-button { width: 1.75rem; min-width: 1.75rem; height: 1.75rem; min-height: 1.75rem; padding: .3rem; border-radius: 4px; background: transparent; color: var(--muted); }
+.item-tool.icon-button:not(:disabled):hover { background: var(--space-2); color: var(--accent); }
+.item-tool.icon-button svg { width: 1rem; height: 1rem; }
 .selection-control { top: .65rem; right: .65rem; }
 #bag-confirmation { position: fixed; bottom: .75rem; left: 50%; transform: translateX(-50%); z-index: 8; display: flex; gap: 1rem; align-items: center; max-width: calc(100% - 2rem); padding: .625rem .75rem; border: 1px solid var(--line-strong); border-radius: 8px; background: #101b2bf5; box-shadow: 0 8px 24px #0005; }
 #bag-confirmation:has(#lock-choice[hidden]) { display: none; }
@@ -166,7 +168,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 .auction-drafted-item { grid-template-columns: 3.25rem minmax(0, 1fr); gap: .75rem; background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: .5rem 0; }
 .auction-drafted-item strong, .auction-drafted-item span { display: block; line-height: 1.4; overflow-wrap: anywhere; }
 .auction-drafted-item .item-image-frame { width: 3.25rem; }
-.auction-drafted-item .inspect-button { width: 1.75rem; height: 1.75rem; left: 0; bottom: 0; }
+.auction-drafted-item .item-tools { justify-content: flex-start; margin-top: .3rem; }
 .auction-drafted-item span { font-size: .875rem; }
 .auction-bid-recap { border: 0; border-top: 1px solid var(--line); padding: 1rem 0 0; background: none; }
 .auction-bid-recap table { width: auto; max-width: 100%; justify-self: start; font-size: .875rem; }
@@ -208,6 +210,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 .secondary-copy { font-size: .875rem; }
 .inspector { width: min(100%, 68rem); }
 #inspector-images { display: flex; align-items: start; gap: 1rem; overflow-x: auto; }
+#inspector-images[data-view="components"] { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); overflow-x: visible; }
+#inspector-images:not([data-view="components"]) .inspector-component { flex: 0 1 42rem; margin: auto; }
 .inspector-component { flex: 1 0 min(100%, 15rem); display: grid; gap: .5rem; }
 .inspector-component:first-child { flex-basis: min(100%, 24rem); }
 .inspector-component .item-image-frame { max-height: 65dvh; width: min(100%, calc(65dvh * var(--image-ratio, 1))); justify-self: center; }
@@ -245,7 +249,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
   .item-stack > .item-card, #auction-items .item-stack > .item-card { flex-basis: var(--item-width); width: var(--item-width); }
 }
 [hidden] { display: none !important; }
-@media (hover: hover) and (pointer: fine) {
-  .inspect-button { opacity: 0; pointer-events: none; }
-  .inspect-button:focus-visible { opacity: 1; pointer-events: auto; }
+@media (pointer: coarse) {
+  .item-tool.icon-button { width: 2rem; min-width: 2rem; height: 2rem; min-height: 2rem; }
 }

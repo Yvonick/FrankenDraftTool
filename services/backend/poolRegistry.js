@@ -55,10 +55,6 @@ function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function shouldKeepSecondaryImage(type) {
-  return !/(?:planet|anomaly|home\s*systems?)/i.test(type);
-}
-
 function shouldCropSystemTileTexture(type, item) {
   if (item?.Name !== "Custom_Model" || !item.CustomMesh?.DiffuseURL) {
     return false;
@@ -148,6 +144,17 @@ function getImageData(item) {
   };
 }
 
+function getBackImageData(type, item) {
+  if (shouldCropSystemTileTexture(type, item)) {
+    return { imageSecondaryUrl: resolveAssetUrl(item.CustomMesh.DiffuseURL),
+      imageSecondarySheet: { columns: 2, rows: 1, index: 1 } };
+  }
+  const image = getImageData(item);
+  const deck = getDeckForCard(item);
+  return { imageSecondaryUrl: resolveAssetUrl(image.imageSecondaryUrl),
+    imageSecondarySheet: deck?.UniqueBack && image.imageSecondaryUrl ? image.imageSheet : null };
+}
+
 function extractTtsItem(item, type, poolId, index, options = {}) {
   const image = getImageData(item);
 
@@ -164,7 +171,7 @@ function extractTtsItem(item, type, poolId, index, options = {}) {
     content: item.Description || "",
     type,
     imageUrl: resolveAssetUrl(image.imageUrl),
-    imageSecondaryUrl: shouldKeepSecondaryImage(type) ? resolveAssetUrl(image.imageSecondaryUrl) : null,
+    ...getBackImageData(type, item),
     imageSheet: getSystemTileImageSheet(type, item) || image.imageSheet,
     sourceObjectType: item.Name || "Unknown",
     ttsObject: cloneJson(item)
@@ -364,6 +371,9 @@ function normalizePoolItem(item) {
 
   return {
     ...item,
+    ...(item.ttsObject ? getBackImageData(item.type, item.ttsObject) : {
+      imageSecondaryUrl: resolveAssetUrl(item.imageSecondaryUrl), imageSecondarySheet: item.imageSecondarySheet || null
+    }),
     imageSheet,
     linkedItems
   };
@@ -474,7 +484,10 @@ function serializePool(pool) {
   };
 }
 
-const draftPools = new Map(initialPools.map((pool) => [pool.id, pool]));
+const draftPools = new Map(initialPools.map((pool) => [pool.id,
+  pool.items?.some((item) => item.imageSecondarySheet === undefined)
+    ? { ...pool, items: normalizePoolItems(pool.items) } : pool
+]));
 const changes = new Map();
 function persistPublicPools() { onChange([...draftPools.values()]); return true; }
 
