@@ -2874,7 +2874,7 @@
       }
 
       function setGroupBasis(wrapper, itemCount, itemBasisRem = 13) {
-        const columns = Math.min(Math.max(itemCount, 1), 6);
+        const columns = Math.max(itemCount, 1);
         wrapper.style.setProperty("--group-columns", columns);
         const basis = (columns * itemBasisRem) + ((columns - 1) * 0.75);
         wrapper.style.setProperty("--group-basis", `${basis}rem`);

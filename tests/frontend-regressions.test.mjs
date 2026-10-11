@@ -16,6 +16,16 @@ function load(names, globals = {}) {
   return context;
 }
 
+test('category sizing retains all items so wrapped types occupy the full available row', () => {
+  const context = load(['setGroupBasis']);
+  const values = new Map();
+  const wrapper = { style: { setProperty: (key, value) => values.set(key, value) } };
+  for (const count of [0, 1, 6, 8, 20]) {
+    context.setGroupBasis(wrapper, count);
+    assert.equal(values.get('--group-columns'), Math.max(count, 1));
+  }
+});
+
 function deferred() {
   let resolve;
   const promise = new Promise(done => { resolve = done; });

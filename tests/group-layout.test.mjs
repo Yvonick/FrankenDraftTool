@@ -60,6 +60,20 @@ test('group layout fits available columns without masonry row spans or replacing
   assert.equal(f.first.style.getPropertyValue('--group-span'), 1);
 });
 
+test('large types fill the available row before the following speaker-order category', () => {
+  const f = fixture();
+  f.first.style.setProperty('--group-columns', 8);
+  f.second.style.setProperty('--group-columns', 1);
+  for (const [width, columns, span] of [[1300, 7, 7], [1100, 6, 6], [1700, 9, 8], [600, 3, 3]]) {
+    f.container.clientWidth = width;
+    f.observers[0].callback();
+    assert.equal(f.container.style.getPropertyValue('--layout-columns'), columns);
+    assert.equal(f.first.style.getPropertyValue('--group-span'), span);
+    assert.equal(f.second.style.getPropertyValue('--group-span'), 1);
+    assert.deepEqual(f.container.children, [f.first, f.second]);
+  }
+});
+
 test('group grids keep source order instead of filling earlier holes with later types', async () => {
   const css = await readFile(new URL('../services/frontend/polish.css', import.meta.url), 'utf8');
   const rule = css.match(/\.item-grid\.compact-groups\s*\{([^}]+)\}/)[1];
