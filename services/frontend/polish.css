@@ -153,6 +153,17 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 .item-banner { position: static; overflow-wrap: anywhere; }
 .item-card:has(.item-banner) .selection-control { display: none; }
 .item-tools { display: flex; align-items: center; justify-content: flex-end; gap: .25rem; max-width: 100%; }
+.item-tools { flex-wrap: wrap; }
+.user-hidden > .item-image-frame { opacity: .5; }
+.user-hidden { border-style: dashed; }
+.player-option { display: inline-flex; align-items: center; gap: .5rem; margin-left: auto; font-size: .875rem; color: var(--muted); }
+.player-option input { width: auto; margin: 0; accent-color: var(--accent); }
+.table-direction { display: inline-flex; justify-content: center; color: var(--accent); line-height: 1; }
+.table-direction svg { width: 1.125rem; height: 1.125rem; }
+#hidden-items-toggle { font-size: .8125rem; min-height: 2.5rem; padding: .4rem .65rem; }
+#bag-drafted-tools > #hidden-items-toggle, #auction-personal-tools > #hidden-items-toggle { order: 2; }
+#bag-drafted-tools > .checklist-control, #auction-personal-tools > .checklist-control { order: 3; }
+#bag-picks-panel > .draft-section-header, #auction-personal-area > .draft-section-header { align-items: flex-start; }
 .item-card > .item-tools { margin-top: auto; }
 .item-tool.icon-button { width: 1.75rem; min-width: 1.75rem; height: 1.75rem; min-height: 1.75rem; padding: .3rem; border-radius: 4px; background: transparent; color: var(--muted); }
 .item-tool.icon-button:not(:disabled):hover { background: var(--space-2); color: var(--accent); }

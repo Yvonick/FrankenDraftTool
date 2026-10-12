@@ -54,6 +54,97 @@ export async function fixture(t) {
   };
 }
 
+test('automatic solo picks reject choices and stale submissions, and preserve history and exports', async t => {
+  const f = await fixture(t), room = await f.room('bag-passing-default', 1);
+  const { pool } = await f.api('/api/pools/upload', { poolJson: tinyPool, savePool: true });
+  await f.api(`${room.base}/settings`, { ...room.auth, poolId: pool.id, picksPerBag: 3,
+    itemsPerType: { Units: 3, Abilities: 0, 'Speaker Order': 0 } }, room.host.token);
+  let state = await room.start();
+  const draftId = state.draft.id;
+  let bag = state.draft.currentPlayer.currentBag;
+  assert.equal(bag.automaticItemIds, null, 'first rotation still requires a choice between three units');
+  const send = (bag, itemIds, automatic = true) => ({ playerId: room.host.id, bagId: bag.id,
+    expectedPickCount: bag.pickCount, itemIds, automatic });
+  assert.equal((await f.raw(`${room.base}/draft/pick`, send(bag, [bag.items[0].id]), room.host.token)).status, 409);
+  state = await f.api(`${room.base}/draft/pick`, send(bag, [bag.items[0].id], false), room.host.token);
+  const previous = bag;
+  bag = state.draft.currentPlayer.currentBag;
+  assert.equal(bag.id, previous.id, 'solo players see the same, now smaller bag');
+  assert.equal(bag.pickCount, 1);
+  assert.equal(bag.automaticItemIds.length, 2);
+  assert.equal((await f.raw(`${room.base}/draft/pick`, send(previous, bag.automaticItemIds), room.host.token)).status, 409);
+  await f.restart();
+  const results = await Promise.all([1, 2].map(() => f.raw(`${room.base}/draft/pick`, send(bag, bag.automaticItemIds), room.host.token)));
+  assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
+  state = (await room.connect(room.host)).room;
+  assert.equal(state.draft.status, 'complete');
+  assert.equal(state.draft.id, draftId);
+  assert.equal(state.draft.revealedDrafts[0].items.length, 3);
+  const entry = (await f.history()).drafts[0];
+  const events = (await f.history(`/${entry.id}/events`)).events.filter(e => e.kind === 'bag_pick');
+  assert.equal(events.length, 2);
+  assert.equal(events[1].automatic, true);
+  assert.equal(events[1].items.length, 2);
+  const exported = await f.api(`${room.base}/draft/export?${new URLSearchParams(room.auth)}`, undefined, room.host.token);
+  assert.equal(exported.ObjectStates.find(o => o.Nickname === 'Player 1').ContainedObjects.length, 3);
+});
+
+test('automatic picks are viewer-scoped and simultaneous players cannot duplicate or lose items', async t => {
+  const f = await fixture(t), room = await f.room();
+  const { pool } = await f.api('/api/pools/upload', { poolJson: tinyPool, savePool: true });
+  await f.api(`${room.base}/settings`, { ...room.auth, poolId: pool.id, picksPerBag: 3,
+    itemsPerType: { Units: 1, Abilities: 1, 'Speaker Order': 0 } }, room.host.token);
+  await room.start();
+  assert.equal((await f.api(room.base)).draft.currentPlayer, null);
+  const views = await Promise.all(room.players.map(player => room.connect(player)));
+  const bag = views[0].room.draft.currentPlayer.currentBag;
+  const forged = await f.raw(`${room.base}/draft/pick`, { playerId: room.host.id, bagId: bag.id,
+    expectedPickCount: bag.pickCount, automatic: true, itemIds: bag.automaticItemIds }, room.players[1].token);
+  assert.equal(forged.status, 403);
+  await Promise.all(room.players.map((player, index) => {
+    const current = views[index].room.draft.currentPlayer.currentBag;
+    assert.equal(current.automaticItemIds.length, 2);
+    return f.api(`${room.base}/draft/pick`, { playerId: player.id, bagId: current.id,
+      expectedPickCount: current.pickCount, itemIds: current.automaticItemIds, automatic: true }, player.token);
+  }));
+  const final = (await room.connect(room.host)).room.draft;
+  assert.equal(final.status, 'complete');
+  assert.equal(new Set(final.revealedDrafts.flatMap(p => p.items.map(i => i.id))).size, 4);
+});
+
+test('automatic empty passes keep bags moving until their remaining items reach a player with capacity', async t => {
+  const f = await fixture(t), room = await f.room();
+  const raw = structuredClone(tinyPool);
+  raw.ObjectStates[0].ContainedObjects.push({ Name: 'Bag', Nickname: 'Tech', ContainedObjects:
+    Array.from({ length: 8 }, (_, index) => ({ Name: 'Custom_Tile', Nickname: `Tech ${index}`, GUID: `c0000${index}`,
+      CustomImage: { ImageURL: `https://example.test/Tech/${index}.png` } })) });
+  const { pool } = await f.api('/api/pools/upload', { poolJson: raw, savePool: true });
+  await f.api(`${room.base}/settings`, { ...room.auth, poolId: pool.id, picksPerBag: 2,
+    itemsPerType: { Units: 1, Abilities: 1, Tech: 1, 'Speaker Order': 0 } }, room.host.token);
+  await room.start();
+  for (const [index, player] of room.players.entries()) {
+    const bag = (await room.connect(player)).room.draft.currentPlayer.currentBag;
+    const types = index === 0 ? ['Units', 'Abilities'] : ['Units', 'Tech'];
+    await f.api(`${room.base}/draft/pick`, { playerId: player.id, itemIds: bag.items.filter(i => types.includes(i.type)).map(i => i.id) }, player.token);
+  }
+  for (const player of room.players) {
+    const bag = (await room.connect(player)).room.draft.currentPlayer.currentBag;
+    assert.deepEqual(bag.automaticItemIds, []);
+    const after = await f.api(`${room.base}/draft/pick`, { playerId: player.id, bagId: bag.id,
+      expectedPickCount: bag.pickCount, itemIds: [], automatic: true }, player.token);
+    assert.equal(after.draft.status, 'active');
+  }
+  for (const player of room.players) {
+    const bag = (await room.connect(player)).room.draft.currentPlayer.currentBag;
+    assert.equal(bag.automaticItemIds.length, 1);
+    await f.api(`${room.base}/draft/pick`, { playerId: player.id, bagId: bag.id,
+      expectedPickCount: bag.pickCount, itemIds: bag.automaticItemIds, automatic: true }, player.token);
+  }
+  const final = (await room.connect(room.host)).room.draft;
+  assert.equal(final.status, 'complete');
+  assert.ok(final.revealedDrafts.every(p => p.items.length === 3));
+});
+
 test('room-wide super visibility is admin-controlled, persistent and independent of individual promotions', async t => {
   const f = await fixture(t), room = await f.room();
   const spectator = { id: crypto.randomUUID(), token: crypto.randomUUID() };

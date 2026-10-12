@@ -1800,6 +1800,7 @@
             <button id="room-logs-more" class="secondary" type="button" hidden>Load more actions</button>
           </section>
           <section class="panel draft-toolbar" id="draft-display-panel" hidden>
+            <button id="hidden-items-toggle" class="secondary" type="button" aria-pressed="false" hidden>Show Hidden (0)</button>
             <h3>Draft Controls</h3>
             <label class="draft-grouping-control" id="draft-grouping-control">
               Organize drafted items by
@@ -1813,6 +1814,7 @@
           <section class="panel" id="player-draft-panel" hidden>
             <div class="draft-section-header">
               <h3>Your Draft</h3>
+              <label class="player-option"><input id="auto-pick-toggle" type="checkbox" role="switch" checked>Auto-pick when no choice</label>
               <button id="chime-toggle" class="secondary" type="button" aria-pressed="false">Mute Chime</button>
             </div>
             <div class="draft-panel-grid" id="bag-draft-layout">
@@ -2146,6 +2148,8 @@
       const currentBag = document.querySelector("#current-bag");
       const currentBagTableSlot = document.querySelector("#current-bag-table-slot");
       const chimeToggle = document.querySelector("#chime-toggle");
+      const autoPickToggle = document.querySelector("#auto-pick-toggle");
+      const hiddenItemsToggle = document.querySelector("#hidden-items-toggle");
       const lockChoice = document.querySelector("#lock-choice");
       const privateDraftedItems = document.querySelector("#private-drafted-items");
       const bagDraftedTools = document.querySelector("#bag-drafted-tools");
@@ -2201,6 +2205,16 @@
       let draftMethods = [];
       let settingsInitialized = false;
       let selectedItemIds = new Set();
+      let hiddenDraftedIds = new Set();
+      let showHiddenDrafted = false;
+      let draftedVisibilityScope = "";
+      let autoPickEnabled = true;
+      try { autoPickEnabled = localStorage.getItem("frankenDraftTool:autoPick") !== "false"; } catch {}
+      autoPickToggle.checked = autoPickEnabled;
+      let autoPickTimer = null;
+      let autoPickScheduledKey = null;
+      let autoPickAttemptedKey = null;
+      let bagPickPending = false;
       let auctionSelectionKey = "";
       let auctionSelectedItemId = null;
       let auctionBidKey = "";
@@ -2359,7 +2373,7 @@
         return item.imageSecondaryUrl !== item.imageUrl || cropKey(item.imageSecondarySheet) !== cropKey(item.imageSheet);
       }
 
-      function renderItemTools(item) {
+      function renderItemTools(item, options = {}) {
         const tools = document.createElement("div");
         tools.className = "item-tools";
         tools.setAttribute("role", "group");
@@ -2382,6 +2396,19 @@
           button.addEventListener("click", event => {
             event.preventDefault(); event.stopPropagation();
             inspectItem(item, mode);
+          });
+          tools.append(button);
+        }
+        if (options.hideable) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "secondary item-tool";
+          button.dataset.hideItem = item.id;
+          const hidden = hiddenDraftedIds.has(item.id);
+          setIconButton(button, hidden ? "eye" : "eye-off", `${hidden ? "Unhide" : "Hide"} item: ${item.name}`);
+          button.addEventListener("click", event => {
+            event.preventDefault(); event.stopPropagation();
+            toggleDraftedItem(item.id);
           });
           tools.append(button);
         }
@@ -2803,15 +2830,16 @@
 
       function renderItemCard(item, options = {}) {
         const card = document.createElement("label");
+        card.dataset.itemId = item.id;
         const selected = options.selected ?? selectedItemIds.has(item.id);
         card.className = [
           "item-card",
-          options.checkable ? "checkable" : "",
+          options.checkable && options.available !== false ? "checkable" : "",
           options.available === false ? "unavailable" : "",
           selected ? "selected" : ""
         ].filter(Boolean).join(" ");
 
-        if (options.checkable) {
+        if (options.checkable && options.available !== false) {
           const control = document.createElement("span");
           control.className = "selection-control";
           const checkbox = document.createElement("input");
@@ -2855,7 +2883,8 @@
         type.textContent = item.type;
         card.append(name, type);
 
-        card.append(renderItemTools(item));
+        card.classList.toggle("user-hidden", Boolean(options.hideable && hiddenDraftedIds.has(item.id)));
+        card.append(renderItemTools(item, options));
         return card;
       }
 
@@ -2937,7 +2966,7 @@
 
         if (items.length === 0) {
           const empty = document.createElement("p");
-          empty.textContent = "None yet";
+          empty.textContent = options.emptyText || "None yet";
           container.append(empty);
           return;
         }
@@ -2961,11 +2990,12 @@
           if (draftGrouping.value === "pick") {
             renderTypeSections(stack, section.items, {
               typeOrder: options.typeOrder,
-              titleForType: options.titleForType
+              titleForType: options.titleForType,
+              itemOptions: options.itemOptions
             });
           } else {
             for (const item of section.items) {
-              stack.append(renderItemCard(item));
+              stack.append(renderItemCard(item, options.itemOptions ? options.itemOptions(item) : {}));
             }
           }
 
@@ -3991,6 +4021,15 @@
         const label = document.createElement("span");
         label.textContent = draft.table.length === 1 ? "player" : "players";
         center.append(count, label);
+        if (draft.engine !== "auction") {
+          const direction = document.createElement("span");
+          direction.className = "table-direction";
+          direction.title = "Bags pass clockwise to the next seat";
+          direction.setAttribute("role", "img");
+          direction.setAttribute("aria-label", direction.title);
+          direction.append(window.frankenIcon("rotate-cw"));
+          center.append(direction);
+        }
         roundTable.append(center);
 
         const total = draft.table.length;
@@ -4048,7 +4087,7 @@
         const selectedCount = selectedItemIds.size;
         document.querySelector("#bag-selection-summary").textContent = `${selectedCount} / ${requiredPickCount} selected`;
         lockChoice.textContent = requiredPickCount === 0 ? "Pass Bag" : "Lock Choices";
-        lockChoice.disabled = selectedCount !== requiredPickCount;
+        lockChoice.disabled = bagPickPending || selectedCount !== requiredPickCount;
       }
 
       function countSelectedTypeInBag(bag, type) {
@@ -4062,6 +4101,107 @@
         }
 
         return count;
+      }
+
+      function updateBagSelectionAvailability(bag) {
+        const eligible = new Set(bag.eligibleItemIds);
+        const items = new Map(bag.items.map(item => [item.id, item]));
+        for (const card of currentBag.querySelectorAll(".item-card")) {
+          const item = items.get(card.dataset.itemId);
+          if (!item) continue;
+          const selected = selectedItemIds.has(item.id);
+          const available = selected || (eligible.has(item.id) && selectedItemIds.size < bag.requiredPickCount
+            && countSelectedTypeInBag(bag, item.type) < (bag.typePickLimits?.[item.type] || 0));
+          const control = card.querySelector(".selection-control");
+          const checkbox = card.querySelector("input[type='checkbox']");
+          if (control) control.hidden = !available;
+          if (checkbox) checkbox.disabled = !available || bagPickPending;
+          card.classList.toggle("unavailable", !available);
+          card.classList.toggle("checkable", available);
+        }
+      }
+
+      function visibleDraftedPlayer(player) {
+        const visible = item => showHiddenDrafted || !hiddenDraftedIds.has(item.id);
+        return { ...player, draftedItems: player.draftedItems.filter(visible),
+          draftedGroups: player.draftedGroups.map(group => ({ ...group, items: group.items.filter(visible) }))
+            .filter(group => group.items.length) };
+      }
+
+      function ownDraftedItems(draft) {
+        if (currentRole !== "seated") return [];
+        if (draft.status === "complete") return draft.revealedDrafts.find(player => player.playerId === currentViewerId)?.items || [];
+        return (draft.engine === "auction" ? draft.auction?.players.find(player => player.playerId === currentViewerId)
+          : draft.currentPlayer)?.draftedItems || [];
+      }
+
+      function refreshDraftedVisibility() {
+        currentDraftedItemsKey = "";
+        auctionPlayersRenderKey = "";
+        revealedDrafts.dataset.key = "";
+        if (latestRoom) renderDraft(latestRoom.draft);
+      }
+
+      function toggleDraftedItem(id) {
+        if (!ownDraftedItems(latestRoom.draft).some(item => item.id === id)) return;
+        if (hiddenDraftedIds.has(id)) hiddenDraftedIds.delete(id);
+        else hiddenDraftedIds.add(id);
+        try { sessionStorage.setItem(storageKey(currentRoomNumber, "draftedVisibility"), JSON.stringify({
+          scope: draftedVisibilityScope, ids: [...hiddenDraftedIds]
+        })); } catch {}
+        refreshDraftedVisibility();
+        hiddenItemsToggle.focus({ preventScroll: true });
+      }
+
+      function updateDraftedVisibility(draft) {
+        const scope = `${currentRoomNumber}:${draft.id || (draft.status === "not_started" ? "setup" : "legacy")}:${currentViewerId}`;
+        if (scope !== draftedVisibilityScope) {
+          draftedVisibilityScope = scope;
+          hiddenDraftedIds = new Set();
+          showHiddenDrafted = false;
+          try {
+            const saved = JSON.parse(sessionStorage.getItem(storageKey(currentRoomNumber, "draftedVisibility")));
+            if (saved?.scope === scope && Array.isArray(saved.ids)) hiddenDraftedIds = new Set(saved.ids.filter(id => typeof id === "string"));
+          } catch {}
+          currentDraftedItemsKey = "";
+          auctionPlayersRenderKey = "";
+          revealedDrafts.dataset.key = "";
+        }
+        const count = ownDraftedItems(draft).filter(item => hiddenDraftedIds.has(item.id)).length;
+        hiddenItemsToggle.hidden = currentRole !== "seated" || draft.status === "not_started";
+        hiddenItemsToggle.disabled = count === 0;
+        hiddenItemsToggle.textContent = `${showHiddenDrafted ? "Hide" : "Show"} Hidden (${count})`;
+        hiddenItemsToggle.setAttribute("aria-pressed", String(showHiddenDrafted));
+        if (!hiddenItemsToggle.hidden) placeControl(draft.status === "complete" ? revealTools
+          : draft.engine === "auction" ? auctionPersonalTools : bagDraftedTools, hiddenItemsToggle);
+      }
+
+      function cancelAutomaticPick() {
+        window.clearTimeout(autoPickTimer);
+        autoPickTimer = null;
+        autoPickScheduledKey = null;
+      }
+
+      function automaticPickKey() {
+        const draft = latestRoom?.draft;
+        const bag = draft?.currentPlayer?.currentBag;
+        if (!autoPickEnabled || document.hidden || currentRole !== "seated" || draft?.status !== "active"
+          || draft.engine === "auction" || !Array.isArray(bag?.automaticItemIds)) return null;
+        return [currentRoomNumber, draft.id, currentViewerId, bag.id, bag.pickCount].join(":");
+      }
+
+      function scheduleAutomaticPick() {
+        const key = automaticPickKey();
+        if (!key || bagPickPending || key === autoPickAttemptedKey) { cancelAutomaticPick(); return; }
+        if (key === autoPickScheduledKey) return;
+        cancelAutomaticPick();
+        autoPickScheduledKey = key;
+        autoPickTimer = window.setTimeout(() => {
+          cancelAutomaticPick();
+          if (automaticPickKey() !== key || bagPickPending) return;
+          autoPickAttemptedKey = key;
+          lockCurrentChoice(true);
+        }, 700);
       }
 
       function getDraftTypeProgress(player, draft) {
@@ -4142,6 +4282,7 @@
       function getCurrentBagRenderKey(bag) {
         return [
           bag?.id || "",
+          bag?.pickCount ?? "",
           bag?.requiredPickCount ?? "",
           (bag?.items || []).map((item) => item.id).join("|"),
           (bag?.eligibleItemIds || []).join("|")
@@ -4166,6 +4307,7 @@
         placeTablePanel(false);
         const bagChanged = currentBagId !== bag.id;
         const bagRenderKey = getCurrentBagRenderKey(bag);
+        if (renderedCurrentBagKey !== null && renderedCurrentBagKey !== bagRenderKey) selectedItemIds = new Set();
 
         if (bagChanged) {
           const draftJustStarted = priorDraftStatus
@@ -4196,6 +4338,7 @@
         }
 
         lockChoice.hidden = false;
+        updateBagSelectionAvailability(bag);
         updateLockButton(bag.requiredPickCount);
       }
 
@@ -4314,7 +4457,7 @@
         auctionStage.replaceChildren(title, meta);
       }
 
-      function renderAuctionDraftedItem(item, group) {
+      function renderAuctionDraftedItem(item, group, options = {}) {
         const row = document.createElement("div");
         row.className = "auction-drafted-item";
 
@@ -4333,18 +4476,21 @@
         const meta = document.createElement("span");
         const cost = group.cost ?? 0;
         meta.textContent = `${item.type} - ${cost} credit${cost === 1 ? "" : "s"}`;
-        details.append(name, meta, renderItemTools(item));
+        row.classList.toggle("user-hidden", Boolean(options.hideable && hiddenDraftedIds.has(item.id)));
+        details.append(name, meta, renderItemTools(item, options));
         row.append(details);
         return row;
       }
 
-      function renderAuctionDraftedList(player) {
+      function renderAuctionDraftedList(player, options = {}) {
         const wrapper = document.createElement("div");
         wrapper.className = "auction-drafted-list";
+        const hadPicks = player.draftedItems.length > 0;
+        if (options.hideable) player = visibleDraftedPlayer(player);
 
         if ((player.draftedGroups || []).length === 0) {
           const empty = document.createElement("span");
-          empty.textContent = "No picks yet";
+          empty.textContent = hadPicks ? "All picks hidden" : "No picks yet";
           wrapper.append(empty);
           return wrapper;
         }
@@ -4358,7 +4504,7 @@
             section.append(title);
 
             for (const item of group.items || []) {
-              section.append(renderAuctionDraftedItem(item, group));
+              section.append(renderAuctionDraftedItem(item, group, options));
             }
 
             wrapper.append(section);
@@ -4392,7 +4538,7 @@
           section.append(title);
 
           for (const record of grouped.get(type)) {
-            section.append(renderAuctionDraftedItem(record.item, record.group));
+            section.append(renderAuctionDraftedItem(record.item, record.group, options));
           }
 
           wrapper.append(section);
@@ -4446,7 +4592,7 @@
         }
 
         card.append(header);
-        card.append(renderAuctionDraftedList(player));
+        card.append(renderAuctionDraftedList(player, { hideable: currentRole === "seated" && player.playerId === currentViewerId }));
 
         const footer = document.createElement("footer");
         appendAdminAction(footer, {
@@ -5151,9 +5297,12 @@
           const progress = getDraftTypeProgress(currentPlayer, draft);
           const titleForType = makeTypeProgressTitle(progress);
           renderDraftChecklist(progress);
-          renderGroupedItems(privateDraftedItems, currentPlayer.draftedItems, currentPlayer.draftedGroups, {
+          const visible = visibleDraftedPlayer(currentPlayer);
+          renderGroupedItems(privateDraftedItems, visible.draftedItems, visible.draftedGroups, {
             typeOrder: draft.typeOrder,
-            titleForType
+            titleForType,
+            emptyText: currentPlayer.draftedItems.length ? "All picks hidden" : "None yet",
+            itemOptions: () => ({ hideable: true })
           });
           currentDraftedItemsKey = draftedItemsKey;
         }
@@ -5260,12 +5409,17 @@
             section.append(title, renderAuctionDraftedList({
               draftedItems: player.items,
               draftedGroups: player.groups
-            }));
+            }, { hideable: currentRole === "seated" && player.playerId === currentViewerId }));
           } else {
             const items = document.createElement("div");
             items.className = "item-grid";
             section.append(title, items);
-            renderGroupedItems(items, player.items, player.groups);
+            const hideable = currentRole === "seated" && player.playerId === currentViewerId;
+            const visible = hideable ? visibleDraftedPlayer({ draftedItems: player.items, draftedGroups: player.groups })
+              : { draftedItems: player.items, draftedGroups: player.groups };
+            renderGroupedItems(items, visible.draftedItems, visible.draftedGroups, {
+              itemOptions: () => ({ hideable }), emptyText: player.items.length ? "All picks hidden" : "None yet"
+            });
           }
 
           revealedDrafts.append(section);
@@ -5324,6 +5478,7 @@
       }
 
       function renderDraft(draft, priorDraftStatus = null) {
+        updateDraftedVisibility(draft);
         renderSpectatorToolbar(draft);
         const hasDraftedAreas = draft.status === "complete"
           || draft.engine === "auction"
@@ -5352,6 +5507,7 @@
         if (draft.status === "complete") {
           roomMessage.textContent = "Draft complete.";
         }
+        scheduleAutomaticPick();
       }
 
       function renderRoom(data, options = {}) {
@@ -6003,41 +6159,51 @@
         }
       }
 
-      async function lockCurrentChoice() {
-        if (!latestRoom?.draft.currentPlayer?.currentBag) {
-          return;
-        }
-
+      async function lockCurrentChoice(automatic = false) {
+        const bag = latestRoom?.draft.currentPlayer?.currentBag;
+        if (!bag || bagPickPending || (automatic && !automaticPickKey())) return;
+        cancelAutomaticPick();
+        const itemIds = automatic ? bag.automaticItemIds : [...selectedItemIds];
+        bagPickPending = true;
         lockChoice.disabled = true;
-        const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/pick`), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            playerId: currentViewerId,
-            itemIds: [...selectedItemIds]
-          })
-        });
-        const data = await response.json();
+        updateBagSelectionAvailability(bag);
+        try {
+          const response = await apiFetch(apiUrl(`/api/rooms/${currentRoomNumber}/draft/pick`), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              playerId: currentViewerId,
+              itemIds, automatic, bagId: bag.id, expectedPickCount: bag.pickCount
+            })
+          });
+          const data = await response.json().catch(() => ({}));
 
-        if (!response.ok) {
-          if (data.error === "wrong_pick_count") {
-            roomMessage.textContent = `Select ${data.requiredPickCount} item${data.requiredPickCount === 1 ? "" : "s"}.`;
-          } else if (data.error === "first_rotation_type_duplicate") {
-            roomMessage.textContent = "First rotation allows only one item of each type from a bag.";
-          } else if (data.error === "type_limit_reached") {
-            roomMessage.textContent = "That choice exceeds the type limit.";
-          } else {
-            roomMessage.textContent = "Could not lock that choice.";
+          if (!response.ok) {
+            if (data.error === "wrong_pick_count") {
+              roomMessage.textContent = `Select ${data.requiredPickCount} item${data.requiredPickCount === 1 ? "" : "s"}.`;
+            } else if (data.error === "first_rotation_type_duplicate") {
+              roomMessage.textContent = "First rotation allows only one item of each type from a bag.";
+            } else if (data.error === "type_limit_reached") {
+              roomMessage.textContent = "That choice exceeds the type limit.";
+            } else if (["stale_bag", "pick_requires_choice"].includes(data.error)) {
+              roomMessage.textContent = "The bag changed. Wait for the current bag before picking.";
+            } else {
+              roomMessage.textContent = "Could not lock that choice.";
+            }
+            return;
           }
-          lockChoice.disabled = false;
-          return;
-        }
 
-        selectedItemIds = new Set();
-        renderRoom(data);
-        roomMessage.textContent = "Choice locked.";
+          selectedItemIds = new Set();
+          renderRoom(data);
+          if (data.draft.status !== "complete") roomMessage.textContent = automatic ? "Automatic choice locked." : "Choice locked.";
+        } catch {
+          roomMessage.textContent = "Choice not confirmed. Check your connection and try again.";
+        } finally {
+          bagPickPending = false;
+          const current = latestRoom?.draft.currentPlayer?.currentBag;
+          if (current) { updateBagSelectionAvailability(current); updateLockButton(current.requiredPickCount); }
+          scheduleAutomaticPick();
+        }
       }
 
       joinForm.addEventListener("submit", (event) => {
@@ -6162,6 +6328,7 @@
         }
 
         event.target.closest(".item-card")?.classList.toggle("selected", event.target.checked);
+        updateBagSelectionAvailability(bag);
         updateLockButton(requiredPickCount);
       });
 
@@ -6504,7 +6671,20 @@
         location.href = `/rooms/${room}`;
       });
       document.querySelector("#refresh-rooms").addEventListener("click", loadCurrentRooms);
-      lockChoice.addEventListener("click", lockCurrentChoice);
+      lockChoice.addEventListener("click", () => lockCurrentChoice());
+      hiddenItemsToggle.addEventListener("click", () => {
+        showHiddenDrafted = !showHiddenDrafted;
+        refreshDraftedVisibility();
+      });
+      autoPickToggle.addEventListener("change", () => {
+        autoPickEnabled = autoPickToggle.checked;
+        autoPickAttemptedKey = null;
+        try { localStorage.setItem("frankenDraftTool:autoPick", String(autoPickEnabled)); } catch {}
+        scheduleAutomaticPick();
+      });
+      document.addEventListener("visibilitychange", scheduleAutomaticPick);
+      window.addEventListener("pagehide", cancelAutomaticPick);
+      window.addEventListener("pageshow", scheduleAutomaticPick);
 
       // Read the same catalog and viewer-scoped room state used by the interface.
       // Unsupported browsers simply continue with the normal UI.

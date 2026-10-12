@@ -1510,6 +1510,13 @@ function getRequiredPickCount(player, bag, draft) {
   return Math.min(draft.picksPerBag, selectableCount);
 }
 
+function getAutomaticPickIds(player, bag, draft) {
+  const limits = getSelectableTypeLimits(player, bag, draft);
+  const eligible = bag.items.filter(item => (limits[item.type] || 0) > 0);
+  return eligible.length === getRequiredPickCount(player, bag, draft)
+    ? eligible.map(item => item.id) : null;
+}
+
 function getSelectionError(player, bag, selectedItems, draft) {
   const selectedCounts = countItemsByType(selectedItems);
 
@@ -1555,6 +1562,8 @@ function getPlayerDraftView(player, draft, includeCurrentBag) {
     draftedGroups: player.draftedGroups.map(getDraftGroupSnapshot),
     currentBag: includeCurrentBag && bag ? {
       id: bag.id,
+      pickCount: player.pickCount || 0,
+      automaticItemIds: getAutomaticPickIds(player, bag, draft),
       items: bag.items.map(getItemSnapshot),
       eligibleItemIds: bag.items
         .filter((item) => (typePickLimits[item.type] || 0) > 0)
@@ -1705,6 +1714,7 @@ function getDraftSnapshot(room, viewerId) {
   if (draft.status === "complete") {
     return {
       status: "complete",
+      id: draft.id || room.history?.id || null,
       engine: draft.engine || method.engine,
       poolId: draft.poolId,
       poolName: getPool(draft.poolId)?.name || "Custom pool",
@@ -1729,6 +1739,7 @@ function getDraftSnapshot(room, viewerId) {
 
   return {
     status: "active",
+    id: draft.id || room.history?.id || null,
     engine: draft.engine || method.engine,
     poolId: draft.poolId,
     poolName: getPool(draft.poolId)?.name || "Custom pool",
@@ -2334,6 +2345,7 @@ function startBagPassingDraft(room, pool, method) {
   });
 
   room.draft = {
+    id: crypto.randomUUID(),
     status: "active",
     engine: "bag-pass",
     poolId: pool.id,
@@ -2357,6 +2369,7 @@ function startNominationAuctionDraft(room, pool, method) {
   }
 
   room.draft = {
+    id: crypto.randomUUID(),
     status: "active",
     engine: "auction",
     poolId: pool.id,
@@ -2634,6 +2647,19 @@ async function handleDraftPick(roomNumber, request, response) {
   }
 
   const selectedIds = [...new Set(Array.isArray(body.itemIds) ? body.itemIds.map(String) : [])];
+  if ((body.automatic === true || body.expectedPickCount !== undefined)
+    && (body.bagId !== bag.id || body.expectedPickCount !== (player.pickCount || 0))) {
+    sendJson(response, 409, { error: "stale_bag" });
+    return;
+  }
+  if (body.automatic === true) {
+    const automaticIds = getAutomaticPickIds(player, bag, draft);
+    if (!automaticIds || automaticIds.length !== selectedIds.length
+      || automaticIds.some(id => !selectedIds.includes(id))) {
+      sendJson(response, 409, { error: "pick_requires_choice" });
+      return;
+    }
+  }
   const itemsById = new Map(bag.items.map((item) => [item.id, item]));
   const selectedItems = selectedIds.map((id) => itemsById.get(id));
 

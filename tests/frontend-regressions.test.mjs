@@ -354,6 +354,89 @@ test('three item icons are available in bag cards and auction rows without chang
   assert.deepEqual(Array.from(unavailable.querySelectorAll('button'), button => button.dataset.itemView), ['zoom']);
 });
 
+test('rule-blocked cards omit checkboxes and own drafted cards offer hide/unhide without selection changes', () => {
+  const { context } = itemViewFixture();
+  const item = { id: 'unit', name: 'Unit', type: 'Units' };
+  const blocked = context.renderItemCard(item, { checkable: true, available: false });
+  assert.equal(blocked.querySelectorAll('input').length, 0);
+  assert.ok(!blocked.className.includes('checkable'));
+  context.hiddenDraftedIds = new Set();
+  const toggled = [];
+  context.toggleDraftedItem = id => toggled.push(id);
+  let card = context.renderItemCard(item, { hideable: true });
+  let button = card.querySelectorAll('button').find(b => b.dataset.hideItem);
+  assert.match(button.title, /Hide item: Unit/);
+  button.listeners.click({ preventDefault() {}, stopPropagation() {} });
+  assert.deepEqual(toggled, ['unit']);
+  assert.equal(context.selectedItemIds.size, 0);
+  context.hiddenDraftedIds.add('unit');
+  card = context.renderItemCard(item, { hideable: true });
+  button = card.querySelectorAll('button').find(b => b.dataset.hideItem);
+  assert.match(button.title, /Unhide item/);
+  assert.ok(!context.renderItemCard(item).querySelectorAll('button').some(b => b.dataset.hideItem));
+  assert.ok(context.renderAuctionDraftedItem(item, {}, { hideable: true }).querySelectorAll('button').some(b => b.dataset.hideItem));
+});
+
+test('hiding drafted items is a projection only and retains real counts and pick costs', () => {
+  const items = [{ id: 'a', type: 'Units' }, { id: 'b', type: 'Tech' }];
+  const player = { draftedItems: items, draftedGroups: [{ items, cost: 8, pickNumber: 1 }] };
+  const context = load(['visibleDraftedPlayer', 'getDraftTypeProgress'], { hiddenDraftedIds: new Set(['a']), showHiddenDrafted: false });
+  const visible = context.visibleDraftedPlayer(player);
+  assert.deepEqual(Array.from(visible.draftedItems, i => i.id), ['b']);
+  assert.equal(visible.draftedGroups[0].cost, 8);
+  assert.equal(player.draftedGroups[0].items.length, 2);
+  const counts = context.getDraftTypeProgress(player, { itemsPerType: { Units: 1, Tech: 1 }, typeOrder: ['Units', 'Tech'] });
+  assert.deepEqual(Array.from(counts, c => c.drafted), [1, 1]);
+  context.hiddenDraftedIds.add('b');
+  assert.equal(context.visibleDraftedPlayer(player).draftedGroups.length, 0);
+  context.showHiddenDrafted = true;
+  assert.equal(context.visibleDraftedPlayer(player).draftedItems.length, 2);
+});
+
+test('selection-dependent limits hide controls until a pick is unchecked, without losing selected cards', () => {
+  const items = [{ id: 'a', type: 'Units' }, { id: 'b', type: 'Units' }, { id: 'c', type: 'Tech' }];
+  const cards = items.map(item => {
+    const control = {}, checkbox = {}, classes = {};
+    return { dataset: { itemId: item.id }, control, checkbox, classes,
+      querySelector: selector => selector === '.selection-control' ? control : checkbox,
+      classList: { toggle: (name, value) => { classes[name] = value; } } };
+  });
+  const context = load(['countSelectedTypeInBag', 'updateBagSelectionAvailability'], {
+    currentBag: { querySelectorAll: () => cards }, selectedItemIds: new Set(['a']), bagPickPending: false
+  });
+  const bag = { items, eligibleItemIds: ['a', 'b', 'c'], typePickLimits: { Units: 1, Tech: 1 }, requiredPickCount: 2 };
+  context.updateBagSelectionAvailability(bag);
+  assert.equal(cards[0].control.hidden, false);
+  assert.equal(cards[1].control.hidden, true);
+  assert.equal(cards[2].control.hidden, false);
+  context.selectedItemIds.clear(); context.updateBagSelectionAvailability(bag);
+  assert.ok(cards.every(card => !card.control.hidden && !card.checkbox.disabled));
+});
+
+test('automatic picks schedule once, cancel on opt-out, and never run for spectators or background tabs', () => {
+  const timers = new Map(), calls = [];
+  let id = 0;
+  const context = load(['cancelAutomaticPick', 'automaticPickKey', 'scheduleAutomaticPick'], {
+    autoPickEnabled: true, autoPickTimer: null, autoPickScheduledKey: null, autoPickAttemptedKey: null, bagPickPending: false,
+    document: { hidden: false }, currentRole: 'seated', currentRoomNumber: '123', currentViewerId: 'a',
+    latestRoom: { draft: { id: 'd', status: 'active', engine: 'bag-pass', currentPlayer: { currentBag: { id: 'bag', pickCount: 0, automaticItemIds: [] } } } },
+    window: { setTimeout: fn => { timers.set(++id, fn); return id; }, clearTimeout: key => timers.delete(key) },
+    lockCurrentChoice: automatic => calls.push(automatic)
+  });
+  context.scheduleAutomaticPick(); context.scheduleAutomaticPick();
+  assert.equal(timers.size, 1);
+  context.autoPickEnabled = false; context.scheduleAutomaticPick(); assert.equal(timers.size, 0);
+  context.autoPickEnabled = true; context.document.hidden = true; context.scheduleAutomaticPick(); assert.equal(timers.size, 0);
+  context.document.hidden = false; context.currentRole = 'spectator'; context.scheduleAutomaticPick(); assert.equal(timers.size, 0);
+  context.currentRole = 'seated'; context.scheduleAutomaticPick(); [...timers.values()][0]();
+  assert.deepEqual(calls, [true], 'zero-item forced passes are supported');
+  context.scheduleAutomaticPick(); assert.equal(timers.size, 0, 'failed or unconfirmed requests are not retried forever');
+  context.latestRoom.draft.currentPlayer.currentBag.pickCount++;
+  context.scheduleAutomaticPick(); assert.equal(timers.size, 1);
+  context.latestRoom.draft.currentPlayer.currentBag.automaticItemIds = null;
+  context.scheduleAutomaticPick(); assert.equal(timers.size, 0, 'a new bag requiring a decision stays manual');
+});
+
 test('back and attachment icons are omitted when irrelevant, but alternate texture crops count as different backs', () => {
   const {context} = itemViewFixture();
   const views = item => Array.from(context.renderItemTools(item).children, button => button.dataset.itemView);
@@ -479,6 +562,7 @@ test('attached-component previews show cards inside decks and bags without dupli
 test('table roster groups player identity, status and admin controls in compact rows', () => {
   const roundTable = new Element(), tableRoster = new Element(), tablePanel = new Element();
   const context = load(['renderTable'], {
+    window: { frankenIcon: name => ({ icon: name }) },
     document: { createElement() { const element = new Element(); element.style = { setProperty() {} }; return element; } },
     roundTable, tableRoster, tablePanel, hasHostRights: () => true,
     appendHostBadge() {}, appendAdminAction(card, player) { if (player.admin) card.append('admin control'); }
@@ -490,6 +574,8 @@ test('table roster groups player identity, status and admin controls in compact 
   context.renderTable(draft);
   assert.equal(roundTable.children[0].children[0].textContent, 2);
   assert.equal(roundTable.children[0].children[1].textContent, 'players');
+  assert.equal(roundTable.children[0].children[2].children[0].icon, 'rotate-cw');
+  assert.match(roundTable.children[0].children[2].attributes['aria-label'], /clockwise/);
   assert.equal(tableRoster.children[0].children[0].className, 'table-identity');
   assert.equal(tableRoster.children[0].children[1].className, 'table-player-status choosing');
   assert.equal(tableRoster.children[0].children[1].children[0].textContent, 'Choosing');
@@ -501,6 +587,8 @@ test('table roster groups player identity, status and admin controls in compact 
   assert.equal(tableRoster.children[0], unchangedRow, 'unrelated updates retain roster nodes');
   context.renderTable({ ...draft, status: 'complete' });
   assert.equal(tableRoster.children[1].children[1].children[0].textContent, 'Finished');
+  context.renderTable({ ...draft, engine: 'auction' });
+  assert.equal(roundTable.children[0].children.length, 2, 'auction tables have no bag-passing arrow');
   context.renderTable({ status: 'not_started' });
   assert.equal(tablePanel.hidden, true);
   assert.equal(tableRoster.children.length, 0);
@@ -528,7 +616,7 @@ test('bag waiting state restores the current-bag heading and controls when a bag
     document: { querySelector: () => heading }, draftInstruction: instruction, lockChoice,
     currentBag: new Element(), renderedCurrentBagKey: null, currentBagId: 'bag', selectedItemIds: new Set(),
     latestRoom: { draft: {} }, placeTablePanel: inside => placements.push(inside),
-    getCurrentBagRenderKey: () => 'bag', renderTypeSections() {}, updateLockButton() {}
+    getCurrentBagRenderKey: () => 'bag', renderTypeSections() {}, updateLockButton() {}, updateBagSelectionAvailability() {}
   });
   context.renderCurrentBag({ currentBag: null, queueLength: 0 });
   assert.equal(heading.textContent, 'Waiting for next bag');

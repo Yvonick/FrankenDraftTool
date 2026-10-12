@@ -86,6 +86,7 @@ export function recordDraftAction({ before, room, roomId, actorId, action, body,
   const data = {};
   let kind = action.replace('auction/', '');
   if (action === 'pick') {
+    if (body.automatic === true) data.automatic = true;
     kind = body.itemIds?.length ? 'bag_pick' : 'bag_pass';
     data.bagId = before.bag.id;
     data.items = before.bag.items.filter(value => body.itemIds?.includes(value.id));
