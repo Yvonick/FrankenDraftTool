@@ -3193,7 +3193,7 @@
       }
 
       function hasUnsavedEdits() {
-        return roomSettingsDirty || Boolean(publicPoolsList.querySelector('.pool-admin-card[data-dirty="true"], .pool-admin-card[data-saving="true"]'));
+        return roomSettingsDirty || Boolean(publicPoolsList.querySelector('.pool-admin-card[data-dirty="true"], .pool-admin-card[data-saving="true"], .pool-admin-card[data-updating="true"]'));
       }
       window.addEventListener("beforeunload", event => {
         if (!allowNavigation && hasUnsavedEdits()) { event.preventDefault(); event.returnValue = ""; }
@@ -3350,7 +3350,7 @@
           const existing = existingCards.get(pool.id);
           const poolVersion = JSON.stringify(pool);
           if (existing && (existing.dataset.dirty === "true"
-            || existing.dataset.saving === "true" || existing.dataset.poolVersion === poolVersion)) continue;
+            || existing.dataset.saving === "true" || existing.dataset.updating === "true" || existing.dataset.poolVersion === poolVersion)) continue;
           const card = document.createElement("section");
           card.className = "pool-admin-card";
           card.dataset.poolId = pool.id;
@@ -3368,7 +3368,18 @@
           const editButton = document.createElement("button"); editButton.type = "button"; editButton.className = "secondary"; editButton.textContent = "Edit"; editButton.setAttribute("aria-expanded", "false");
           const editor = document.createElement("div"); editor.className = "pool-editor"; editor.id = `editor-${pool.id}`; editor.hidden = true; editButton.setAttribute("aria-controls", editor.id);
           editButton.addEventListener("click", () => { editor.hidden = !editor.hidden; editButton.textContent = editor.hidden ? "Edit" : "Close Editor"; editButton.setAttribute("aria-expanded", String(!editor.hidden)); });
-          libraryActions.append(useButton, editButton); header.append(libraryActions);
+          const updateButton = document.createElement("button");
+          updateButton.type = "button"; updateButton.className = "secondary";
+          updateButton.dataset.poolAction = "update";
+          updateButton.title = "Update pool from a JSON file";
+          if (window.frankenIcon) updateButton.append(window.frankenIcon("upload"));
+          updateButton.append("Update");
+          const updateInput = document.createElement("input");
+          updateInput.type = "file"; updateInput.accept = ".json,application/json"; updateInput.hidden = true;
+          updateInput.dataset.poolUpdateFile = "true";
+          updateInput.setAttribute("aria-label", `Replacement JSON for ${pool.name}`);
+          updateInput.addEventListener("change", () => updateManagedPoolFile(card, updateInput.files?.[0]));
+          libraryActions.append(useButton, editButton, updateButton, updateInput); header.append(libraryActions);
 
           const nameLabel = document.createElement("label");
           const nameInput = document.createElement("input");
@@ -3493,7 +3504,69 @@
         };
       }
 
+      function chooseManagedPoolUpdate(card) {
+        if (card.dataset.saving === "true" || card.dataset.updating === "true") return;
+        if (card.dataset.dirty === "true") {
+          poolsMessage.textContent = "Save your settings changes before updating this pool.";
+          return;
+        }
+        card.querySelector("[data-pool-update-file]").click();
+      }
+
+      async function updateManagedPoolFile(card, file) {
+        const input = card.querySelector("[data-pool-update-file]");
+        if (!file || card.dataset.saving === "true" || card.dataset.updating === "true") return;
+        if (card.dataset.dirty === "true") {
+          input.value = "";
+          poolsMessage.textContent = "Save your settings changes before updating this pool.";
+          return;
+        }
+        const poolId = card.dataset.poolId;
+        const poolName = card.querySelector("h3").textContent;
+        const controls = [...card.querySelectorAll("button, input, select")].map(control => [control, control.disabled]);
+        card.dataset.updating = "true";
+        card.setAttribute("aria-busy", "true");
+        controls.forEach(([control]) => { control.disabled = true; });
+        try {
+          if (file.size > 25 * 1024 * 1024) throw new Error("request_body_too_large");
+          const confirmed = await requestConfirmation({
+            title: "Update Pool",
+            message: `Replace the items in "${poolName}" with "${file.name}"? Saved settings will be kept. Existing rooms are unchanged.`,
+            acceptLabel: "Update"
+          });
+          if (!confirmed) return;
+          poolsMessage.textContent = `Updating ${poolName}...`;
+          const fileContent = await file.text();
+          const response = await apiFetch(apiUrl(`/api/pools/${encodeURIComponent(poolId)}/replace`), {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fileName: file.name, fileContent })
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || "update_failed");
+          pools = data.pools;
+          card.dataset.updating = "false";
+          card.dataset.poolVersion = "";
+          renderPublicPools();
+          poolsMessage.textContent = `${data.pool.name} updated. Saved settings kept.` + linkedImportWarning(data.pool);
+        } catch (error) {
+          poolsMessage.textContent = ["invalid_pool_json", "invalid_pool_format", "request_body_too_large"].includes(error.message)
+            ? poolUploadErrorMessage(error.message)
+            : error.message === "pool_not_found" ? "This pool no longer exists. Refresh the page."
+            : "Could not confirm the pool update. Please try again.";
+        } finally {
+          input.value = "";
+          card.dataset.updating = "false";
+          card.removeAttribute("aria-busy");
+          controls.forEach(([control, disabled]) => { control.disabled = disabled; });
+          if (document.activeElement === document.body || card.contains(document.activeElement)) {
+            const current = [...publicPoolsList.querySelectorAll(".pool-admin-card")].find(entry => entry.dataset.poolId === poolId);
+            current?.querySelector("[data-pool-action='update']")?.focus({ preventScroll: true });
+          }
+        }
+      }
+
       async function saveManagedPool(card) {
+        if (card.dataset.updating === "true") return;
         const poolId = card.dataset.poolId;
         const button = card.querySelector("button[data-pool-action='save']");
         if (button.disabled) return;
@@ -3536,6 +3609,7 @@
       }
 
       async function removeManagedPool(card) {
+        if (card.dataset.updating === "true") return;
         const poolId = card.dataset.poolId;
         const button = card.querySelector("button[data-pool-action='remove']");
         button.disabled = true;
@@ -6265,9 +6339,11 @@
       });
 
       publicPoolsList.addEventListener("input", (event) => {
+        if (event.target.dataset.poolUpdateFile) return;
         markManagedPoolDirty(event.target.closest(".pool-admin-card"));
       });
       publicPoolsList.addEventListener("change", (event) => {
+        if (event.target.dataset.poolUpdateFile) return;
         markManagedPoolDirty(event.target.closest(".pool-admin-card"));
       });
       publicPoolsList.addEventListener("keydown", (event) => {
@@ -6299,7 +6375,9 @@
 
         const card = button.closest(".pool-admin-card");
 
-        if (button.dataset.poolAction === "save") {
+        if (button.dataset.poolAction === "update") {
+          chooseManagedPoolUpdate(card);
+        } else if (button.dataset.poolAction === "save") {
           saveManagedPool(card);
         } else if (button.dataset.poolAction === "remove") {
           const poolName = card.querySelector("input[data-pool-field='name']").value.trim() || "this pool";

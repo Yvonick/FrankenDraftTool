@@ -286,9 +286,9 @@ function shouldUseTtsBag(bag) {
 }
 
 function parseTtsPool(rawJson, fallbackName) {
-  const root = rawJson.ObjectStates?.[0];
+  const root = rawJson?.ObjectStates?.[0];
 
-  if (!root?.ContainedObjects) {
+  if (!Array.isArray(root?.ContainedObjects)) {
     return null;
   }
 
@@ -549,6 +549,25 @@ function registerUploadedTtsPool(rawJson, fallbackName, options = {}) {
   return pool;
 }
 
+function replacePublicTtsPool(poolId, rawJson) {
+  const previous = getPool(poolId);
+  if (!previous?.public) return null;
+  const parsed = parseTtsPool(rawJson, previous.name);
+  if (!parsed) return null;
+  const replacement = {
+    ...withPoolMetadata(clonePoolWithId(parsed, previous.id), {
+      name: previous.name,
+      public: true,
+      defaultParameters: previous.defaultParameters
+    }),
+    source: "tts-saved"
+  };
+  draftPools.set(poolId, replacement);
+  changes.set(poolId, replacement);
+  persistPublicPools();
+  return replacement;
+}
+
 function savePool(poolId, options = {}) {
   const existing = getPool(poolId);
   const sourceJson = options.sourceJson === undefined ? options.baseUnitSource : options.sourceJson;
@@ -635,6 +654,7 @@ return {
   normalizeDefaultParameters,
   parseTtsPool,
   registerUploadedTtsPool,
+  replacePublicTtsPool,
   removePublicPool,
   savePool,
   speakerOrderType,

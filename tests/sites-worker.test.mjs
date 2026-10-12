@@ -266,6 +266,63 @@ test('pool uploads, edits, deletion and active draft pool versions survive resta
   assert.ok((await exported.json()).ObjectStates.length > 0);
 });
 
+test('pool replacement persists under the same ID while existing bag and auction rooms keep their immutable source', async t => {
+  const f = await fixture(t);
+  const {pool} = await f.api('/api/pools/upload', {poolJson: tinyPool, savePool: true, poolName: 'Stable name'});
+  const defaults = {maxSeats: 4, picksPerBag: 3, auctionSpeakerMode: 'none', typeOrder: ['Abilities', 'Speaker Order', 'Units'], itemsPerType: {Units: 4, Abilities: 0, 'Speaker Order': 1}};
+  await f.api(`/api/pools/${pool.id}`, {defaultParameters: defaults});
+  const rooms = [];
+  for (const method of ['bag-passing-default', 'nomination-auction']) {
+    const room = await f.room(method, 1);
+    await f.api(`${room.base}/settings`, {...room.auth, poolId: pool.id, auctionSpeakerMode: 'none', itemsPerType: {Units: 1, Abilities: 0, 'Speaker Order': 0}}, room.host.token);
+    let state = await room.start();
+    if (method === 'nomination-auction') state = await f.api(`${room.base}/draft/auction/nominate`, {playerId: room.host.id, type: 'Units'}, room.host.token);
+    const items = method === 'bag-passing-default' ? state.draft.currentPlayer.currentBag.items : state.draft.auction.currentNomination.items;
+    rooms.push({room, method, items});
+  }
+  const store = createStorage(f.env), originalRow = (await store.catalog()).find(row => row.id === pool.id);
+  const original = await store.pool(originalRow.object_key);
+  const replacement = structuredClone(tinyPool);
+  replacement.ObjectStates[0].Nickname = 'Different import name';
+  replacement.ObjectStates[0].ContainedObjects[1].Nickname = 'New type';
+  replacement.ObjectStates[0].ContainedObjects[0].ContainedObjects.forEach(item => {item.Nickname = 'New ' + item.Nickname;});
+  const path = `/api/pools/${pool.id}/replace`;
+  const updated = await f.api(path, {fileName: 'replacement.json', fileContent: JSON.stringify(replacement), poolName: 'Ignored override', defaultParameters: {maxSeats: 12}});
+  assert.equal(updated.pool.id, pool.id);
+  assert.equal(updated.pool.name, 'Stable name');
+  assert.equal(updated.pools.filter(item => item.id === pool.id).length, 1);
+  assert.deepEqual(updated.pool.defaultParameters, {...defaults, typeOrder: ['Speaker Order', 'Units', 'New type'], itemsPerType: {Units: 4, 'New type': 2, 'Speaker Order': 1}});
+  await f.restart();
+  assert.deepEqual((await f.api('/api/pools')).pools.find(item => item.id === pool.id), updated.pool);
+  const currentStore = createStorage(f.env), newRow = (await currentStore.catalog()).find(row => row.id === pool.id);
+  assert.notEqual(newRow.object_key, originalRow.object_key);
+  assert.deepEqual(await currentStore.pool(originalRow.object_key), original);
+  for (const {room, method, items} of rooms) {
+    const state = (await room.connect(room.host)).room;
+    const current = method === 'bag-passing-default' ? state.draft.currentPlayer.currentBag.items : state.draft.auction.currentNomination.items;
+    assert.deepEqual(current, items);
+    const exported = await f.api(`${room.base}/draft/export?${new URLSearchParams(room.auth)}`, undefined, room.host.token);
+    assert.ok(JSON.stringify(exported).includes('Abilities'));
+    assert.ok(!JSON.stringify(exported).includes('New Units'));
+  }
+  const fresh = await f.room('bag-passing-default', 1);
+  await f.api(`${fresh.base}/settings`, {...fresh.auth, poolId: pool.id, itemsPerType: {Units: 1, 'New type': 0, 'Speaker Order': 0}}, fresh.host.token);
+  assert.match((await fresh.start()).draft.currentPlayer.currentBag.items[0].name, /^New Units/);
+  for (const bad of [{fileContent: '{oops'}, {poolJson: {}}, {poolJson: {ObjectStates: [{ContainedObjects: [null]}]}}, {}]) {
+    assert.equal((await f.raw(path, bad)).status, 400);
+    assert.equal((await currentStore.catalog()).find(row => row.id === pool.id).object_key, newRow.object_key);
+  }
+  const put = f.env.BUCKET.put;
+  f.env.BUCKET.put = () => {throw new Error('Simulated replacement storage failure');};
+  assert.equal((await f.raw(path, {poolJson: tinyPool})).status, 503);
+  f.env.BUCKET.put = put;
+  assert.equal((await currentStore.catalog()).find(row => row.id === pool.id).object_key, newRow.object_key);
+  const privatePool = await f.api('/api/pools/upload', {poolJson: tinyPool});
+  assert.equal((await f.raw(`/api/pools/${privatePool.pool.id}/replace`, {poolJson: tinyPool})).status, 404);
+  await f.api(`/api/pools/${pool.id}/delete`, {});
+  assert.equal((await f.raw(path, {poolJson: tinyPool})).status, 404);
+});
+
 test('back images and attached components survive bag drafts, auctions, legacy room reloads and undo', async t => {
   const f = await fixture(t);
   const raw = structuredClone(tinyPool);

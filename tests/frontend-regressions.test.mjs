@@ -220,6 +220,85 @@ test('saving a pool preserves edits made while its save is in flight', async () 
   assert.equal(button.disabled, false);
 });
 
+function poolReplacementFixture() {
+  const gate = deferred(), requests = [];
+  const input = {value: 'chosen.json', disabled: false, click() {this.clicked = true;}};
+  const button = {disabled: false}, alreadyDisabled = {disabled: true};
+  const card = {dataset: {poolId: 'pool-a'}, setAttribute() {}, removeAttribute() {}, contains: () => false,
+    querySelector: selector => selector === 'h3' ? {textContent: 'Saved name'} : input,
+    querySelectorAll: () => [input, button, alreadyDisabled]};
+  const context = load(['chooseManagedPoolUpdate', 'updateManagedPoolFile', 'poolUploadErrorMessage', 'linkedImportWarning'], {
+    poolsMessage: {textContent: ''}, pools: [{id: 'pool-a', name: 'Before'}],
+    requestConfirmation: async () => true,
+    apiUrl: x => x, apiFetch(url, options) {requests.push({url, body: JSON.parse(options.body)}); return gate.promise;},
+    renderPublicPools() {context.renders = (context.renders || 0) + 1;},
+    document: {activeElement: {}, body: {}}, publicPoolsList: {querySelectorAll: () => [card]}
+  });
+  let reads = 0;
+  const file = {name: 'new.json', size: 20, text: async () => {reads++; return '{"ObjectStates":[]}';}};
+  return {context, card, input, button, alreadyDisabled, requests, gate, file, get reads() {return reads;}};
+}
+
+test('pool update protects unsaved edits and does nothing when file selection or confirmation is cancelled', async () => {
+  const f = poolReplacementFixture();
+  await f.context.updateManagedPoolFile(f.card, null);
+  assert.equal(f.requests.length, 0);
+  f.card.dataset.dirty = 'true';
+  f.context.chooseManagedPoolUpdate(f.card);
+  assert.equal(f.input.clicked, undefined);
+  await f.context.updateManagedPoolFile(f.card, f.file);
+  assert.equal(f.reads, 0);
+  assert.match(f.context.poolsMessage.textContent, /Save your settings/);
+  f.card.dataset.dirty = 'false';
+  f.context.chooseManagedPoolUpdate(f.card);
+  assert.equal(f.input.clicked, true);
+  f.context.requestConfirmation = async () => false;
+  await f.context.updateManagedPoolFile(f.card, f.file);
+  assert.equal(f.reads, 0);
+  assert.equal(f.requests.length, 0);
+  assert.equal(f.button.disabled, false);
+  assert.equal(f.alreadyDisabled.disabled, true);
+  assert.equal(f.input.value, '');
+});
+
+test('pool update freezes the target editor, prevents duplicate requests and refreshes only after success', async () => {
+  const f = poolReplacementFixture();
+  const updating = f.context.updateManagedPoolFile(f.card, f.file);
+  await flush();
+  assert.equal(f.button.disabled, true);
+  assert.equal(f.card.dataset.updating, 'true');
+  await f.context.updateManagedPoolFile(f.card, f.file);
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.requests[0].url, '/api/pools/pool-a/replace');
+  assert.deepEqual(f.requests[0].body, {fileName: 'new.json', fileContent: '{"ObjectStates":[]}'});
+  const pool = {id: 'pool-a', name: 'Saved name', unmatchedLinkedBags: ['Missing']};
+  f.gate.resolve(response({pool, pools: [pool]}));
+  await updating;
+  assert.equal(f.context.renders, 1);
+  assert.equal(f.context.pools[0], pool);
+  assert.match(f.context.poolsMessage.textContent, /Saved settings kept/);
+  assert.match(f.context.poolsMessage.textContent, /Missing/);
+  assert.equal(f.card.dataset.updating, 'false');
+  assert.equal(f.button.disabled, false);
+  assert.equal(f.alreadyDisabled.disabled, true);
+  assert.equal(f.input.value, '');
+});
+
+test('invalid or failed updates retain the current pool and make the file input available for retry', async () => {
+  for (const error of ['invalid_pool_json', 'invalid_pool_format', 'storage_unavailable']) {
+    const f = poolReplacementFixture();
+    const updating = f.context.updateManagedPoolFile(f.card, f.file);
+    await flush();
+    f.gate.resolve({ok: false, json: async () => ({error})});
+    await updating;
+    assert.equal(f.context.pools[0].name, 'Before');
+    assert.equal(f.context.renders, undefined);
+    assert.equal(f.button.disabled, false);
+    assert.equal(f.input.value, '');
+    assert.ok(f.context.poolsMessage.textContent);
+  }
+});
+
 class Element {
   children = [];
   dataset = {};

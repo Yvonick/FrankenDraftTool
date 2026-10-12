@@ -114,8 +114,8 @@ export async function handleApi(request, env) {
       const [catalog, storedRoom] = await Promise.all([store.catalog(), roomId ? store.room(roomId) : null]);
       if (roomId && !storedRoom) return response({ error: 'room_not_found' }, 404);
       const poolRows = new Map(catalog.map(row => [row.id, row]));
-      const poolPathId = url.pathname.match(/^\/api\/pools\/([^/]+)(?:\/delete)?$/)?.[1];
-      const selectedId = body.poolId || storedRoom?.state.draftSettings.poolId || (poolPathId && decodeURIComponent(poolPathId)) || catalog.find(row => !row.deleted && JSON.parse(row.summary).public)?.id;
+      const poolPathId = url.pathname.match(/^\/api\/pools\/([^/]+)(?:\/(?:delete|replace))?$/)?.[1];
+      const selectedId = (poolPathId && decodeURIComponent(poolPathId)) || body.poolId || storedRoom?.state.draftSettings.poolId || catalog.find(row => !row.deleted && JSON.parse(row.summary).public)?.id;
       const selectedRow = poolRows.get(selectedId);
       const pinnedKey = !body.poolId && storedRoom?.state.poolObjectKey;
       const selectedKey = pinnedKey || (!selectedRow?.deleted && selectedRow?.object_key);

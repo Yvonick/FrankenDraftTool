@@ -12,6 +12,7 @@ const {
   isSpeakerOrderType,
   listPublicPools,
   registerUploadedTtsPool,
+  replacePublicTtsPool,
   removePublicPool,
   savePool,
   speakerOrderType,
@@ -1033,7 +1034,11 @@ function handleCreateRoom(response) {
   });
 }
 
-async function handlePoolUpload(request, response) {
+async function handlePoolUpload(request, response, replacePoolId = null) {
+  if (replacePoolId && !getPool(replacePoolId)?.public) {
+    sendJson(response, 404, { error: "pool_not_found" });
+    return;
+  }
   let body;
 
   try {
@@ -1060,18 +1065,25 @@ async function handlePoolUpload(request, response) {
     return;
   }
 
-  const saveUploadedPool = body.savePool === true;
-  const pool = registerUploadedTtsPool(rawJson, fileName.replace(/\.json$/i, ""), {
-    name: cleanOptionalName(body.poolName),
-    public: saveUploadedPool
-  });
+  const saveUploadedPool = Boolean(replacePoolId) || body.savePool === true;
+  let pool;
+  try {
+    pool = replacePoolId ? replacePublicTtsPool(replacePoolId, rawJson)
+      : registerUploadedTtsPool(rawJson, fileName.replace(/\.json$/i, ""), {
+        name: cleanOptionalName(body.poolName), public: saveUploadedPool
+      });
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    sendJson(response, 400, { error: "invalid_pool_format" });
+    return;
+  }
 
   if (!pool) {
     sendJson(response, 400, { error: "invalid_pool_format" });
     return;
   }
 
-  sendJson(response, 201, {
+  sendJson(response, replacePoolId ? 200 : 201, {
     pool: getPoolSummary(pool),
     pools: saveUploadedPool ? listPublicPools().map(getPoolSummary) : undefined
   });
@@ -3219,6 +3231,12 @@ async function handleRequest(request, response) {
   }
 
   const poolUpdateMatch = url.pathname.match(/^\/api\/pools\/([^/]+)$/);
+
+  const poolReplaceMatch = url.pathname.match(/^\/api\/pools\/([^/]+)\/replace$/);
+  if (poolReplaceMatch && request.method === "POST") {
+    await handlePoolUpload(request, response, decodeURIComponent(poolReplaceMatch[1]));
+    return;
+  }
 
   if (poolUpdateMatch && request.method === "POST") {
     await handleUpdatePublicPool(decodeURIComponent(poolUpdateMatch[1]), request, response);
