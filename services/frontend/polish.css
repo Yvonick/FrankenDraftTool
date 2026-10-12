@@ -124,6 +124,11 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 .compact-groups .item-stack > .group-section { grid-column: span var(--group-span, 1); min-width: 0; }
 .compact-groups .item-stack > .item-card, #auction-items.compact-groups .item-stack > .item-card { width: 100%; min-width: 0; max-width: none; }
 .compact-groups > :not(.group-section) { grid-column: 1 / -1; }
+.item-grid.packed-groups { row-gap: 0; }
+.item-grid.packed-groups > .group-section, .item-grid.packed-groups > .group-section > .item-stack { display: contents; }
+.packed-groups > .group-section > h4, .packed-groups > .group-section > .item-stack > .item-card { grid-column: var(--packed-column); grid-row: var(--packed-row); }
+.packed-groups > .group-section > h4 { min-width: 0; overflow-wrap: anywhere; margin: 0; padding-block: var(--heading-gap) .55rem; align-self: end; }
+.packed-groups > .group-section > .item-stack > .item-card { display: flex; flex-direction: column; align-self: stretch; }
 .item-grid > .group-section, .item-stack > .group-section { flex: 0 1 min(100%, calc(var(--group-columns, 1) * var(--item-width, 10.5rem) + (var(--group-columns, 1) - 1) * 1rem)); }
 .group-section { max-width: 100%; }
 .group-section > h4 { color: var(--accent-2); font-weight: 600; font-size: .875rem; }
