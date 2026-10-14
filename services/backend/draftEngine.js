@@ -22,6 +22,7 @@ const {
 const serviceName = "franken-draft-tool-backend";
 const presenceClients = new Set();
 const rooms = new Map(roomEntries.map(([id, room]) => [id, { ...room, participants: new Map(room.participants || []), clients: new Map() }]));
+for (const room of rooms.values()) syncSeatNames(room);
 const defaultSeatLimit = 6;
 const defaultJsonBodyLimit = 10000;
 const poolUploadJsonBodyLimit = 25 * 1024 * 1024;
@@ -221,6 +222,7 @@ function getSeatedParticipants(room) {
     .map((participant) => ({
       id: participant.id,
       name: participant.name,
+      online: participant.online !== false,
       admin: Boolean(participant.admin),
       host: isRoomHost(room, participant.id)
     }));
@@ -251,7 +253,7 @@ function hasRoomAdminRights(room, body = {}) {
   const actorId = String(body.actorId || body.viewerId || body.participantId || "");
   const actor = room.participants.get(actorId);
 
-  return Boolean(actor?.admin);
+  return Boolean(actor && ['seated', 'spectator'].includes(actor.role) && (actor.admin || isRoomHost(room, actorId)));
 }
 
 function sendAdminRequired(response) {
@@ -274,13 +276,13 @@ function getRoomSnapshot(roomNumber, viewerId = null) {
     listed: room.listed === true,
     seated: getSeatedParticipants(room),
     spectators: [...room.participants.values()]
-      .filter((participant) => participant.role === "spectator")
+      .filter((participant) => participant.role === "spectator" && participant.online !== false)
       .length,
     namedSpectators: [...room.participants.values()]
-      .filter((participant) => participant.role === "spectator" && participant.name)
+      .filter((participant) => participant.role === "spectator" && participant.online !== false)
       .map((participant) => ({
         id: participant.id,
-        name: participant.name,
+        name: participant.name || "Anonymous spectator",
         superSpectator: Boolean(participant.superSpectator || room.superSpectators),
         admin: Boolean(participant.admin),
         host: isRoomHost(room, participant.id)
@@ -1540,10 +1542,12 @@ function getTablePlayerSnapshot(player, room) {
     id: player.id,
     name: player.name,
     seat: player.seat,
+    vacant: participant?.role === "vacant",
+    online: participant?.online !== false && participant?.role !== "vacant",
     admin: Boolean(participant?.admin),
     host: isRoomHost(room, player.id),
     queueLength: player.queue.length,
-    lookingAtBag: Boolean(player.queue[0]),
+    lookingAtBag: Boolean(player.queue[0]) && participant?.online !== false && participant?.role !== 'vacant',
     credits: player.credits,
     mulliganTokens: player.mulliganTokens,
     banTokens: player.banTokens
@@ -1689,7 +1693,18 @@ function getAuctionSnapshot(draft, viewerId, room = null) {
   };
 }
 
+function syncSeatNames(room) {
+  for (const player of room.draft?.players || []) {
+    const member = room.participants.get(player.id);
+    if (member?.name && ['seated', 'vacant'].includes(member.role)) player.name = member.name;
+  }
+  for (const item of room.draft?.auction?.currentNomination?.items || []) {
+    if (item.pickedBy) item.pickedBy.playerName = room.draft.players.find(player => player.id === item.pickedBy.playerId)?.name || item.pickedBy.playerName;
+  }
+}
+
 function getDraftSnapshot(room, viewerId) {
+  syncSeatNames(room);
   if (!room.draft) {
     const pool = getPool(room.draftSettings.poolId);
     const method = getDraftMethod(room.draftSettings.methodId) || getDefaultDraftMethod();
@@ -2516,6 +2531,7 @@ async function handleRestartDraft(roomNumber, request, response) {
   }
 
   room.draft = null;
+  for (const member of room.participants.values()) if (member.role === "vacant") { member.role = "left"; delete member.handoffHash; }
   broadcastRoom(roomNumber);
   sendJson(response, 200, getRoomSnapshot(roomNumber, body.participantId));
 }
@@ -3469,6 +3485,12 @@ function joinRoom(roomNumber, url, response) {
   const participantId = getParticipantId(url.searchParams.get("participantId"));
   const connectionToken = crypto.randomUUID();
   const existingParticipant = room.participants.get(participantId);
+  if (existingParticipant && !['seated', 'spectator'].includes(existingParticipant.role)) {
+    sendJson(response, 403, { error: "participant_removed" }); return;
+  }
+  if (room.draft && existingParticipant?.role === 'seated' && url.searchParams.get('role') !== 'seated') {
+    sendJson(response, 409, { error: 'use_leave_control' }); return;
+  }
   const hasCreatorToken = url.searchParams.get("creatorToken") === room.creatorToken;
 
   if (hasCreatorToken && (!room.creatorId || !room.participants.has(room.creatorId) || room.creatorId === participantId)) {

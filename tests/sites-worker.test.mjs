@@ -1051,10 +1051,132 @@ test('reconnecting to a full lobby preserves identity without exceeding the seat
   const room = await f.room('bag-passing-default', 1);
   await f.env.DB.prepare('UPDATE room_sessions SET last_seen = ? WHERE room_id = ? AND participant_id = ?').bind(Date.now() - 120000, room.roomNumber, room.host.id).run();
   const replacement = { id: crypto.randomUUID(), token: crypto.randomUUID() };
-  await f.api(`${room.base}/presence?${new URLSearchParams({ participantId: replacement.id, name: 'New player', role: 'seated' })}`, undefined, replacement.token);
+  const denied = await f.api(`${room.base}/presence?${new URLSearchParams({ participantId: replacement.id, name: 'New player', role: 'seated' })}`, undefined, replacement.token);
+  assert.equal(denied.viewer.role, 'spectator', 'offline seats cannot be stolen by a new visitor');
+  assert.equal(denied.room.seated[0].online, false);
   const returned = await room.connect(room.host);
   assert.equal(returned.viewer.host, true);
-  assert.equal(returned.viewer.role, 'spectator');
+  assert.equal(returned.viewer.role, 'seated');
   assert.equal(returned.room.seated.length, 1);
   assert.equal((await f.api(room.base)).seated.length, 1);
+});
+
+test('seat handoff preserves a bag seat, revokes its old session and atomically admits only one replacement', async t => {
+  const f = await fixture(t), room = await f.room();
+  const { pool } = await f.api('/api/pools/upload', { poolJson: tinyPool, savePool: true });
+  await f.api(`${room.base}/settings`, { ...room.auth, poolId: pool.id, itemsPerType: { Units: 3, Abilities: 2, 'Speaker Order': 0 } }, room.host.token);
+  await room.start();
+  const target = room.players[1], original = (await room.connect(target)).room.draft.currentPlayer;
+  assert.equal((await f.raw(`${room.base}/participants/remove`, { actorId: target.id, targetId: room.host.id, mode: 'handoff' }, target.token)).status, 403);
+  assert.equal((await f.raw(`${room.base}/participants/remove`, { actorId: room.host.id, targetId: target.id, mode: 'remove' }, room.host.token)).status, 409);
+  const opened = await f.api(`${room.base}/participants/remove`, { actorId: room.host.id, targetId: target.id, mode: 'handoff' }, room.host.token);
+  assert.ok(opened.handoffToken);
+  assert.equal(opened.draft.table.find(p => p.id === target.id).vacant, true);
+  assert.equal((await f.raw(`${room.base}/presence?participantId=${target.id}&role=seated`, undefined, target.token)).status, 403);
+  assert.equal((await f.raw(`${room.base}/draft/pick`, { playerId: target.id, itemIds: [] }, target.token)).status, 403);
+  assert.doesNotMatch(JSON.stringify(await f.api(room.base)), /handoffHash|handoffToken/);
+  await f.restart();
+  const tokens = [crypto.randomUUID(), crypto.randomUUID()];
+  const claims = await Promise.all(tokens.map((token, i) => f.raw(`${room.base}/seats/claim`, { token: opened.handoffToken, name: `Successor ${i}` }, token)));
+  assert.deepEqual(claims.map(r => r.status).sort(), [200, 410]);
+  const index = claims.findIndex(r => r.status === 200), claimed = await claims[index].json();
+  assert.equal(claimed.viewer.id, target.id);
+  assert.equal(claimed.viewer.admin, false); assert.equal(claimed.viewer.host, false);
+  assert.deepEqual(claimed.draft.currentPlayer.currentBag, original.currentBag);
+  assert.equal(claimed.draft.currentPlayer.queueLength, original.queueLength);
+  assert.equal(claimed.viewer.name, `Successor ${index}`);
+  assert.equal((await f.raw(`${room.base}/seats/claim`, { token: opened.handoffToken, name: 'Replay' }, crypto.randomUUID())).status, 410);
+  const exportData = await f.api(`${room.base}/draft/export?${new URLSearchParams(room.auth)}`, undefined, room.host.token);
+  assert.ok(exportData.ObjectStates.some(o => o.Nickname === `Successor ${index}`));
+  const logs = await f.api(`${room.base}/logs?viewerId=${room.host.id}`, undefined, room.host.token);
+  assert.ok(logs.events.some(e => e.kind === 'seat_claim' && /Successor/.test(e.note)));
+  assert.doesNotMatch(JSON.stringify(logs), new RegExp(opened.handoffToken));
+});
+
+test('host can leave a seat without transferring host rights, even with spectators disabled', async t => {
+  const f = await fixture(t), room = await f.room();
+  await f.api(`${room.base}/settings`, { ...room.auth, allowSpectators: false }, room.host.token);
+  await room.start();
+  const left = await f.api(`${room.base}/participants/leave`, { actorId: room.host.id, mode: 'handoff' }, room.host.token);
+  assert.equal(left.viewer.role, 'spectator'); assert.equal(left.viewer.host, true);
+  assert.notEqual(left.viewer.id, room.host.id);
+  const claimed = await f.api(`${room.base}/seats/claim`, { token: left.handoffToken, name: 'New host-seat occupant' }, crypto.randomUUID());
+  assert.equal(claimed.viewer.host, false); assert.equal(claimed.viewer.admin, false);
+  const rejoined = await f.api(`${room.base}/presence?participantId=${left.viewer.id}&role=spectator`, undefined, room.host.token);
+  assert.equal(rejoined.viewer.host, true);
+  const restarted = await f.api(`${room.base}/draft/restart`, { actorId: left.viewer.id, participantId: left.viewer.id }, room.host.token);
+  assert.equal(restarted.draft.status, 'not_started');
+});
+
+test('auction handoff keeps resources and seat order through undo without restoring the old owner', async t => {
+  const f = await fixture(t), room = await f.room('nomination-auction');
+  const { pool } = await f.api('/api/pools/upload', { poolJson: tinyPool, savePool: true });
+  await f.api(`${room.base}/settings`, { ...room.auth, poolId: pool.id, auctionSpeakerMode: 'none', itemsPerType: { Units: 1, Abilities: 1, 'Speaker Order': 0 } }, room.host.token);
+  const started = await room.start();
+  const speaker = room.players.find(p => p.id === started.draft.auction.speakerId);
+  await f.api(`${room.base}/draft/auction/nominate`, { playerId: speaker.id, type: 'Units' }, speaker.token);
+  const target = room.players[1];
+  const before = (await room.connect(target)).room.draft.auction.players.find(p => p.playerId === target.id);
+  const opened = await f.api(`${room.base}/participants/remove`, { actorId: room.host.id, targetId: target.id, mode: 'handoff' }, room.host.token);
+  const token = crypto.randomUUID();
+  const claimed = await f.api(`${room.base}/seats/claim`, { token: opened.handoffToken, name: 'Replacement' }, token);
+  const after = claimed.draft.auction.players.find(p => p.playerId === target.id);
+  for (const key of ['seat', 'credits', 'banTokens', 'mulliganTokens']) assert.equal(after[key], before[key]);
+  assert.deepEqual(after.draftedItems, before.draftedItems);
+  const undone = await f.api(`${room.base}/draft/auction/undo`, room.auth, room.host.token);
+  assert.equal(undone.draft.auction.players.find(p => p.playerId === target.id).name, 'Replacement');
+  assert.equal((await f.raw(`${room.base}/draft/auction/no-ban-preset`, { playerId: target.id, noBanPreset: true }, target.token)).status, 403);
+  const connected = await f.api(`${room.base}/presence?participantId=${target.id}&role=seated`, undefined, token);
+  assert.equal(connected.viewer.name, 'Replacement');
+});
+
+test('admins can remove anonymous spectators and seats; removal and restart invalidate replacement links', async t => {
+  const f = await fixture(t), room = await f.room();
+  const admin = room.players[1];
+  await f.api(`${room.base}/participants/admin`, { ...room.auth, participantId: admin.id, admin: true }, room.host.token);
+  const observer = { id: crypto.randomUUID(), token: crypto.randomUUID() };
+  const observed = await f.api(`${room.base}/presence?participantId=${observer.id}&role=spectator`, undefined, observer.token);
+  assert.ok(observed.room.namedSpectators.some(p => p.id === observer.id));
+  await f.api(`${room.base}/participants/remove`, { actorId: admin.id, targetId: observer.id }, admin.token);
+  assert.equal((await f.raw(`${room.base}/presence?participantId=${observer.id}&role=spectator`, undefined, observer.token)).status, 403);
+  assert.equal((await f.raw(`${room.base}/participants/remove`, { actorId: admin.id, targetId: room.host.id }, admin.token)).status, 409);
+  await room.start();
+  const left = await f.api(`${room.base}/participants/leave`, { actorId: admin.id, mode: 'handoff' }, admin.token);
+  const regen = await f.api(`${room.base}/seats/link`, { actorId: room.host.id, targetId: admin.id }, room.host.token);
+  assert.equal((await f.raw(`${room.base}/seats/claim`, { token: left.handoffToken, name: 'Old link' }, crypto.randomUUID())).status, 410);
+  const removed = await f.api(`${room.base}/participants/remove`, { actorId: room.host.id, targetId: admin.id, mode: 'remove', confirmRestart: true }, room.host.token);
+  assert.equal(removed.draft.status, 'not_started'); assert.equal(removed.seated.length, 1);
+  assert.equal((await f.raw(`${room.base}/seats/claim`, { token: regen.handoffToken, name: 'Late visitor' }, crypto.randomUUID())).status, 410);
+  await f.restart();
+  assert.equal((await f.api(room.base)).seated.length, 1);
+});
+
+test('leaving the lobby is explicit and survives reload, and claimers cannot occupy two seats', async t => {
+  const f = await fixture(t), room = await f.room();
+  const target = room.players[1];
+  const left = await f.api(`${room.base}/participants/leave`, { actorId: target.id }, target.token);
+  assert.equal(left.viewer.role, 'spectator'); assert.equal(left.seated.length, 1);
+  assert.equal((await f.raw(`${room.base}/presence?participantId=${target.id}&role=seated`, undefined, target.token)).status, 403);
+  await f.api(`${room.base}/presence?participantId=${left.viewer.id}&role=seated&name=Returned`, undefined, target.token);
+  await room.start();
+  const opened = await f.api(`${room.base}/participants/remove`, { actorId: room.host.id, targetId: left.viewer.id, mode: 'handoff' }, room.host.token);
+  assert.equal((await f.raw(`${room.base}/seats/claim`, { actorId: room.host.id, token: opened.handoffToken, name: 'Two seats' }, room.host.token)).status, 409);
+});
+
+test('legacy expired duplicate seats do not overfill a lobby or resurrect seats outside an active draft', async t => {
+  const f = await fixture(t), room = await f.room();
+  const store = createStorage(f.env);
+  let stored = await store.room(room.roomNumber);
+  const ghost = crypto.randomUUID();
+  stored.state.participants.unshift([ghost, { id: ghost, name: 'Expired legacy seat', role: 'seated' }]);
+  await store.commit({ room: { id: room.roomNumber, expected: stored.revision, state: stored.state } });
+  let snapshot = await f.api(room.base);
+  assert.deepEqual(new Set(snapshot.seated.map(p => p.id)), new Set(room.players.map(p => p.id)));
+  await room.start();
+  stored = await store.room(room.roomNumber);
+  stored.state.participants.find(([id]) => id === ghost)[1].role = 'seated';
+  await store.commit({ room: { id: room.roomNumber, expected: stored.revision, state: stored.state } });
+  snapshot = await f.api(room.base);
+  assert.equal(snapshot.seated.length, 2); assert.equal(snapshot.draft.table.length, 2);
+  assert.equal((await store.room(room.roomNumber)).state.participants.find(([id]) => id === ghost)[1].role, 'spectator');
 });

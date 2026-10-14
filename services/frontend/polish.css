@@ -308,3 +308,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 @media (pointer: coarse) {
   .item-tool.icon-button { width: 2rem; min-width: 2rem; height: 2rem; min-height: 2rem; }
 }
+/* Seat actions stay compact; destructive choices are separated in the dialog. */
+.seat-management-options { display: grid; gap: 12px; margin: 16px 0; }
+.seat-management-options button { white-space: normal; }
+#seat-link { width: 100%; min-width: 0; }

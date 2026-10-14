@@ -146,7 +146,8 @@
   const titles = { draft_started: 'Started the draft', recording_started: 'History recording began', bag_pick: 'Picked from a bag', bag_pass: 'Passed a bag without picking',
     nominate: 'Nominated', mulligan: 'Mulliganed the draw', keep_draw: 'Kept the draw', ban: 'Banned an item', decline_ban: 'Declined to ban',
     wildcard: 'Chose a wildcard replacement', bid_locked: 'Locked bids', speaker_pick: 'Picked speaker order', auction_pick: 'Picked an item',
-    no_ban_preset: 'Changed no-ban preset', undo: 'Undid an action', 'shuffle-pool': 'Shuffled all item types', draft_restarted: 'Restarted the room' };
+    no_ban_preset: 'Changed no-ban preset', undo: 'Undid an action', 'shuffle-pool': 'Shuffled all item types', draft_restarted: 'Restarted the room',
+    seat_remove: 'Removed a participant', seat_leave: 'Left a seat', seat_claim: 'Joined a replacement seat', seat_link: 'Created a replacement link' };
   function markUndone() {
     for (const [sequence, by] of undone) {
       const row = rows.get(sequence);

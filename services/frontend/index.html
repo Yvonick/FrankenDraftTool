@@ -1703,6 +1703,8 @@
           <button id="share-room" class="secondary" type="button">Share Room</button>
           <button id="sit-down" class="secondary" type="button" hidden>Sit Down</button>
           <button id="spectate-room" class="secondary" type="button" hidden>Become Spectator</button>
+          <button id="leave-room" class="secondary" type="button" hidden>Leave Table</button>
+          <button id="new-player-session" class="secondary" type="button" hidden>Join as Another Player</button>
           <button id="auction-undo-top" class="secondary icon-button" type="button" aria-label="Undo Last Action" title="Undo Last Action" data-icon="undo-2" hidden></button>
           <button id="auction-shuffle-top" class="secondary icon-button" type="button" aria-label="Shuffle Pool" title="Shuffle Pool" data-icon="shuffle" hidden></button>
           <button id="restart-draft" class="secondary" type="button" hidden>Restart Draft</button>
@@ -1980,7 +1982,24 @@
 
     <dialog class="modal-backdrop" id="profile-modal" aria-labelledby="profile-title" hidden><form class="modal" id="profile-form"><h3 id="profile-title">Your name</h3><label>Name<input id="profile-name" maxlength="40" autocomplete="name"></label><p class="secondary-copy">Remembered for this browser. Room roles and host rights stay separate.</p><p id="profile-status" role="status"></p><div class="actions"><button type="submit">Save Name</button><button class="secondary" id="profile-cancel" type="button">Cancel</button></div></form></dialog>
     <dialog class="modal-backdrop" id="inspector-modal" aria-labelledby="inspector-title" hidden><section class="modal inspector"><div class="section-heading"><h3 id="inspector-title"></h3><button id="inspector-close" class="secondary icon-button" type="button" aria-label="Close preview" title="Close preview" data-icon="x"></button></div><div id="inspector-images"></div><p id="inspector-description"></p></section></dialog>
+    <dialog class="modal-backdrop" id="seat-management-modal" aria-labelledby="seat-management-title" hidden>
+      <section class="modal"><h3 id="seat-management-title"></h3><p id="seat-management-message"></p>
+        <div class="seat-management-options"><button id="seat-handoff" type="button">Open Seat for Replacement</button><button id="seat-remove" class="secondary danger" type="button">Remove Seat and Restart</button></div>
+        <button id="seat-management-cancel" class="secondary" type="button">Cancel</button>
+      </section>
+    </dialog>
+    <dialog class="modal-backdrop" id="seat-link-modal" aria-labelledby="seat-link-title" hidden>
+      <section class="modal"><h3 id="seat-link-title">Replacement seat link</h3><p>The next player will choose a name and inherit this seat's picks, bags and resources. This link can be used once.</p>
+        <label>Seat link<input id="seat-link" readonly></label><p id="seat-link-status" role="status"></p><div class="actions"><button id="seat-link-copy" type="button">Copy Link</button><button id="seat-link-close" class="secondary" type="button">Done</button></div>
+      </section>
+    </dialog>
+    <dialog class="modal-backdrop" id="seat-claim-modal" aria-labelledby="seat-claim-title" hidden>
+      <form class="modal" id="seat-claim-form"><h3 id="seat-claim-title">Take over this seat</h3><label>Your name<input id="seat-claim-name" maxlength="40" required autocomplete="nickname"></label>
+        <p id="seat-claim-status" role="status"></p><div class="actions"><button id="seat-claim-submit" type="submit">Join Seat</button><button id="seat-claim-cancel" class="secondary" type="button">Cancel</button></div>
+      </form>
+    </dialog>
     <script src="/icons.js"></script>
+    <script src="/room-identity.js"></script>
     <script src="/group-layout.js" defer></script>
     <script src="/draft-splitter.js" defer></script>
     <script src="/room-logs.js" defer></script>
@@ -1990,9 +2009,10 @@
       const sessionKey = "frankenDraftTool:sessionToken";
       const sessionToken = sessionStorage.getItem(sessionKey) || crypto.randomUUID();
       sessionStorage.setItem(sessionKey, sessionToken);
+      const roomStorage = window.frankenRoomIdentity;
       const apiFetch = (url, options = {}) => {
         const headers = new Headers(options.headers);
-        headers.set("X-Franken-Session", sessionToken);
+        headers.set("X-Franken-Session", roomStorage.tokenFor(url, sessionToken));
         return fetch(url, { ...options, headers });
       };
       // Authenticated streams resume from durable room state after disconnects.
@@ -2049,7 +2069,13 @@
               signal: abort.signal,
               headers: { Accept: this.isRoom ? "text/event-stream" : "application/json" }
             });
-            if (!result.ok) throw new Error("Could not refresh room");
+            if (!result.ok) {
+              const error = await result.json().catch(() => ({}));
+              if (this.isRoom && ['participant_removed', 'participant_session_mismatch', 'participant_session_required'].includes(error.error)) {
+                this.close(); this.onrevoked?.(); return;
+              }
+              throw new Error("Could not refresh room");
+            }
             if (!result.headers.get("content-type")?.includes("text/event-stream")) {
               const data = await result.json();
               if (generation === this.generation) this.deliver(data);
@@ -2103,6 +2129,10 @@
       const shareRoom = document.querySelector("#share-room");
       const sitDown = document.querySelector("#sit-down");
       const spectateRoom = document.querySelector("#spectate-room");
+      const leaveRoom = document.querySelector("#leave-room");
+      let seatManagementTarget = null;
+      let seatManagementPending = false;
+      let seatClaimToken = new URLSearchParams(location.hash.slice(1)).get('seat');
       const auctionUndoTop = document.querySelector("#auction-undo-top");
       const auctionShuffleTop = document.querySelector("#auction-shuffle-top");
       const restartDraft = document.querySelector("#restart-draft");
@@ -2513,14 +2543,14 @@
 
       function participantIdFor(roomId) {
         const key = storageKey(roomId, "participantId");
-        const existing = sessionStorage.getItem(key);
+        const existing = roomStorage.getItem(key);
 
         if (existing) {
           return existing;
         }
 
         const id = makeId();
-        sessionStorage.setItem(key, id);
+        roomStorage.setItem(key, id);
         return id;
       }
 
@@ -3881,16 +3911,16 @@
       }
 
       function hasCreatorToken() {
-        return Boolean(sessionStorage.getItem(storageKey(currentRoomNumber, "creatorToken")));
+        return Boolean(roomStorage.getItem(storageKey(currentRoomNumber, "creatorToken")));
       }
 
       function hasHostRights() {
-        return hasCreatorToken() || Boolean(latestRoom?.viewer?.admin);
+        return hasCreatorToken() || Boolean(latestRoom?.viewer?.admin || latestRoom?.viewer?.host);
       }
 
       function hostPayload(extra = {}) {
         return {
-          creatorToken: sessionStorage.getItem(storageKey(currentRoomNumber, "creatorToken")),
+          creatorToken: roomStorage.getItem(storageKey(currentRoomNumber, "creatorToken")),
           actorId: currentViewerId,
           viewerId: currentViewerId,
           ...extra
@@ -3922,6 +3952,8 @@
 
       function participantStatus(participant, fallback) {
         const labels = [fallback];
+        if (participant.vacant) labels.push("Open seat");
+        else if (participant.online === false) labels.push("Offline");
 
         if (participant.host) {
           labels.push("Host");
@@ -3936,8 +3968,22 @@
         return labels.join(" / ");
       }
 
+      function appendSeatAction(container, participant) {
+        if (!hasHostRights() || !participant?.id || participant.host || participant.id === currentViewerId) return;
+        const actions = container.querySelector('.participant-actions') || document.createElement('div');
+        actions.className = 'participant-actions';
+        const button = document.createElement('button');
+        button.type = 'button'; button.className = 'secondary';
+        button.textContent = participant.vacant ? 'Replacement Link' : 'Remove';
+        button.dataset.seatTarget = participant.id;
+        button.addEventListener('click', event => { event.stopPropagation(); openSeatManagement(participant.id); });
+        actions.append(button);
+        if (!actions.parentElement) container.append(actions);
+      }
+
       function appendAdminAction(container, participant) {
-        if (!hasHostRights() || !participant?.id || participant.host) {
+        appendSeatAction(container, participant);
+        if (!hasHostRights() || !participant?.id || participant.host || participant.vacant) {
           return;
         }
 
@@ -3965,7 +4011,7 @@
 
         if (room.namedSpectators.length === 0) {
           const empty = document.createElement("p");
-          empty.textContent = "No named spectators";
+          empty.textContent = "No spectators online";
           namedSpectators.append(empty);
           return;
         }
@@ -3982,7 +4028,7 @@
 
           appendAdminAction(card, spectator);
 
-          if (hasHostRights() && !room.superSpectators) {
+          if (hasHostRights() && !room.superSpectators && spectator.name !== "Anonymous spectator") {
             const actions = card.querySelector(".participant-actions") || document.createElement("div");
             actions.className = "participant-actions";
             const button = document.createElement("button");
@@ -4051,7 +4097,7 @@
           name.textContent = player.name;
           appendHostBadge(name, player);
           const seat = document.createElement("span");
-          seat.textContent = `${player.admin && !player.host ? "Admin / " : ""}Seat ${player.seat}`;
+          seat.textContent = participantStatus(player, `Seat ${player.seat}`);
           identity.append(name, seat);
           const status = document.createElement("div");
           status.className = `table-player-status${player.lookingAtBag ? " choosing" : ""}`;
@@ -4060,7 +4106,7 @@
             ? `${player.credits} credits`
             : `${player.queueLength} bag${player.queueLength === 1 ? "" : "s"} queued`;
           const looking = document.createElement("span");
-          looking.textContent = draft.engine === "auction"
+          looking.textContent = player.vacant ? "Awaiting replacement" : player.online === false ? "Offline" : draft.engine === "auction"
             ? `${player.mulliganTokens} mulligan / ${player.banTokens} ban`
             : (draft.status === "complete" ? "Finished" : player.lookingAtBag ? "Choosing" : "Waiting");
           status.append(looking, queue);
@@ -4597,6 +4643,7 @@
         const footer = document.createElement("footer");
         appendAdminAction(footer, {
           id: player.playerId,
+          vacant: latestRoom?.draft.table?.find(member => member.id === player.playerId)?.vacant,
           host: player.host,
           admin: player.admin
         });
@@ -5569,6 +5616,9 @@
         startDraft.disabled = roomStartPending || roomPoolSavePending || data.seated.length === 0;
         sitDown.hidden = currentRole !== "spectator" || !draftNotStarted;
         spectateRoom.hidden = currentRole !== "seated" || !draftNotStarted || data.allowSpectators === false;
+        leaveRoom.hidden = !['seated', 'spectator'].includes(currentRole);
+        leaveRoom.textContent = currentRole === 'seated' ? 'Leave Table' : 'Leave Room';
+        document.querySelector('#new-player-session').hidden = !currentRole || !draftNotStarted;
         renderDraft(data.draft, priorDraftStatus);
         scheduleAuctionDock();
         previousDraftStatus = data.draft.status;
@@ -5600,7 +5650,7 @@
       }
 
       function openSitModal() {
-        sitName.value = sessionStorage.getItem(storageKey(currentRoomNumber, "name")) || rememberedName;
+        sitName.value = roomStorage.getItem(storageKey(currentRoomNumber, "name")) || rememberedName;
         openModal(sitModal, sitName);
       }
 
@@ -5632,7 +5682,7 @@
 
       function connectToRoom(role, name = "", remember = false) {
         if (name && remember) rememberName(name).catch(() => { roomMessage.textContent = "Your name could not be remembered. You can retry from Your name."; });
-        if (role === "spectator" && latestRoom?.allowSpectators === false) {
+        if (role === "spectator" && latestRoom?.allowSpectators === false && roomStorage.getItem(storageKey(currentRoomNumber, 'role')) !== 'spectator') {
           roomMessage.textContent = "Spectators are disabled for this room.";
           openJoinModal();
           return;
@@ -5647,7 +5697,7 @@
           role,
           participantId: currentViewerId
         });
-        const creatorToken = sessionStorage.getItem(storageKey(currentRoomNumber, "creatorToken"));
+        const creatorToken = roomStorage.getItem(storageKey(currentRoomNumber, "creatorToken"));
 
         if (creatorToken) {
           params.set("creatorToken", creatorToken);
@@ -5666,11 +5716,12 @@
           sitDown.hidden = currentRole !== "spectator" || latestRoom?.draft.status !== "not_started";
 
           if (viewer.name) {
-            sessionStorage.setItem(storageKey(currentRoomNumber, "name"), viewer.name);
+            roomStorage.setItem(storageKey(currentRoomNumber, "name"), viewer.name);
           }
 
-          sessionStorage.setItem(storageKey(currentRoomNumber, "participantId"), viewer.id);
-          sessionStorage.setItem(storageKey(currentRoomNumber, "role"), currentRole);
+          roomStorage.setItem(storageKey(currentRoomNumber, "participantId"), viewer.id);
+          roomStorage.setItem(storageKey(currentRoomNumber, "role"), currentRole);
+          if (roomStorage.isIsolated(currentRoomNumber)) history.replaceState(null, '', roomStorage.restoredPath(currentRoomNumber));
 
           if (viewer.seatDenied) {
             roomMessage.textContent = "All seats are filled, so you are spectating for now.";
@@ -5682,6 +5733,7 @@
         roomEvents.onmessage = (event) => {
           renderRoom(JSON.parse(event.data));
         };
+        roomEvents.onrevoked = () => handleRoomAccessLost();
 
         roomEvents.onopen = () => {
           roomMessage.textContent = currentRole === "seated" ? "You are seated." : "You are spectating.";
@@ -5692,6 +5744,91 @@
             ? "Spectators are disabled for this room."
             : "Connection lost. Trying to reconnect...";
         };
+      }
+
+      async function handleRoomAccessLost() {
+        roomEvents?.close(); cancelAutomaticPick();
+        roomStorage.clear(currentRoomNumber);
+        history.replaceState(null, '', `/rooms/${currentRoomNumber}`);
+        currentViewerId = null; currentRole = null;
+        playerDraftPanel.hidden = true; auctionPanel.hidden = true;
+        privateDraftedItems.replaceChildren(); currentBag.replaceChildren();
+        try {
+          const result = await apiFetch(`/api/rooms/${currentRoomNumber}`);
+          if (result.ok) renderRoom(await result.json(), { force: true });
+        } catch {}
+        roomMessage.textContent = 'Your room access has ended or this seat was reassigned. Ask the host for a replacement link if needed.';
+      }
+
+      function seatManagementError(error) {
+        return ({ seat_link_invalid: 'This seat link has already been used, replaced, or cancelled. Ask an admin for a new one.',
+          already_seated: 'You already occupy another seat. Leave it before taking this one.',
+          participant_session_mismatch: 'This saved seat is no longer yours. Reload the room and try the replacement link again.',
+          participant_removed: 'Your previous room access has ended. Reload and try the replacement link again.',
+          admin_required: 'Only the host or an admin can manage other participants.',
+          participant_not_found: 'That participant has already left.',
+          room_busy: 'The room changed. Please try again.' })[error] || 'Could not update this seat. Please try again.';
+      }
+
+      function applySeatResponse(data, changingIdentity) {
+        if (changingIdentity) {
+          roomEvents?.close(); cancelAutomaticPick();
+          const token = roomStorage.tokenFor(`/api/rooms/${currentRoomNumber}`, sessionToken);
+          const creatorToken = data.viewer?.host ? roomStorage.getItem(storageKey(currentRoomNumber, 'creatorToken')) : null;
+          if (data.identity) roomStorage.adopt(currentRoomNumber, data.identity, token, creatorToken);
+          else roomStorage.clear(currentRoomNumber);
+          history.replaceState(null, '', roomStorage.restoredPath(currentRoomNumber));
+          currentViewerId = data.identity?.participantId || null;
+          currentRole = data.identity?.role || null;
+        }
+        renderRoom(data, { force: true });
+        if (changingIdentity && data.identity) connectToRoom(data.identity.role, data.identity.name);
+      }
+
+      async function openSeatManagement(id = currentViewerId) {
+        if (seatManagementPending) return;
+        const self = id === currentViewerId;
+        const target = latestRoom.draft.table?.find(member => member.id === id)
+          || latestRoom.seated.find(member => member.id === id) || latestRoom.namedSpectators.find(member => member.id === id)
+          || (self ? latestRoom.viewer : null);
+        if (!target) return;
+        seatManagementTarget = { id, name: target.name, self, vacant: target.vacant, hasSeat: Boolean(latestRoom.draft.table?.some(member => member.id === id)) };
+        if (seatManagementTarget.hasSeat) {
+          document.querySelector('#seat-management-title').textContent = self ? 'Leave your seat' : `Remove ${target.name}`;
+          document.querySelector('#seat-management-message').textContent = target.vacant
+            ? 'Create a new replacement link (the previous link will stop working), or remove this seat and discard the current draft for everyone.'
+            : 'Keep the seat and its draft progress for a replacement, or remove the seat and return everyone to setup. Removing the seat discards the current draft.';
+          document.querySelector('#seat-handoff').textContent = target.vacant ? 'New Replacement Link' : 'Open Seat for Replacement';
+          openModal(document.querySelector('#seat-management-modal'), document.querySelector('#seat-management-cancel'));
+        } else if (await requestConfirmation({ title: self ? 'Leave the table?' : `Remove ${target.name}?`,
+          message: self ? 'Release your seat or leave the spectator list?' : 'Remove this participant from the room? Their current access will end.', acceptLabel: self ? 'Leave' : 'Remove' })) await changeSeat('remove');
+      }
+
+      async function changeSeat(mode) {
+        if (!seatManagementTarget || seatManagementPending) return;
+        const target = { ...seatManagementTarget };
+        closeModal(document.querySelector('#seat-management-modal'));
+        if (mode === 'remove' && target.hasSeat && !await requestConfirmation({ title: 'Remove seat and restart?',
+          message: 'This discards every player\'s current picks, bags, bids and auction progress and returns the whole room to setup. This cannot be undone.', acceptLabel: 'Remove Seat and Restart' })) return;
+        seatManagementPending = true;
+        leaveRoom.disabled = true;
+        try {
+          const endpoint = mode === 'link' ? 'seats/link' : target.self ? 'participants/leave' : 'participants/remove';
+          const result = await apiFetch(`/api/rooms/${currentRoomNumber}/${endpoint}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ actorId: currentViewerId, targetId: target.id, mode, confirmRestart: mode === 'remove' && target.hasSeat })
+          });
+          const data = await result.json();
+          if (!result.ok) throw new Error(seatManagementError(data.error));
+          applySeatResponse(data, target.self);
+          if (data.handoffToken) {
+            document.querySelector('#seat-link').value = `${location.origin}/rooms/${currentRoomNumber}#seat=${data.handoffToken}`;
+            document.querySelector('#seat-link-status').textContent = '';
+            openModal(document.querySelector('#seat-link-modal'), document.querySelector('#seat-link-copy'));
+          } else if (target.self && !data.identity) location.href = '/';
+          roomMessage.textContent = target.self ? 'You have left the seat.' : 'Participant updated.';
+        } catch (error) { roomMessage.textContent = error.message; }
+        finally { seatManagementPending = false; leaveRoom.disabled = false; }
       }
 
       async function enterRoom(id) {
@@ -5729,8 +5866,14 @@
         renderRoom(room);
         show(roomView);
 
-        const savedRole = sessionStorage.getItem(storageKey(id, "role"));
-        const savedName = sessionStorage.getItem(storageKey(id, "name"));
+        const savedRole = roomStorage.getItem(storageKey(id, "role"));
+        const savedName = roomStorage.getItem(storageKey(id, "name"));
+        if (seatClaimToken) {
+          history.replaceState(null, '', location.pathname + location.search);
+          document.querySelector('#seat-claim-name').value = rememberedName;
+          openModal(document.querySelector('#seat-claim-modal'), document.querySelector('#seat-claim-name'));
+          return;
+        }
 
         if (savedRole === "seated" && savedName) {
           connectToRoom("seated", savedName);
@@ -5762,7 +5905,7 @@
           }
 
           const room = await response.json();
-          sessionStorage.setItem(storageKey(room.roomNumber, "creatorToken"), room.creatorToken);
+          roomStorage.setItem(storageKey(room.roomNumber, "creatorToken"), room.creatorToken);
           if (selectedPoolId) {
             const pool = poolById(selectedPoolId);
             const configured = await apiFetch(`/api/rooms/${room.roomNumber}/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ creatorToken: room.creatorToken, poolId: selectedPoolId, ...(pool?.defaultParameters || {}) }) });
@@ -6262,13 +6405,50 @@
       });
 
       sitDown.addEventListener("click", openSitModal);
+      leaveRoom.addEventListener('click', () => openSeatManagement());
+      document.querySelector('#new-player-session').addEventListener('click', async () => {
+        if (!await requestConfirmation({ title: 'Join as another player?', message: 'Only this tab will switch identities. Your existing seat stays reserved and can be reopened from its original room URL.', acceptLabel: 'New Player Session' })) return;
+        roomEvents?.close(); cancelAutomaticPick();
+        history.replaceState(null, '', `/rooms/${currentRoomNumber}`);
+        roomStorage.fork(currentRoomNumber);
+        currentViewerId = null; currentRole = null;
+        await enterRoom(currentRoomNumber);
+      });
+      document.querySelector('#seat-handoff').addEventListener('click', () => changeSeat(seatManagementTarget?.vacant ? 'link' : 'handoff'));
+      document.querySelector('#seat-remove').addEventListener('click', () => changeSeat('remove'));
+      document.querySelector('#seat-management-cancel').addEventListener('click', () => closeModal(document.querySelector('#seat-management-modal')));
+      document.querySelector('#seat-link-close').addEventListener('click', () => closeModal(document.querySelector('#seat-link-modal')));
+      document.querySelector('#seat-link-copy').addEventListener('click', async () => {
+        const input = document.querySelector('#seat-link');
+        try { await navigator.clipboard.writeText(input.value); document.querySelector('#seat-link-status').textContent = 'Link copied.'; }
+        catch { input.focus(); input.select(); document.querySelector('#seat-link-status').textContent = 'Clipboard unavailable. Select and copy the link above.'; }
+      });
+      document.querySelector('#seat-claim-cancel').addEventListener('click', () => { seatClaimToken = null; closeModal(document.querySelector('#seat-claim-modal')); enterRoom(currentRoomNumber); });
+      document.querySelector('#seat-claim-form').addEventListener('submit', async event => {
+        event.preventDefault();
+        const button = document.querySelector('#seat-claim-submit');
+        if (button.disabled) return;
+        button.disabled = true;
+        try {
+          const result = await apiFetch(`/api/rooms/${currentRoomNumber}/seats/claim`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ actorId: roomStorage.getItem(storageKey(currentRoomNumber, 'participantId')) || undefined,
+              token: seatClaimToken, name: document.querySelector('#seat-claim-name').value.trim() })
+          });
+          const data = await result.json();
+          if (!result.ok) throw new Error(seatManagementError(data.error));
+          seatClaimToken = null; closeModal(document.querySelector('#seat-claim-modal'));
+          applySeatResponse(data, true);
+        } catch (error) { document.querySelector('#seat-claim-status').textContent = error.message; }
+        finally { button.disabled = false; }
+      });
       spectateRoom.addEventListener("click", () => {
         if (latestRoom?.allowSpectators === false) {
           roomMessage.textContent = "Spectators are disabled for this room.";
           return;
         }
 
-        const name = sessionStorage.getItem(storageKey(currentRoomNumber, "name")) || "";
+        const name = roomStorage.getItem(storageKey(currentRoomNumber, "name")) || "";
         connectToRoom("spectator", name);
       });
       cancelSit.addEventListener("click", closeSitModal);

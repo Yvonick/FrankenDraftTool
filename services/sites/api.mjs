@@ -6,6 +6,7 @@ import { roomStream } from './room-stream.mjs';
 import { captureHistoryBefore, recordDraftAction } from './draft-history.mjs';
 import { handleHistoryApi } from './history-api.mjs';
 import { readRoomLogs } from './room-logs.mjs';
+import { activeMember, manageSeat } from './seat-management.mjs';
 
 const encoder = new TextEncoder();
 const validId = value => typeof value === 'string' && /^[a-zA-Z0-9-]{8,80}$/.test(value);
@@ -89,6 +90,8 @@ export async function handleApi(request, env) {
     if (url.pathname === '/api/rooms' && request.method === 'GET') return response({ rooms: await store.currentRooms() });
     const roomMatch = url.pathname.match(/^\/api\/rooms\/(\d{6})(?:\/|$)/);
     const roomId = roomMatch?.[1];
+    const seatAction = request.method === 'POST' && url.pathname.match(/^\/api\/rooms\/\d{6}\/(?:participants\/(remove|leave)|seats\/(claim|link))$/);
+    const management = seatAction && (seatAction[1] || seatAction[2]);
     const presence = roomId && url.pathname === `/api/rooms/${roomId}/presence`;
     if (presence && request.method === 'GET' && request.headers.get('accept') === 'text/event-stream') {
       return await roomStream(request, store, snapshotRequest => {
@@ -99,7 +102,7 @@ export async function handleApi(request, env) {
     }
     const actorId = presence ? url.searchParams.get('participantId') : body.playerId || body.actorId || body.viewerId || body.participantId || url.searchParams.get('actorId') || url.searchParams.get('viewerId') || url.searchParams.get('participantId');
     if (presence && !validId(actorId)) return response({ error: 'invalid_participant' }, 400);
-    const hash = (presence || (roomId && actorId)) ? await tokenHash(request) : null;
+    const hash = (presence || management || (roomId && actorId)) ? await tokenHash(request) : null;
     if (roomId && url.pathname === `/api/rooms/${roomId}/logs` && request.method === 'GET') {
       return response(await readRoomLogs(store, roomId, actorId, hash, Number(url.searchParams.get('after') || 0)));
     }
@@ -132,13 +135,16 @@ export async function handleApi(request, env) {
       if (body.poolId && (!selectedRow || selectedRow.deleted)) return response({ error: 'invalid_pool' }, 400);
       const pools = registryModule.createPoolRegistry({ initialPools, assetOverrides });
       const engine = engineModule.createDraftEngine({ pools, roomEntries: storedRoom ? [[roomId, storedRoom.state]] : [] });
-      const historyAction = request.method === 'POST' ? url.pathname.match(/^\/api\/rooms\/\d{6}\/draft\/(start|restart|pick|auction\/[a-z-]+)$/)?.[1] : null;
+      const historyAction = management && storedRoom?.state.draft
+        ? (body.mode === 'remove' && storedRoom.state.draft.players.some(player => player.id === (management === 'leave' ? actorId : body.targetId)) ? 'restart' : `seat_${management}`)
+        : request.method === 'POST' ? url.pathname.match(/^\/api\/rooms\/\d{6}\/draft\/(start|restart|pick|auction\/[a-z-]+)$/)?.[1] : null;
       const historyBefore = captureHistoryBefore(engine.rooms.get(roomId), body, historyAction);
       const out = capture();
       let session;
       let active = new Set();
       let existingSession;
-      let seatRelinquished = false;
+      let seatResult;
+      let seatsRepaired = false;
       if (roomId) {
         active = await store.activeParticipants(roomId);
         if (actorId) {
@@ -146,24 +152,35 @@ export async function handleApi(request, env) {
           existingSession = await store.session(roomId, actorId);
           if (existingSession && existingSession.token_hash !== hash) return response({ error: 'participant_session_mismatch' }, 403);
           if (!presence && !existingSession) return response({ error: 'participant_session_required' }, 403);
+          const member = engine.rooms.get(roomId).participants.get(actorId);
+          if (existingSession && !activeMember(member)) return response({ error: 'participant_removed' }, 403);
           if (existingSession) {
             active.add(actorId);
             if (existingSession.last_seen < Date.now() - 10000) await store.heartbeat(roomId, actorId, hash);
           }
         }
         const room = engine.rooms.get(roomId);
-        for (const id of room.participants.keys()) if (!active.has(id)) room.participants.delete(id);
-        const returning = room.participants.get(actorId);
-        if (presence && existingSession?.last_seen < Date.now() - 60000 && returning?.role === 'seated'
-          && !room.draft?.players.some(player => player.id === actorId)
-          && [...room.participants.values()].filter(player => player.id !== actorId && player.role === 'seated').length >= room.maxSeats) {
-          returning.role = 'spectator';
-          seatRelinquished = true;
-        }
+        for (const member of room.participants.values()) member.online = active.has(member.id);
+        // Older rooms retained expired seat records even after admitting new
+        // players. Preserve actual draft seats, or current lobby occupants first.
+        const seats = [...room.participants.values()].filter(member => member.role === 'seated');
+        const retained = new Set(room.draft ? room.draft.players.map(player => player.id)
+          : seats.sort((a, b) => Number(b.online) - Number(a.online)).slice(0, room.maxSeats).map(member => member.id));
+        for (const member of seats) if (!retained.has(member.id)) { member.role = 'spectator'; seatsRepaired = true; }
       }
       let joined;
-      let changed = request.method === 'POST';
-      if (presence) {
+      let changed = request.method === 'POST' || seatsRepaired;
+      if (management) {
+        seatResult = await manageSeat({ room: engine.rooms.get(roomId), roomId, store, actorId, hash, body, action: management });
+        body.note = seatResult.note;
+        for (const session of seatResult.sessions) {
+          if (session.online) active.add(session.participantId); else active.delete(session.participantId);
+        }
+        const viewerId = management === 'claim' || management === 'leave' ? seatResult.identity?.participantId : actorId;
+        const snapshot = engine.getRoomSnapshot(roomId, viewerId);
+        out.headers = { 'content-type': 'application/json' };
+        out.body = JSON.stringify({ ...snapshot, identity: seatResult.identity, handoffToken: seatResult.handoffToken });
+      } else if (presence) {
         const room = engine.rooms.get(roomId);
         const member = room.participants.get(actorId);
         const requestedRole = url.searchParams.get('role') === 'seated' ? 'seated' : 'spectator';
@@ -171,7 +188,7 @@ export async function handleApi(request, env) {
         const canSeat = [...room.participants.values()].filter(p => p.role === 'seated').length < room.maxSeats;
         const observe = url.searchParams.get('observe') === '1';
         if (observe && !existingSession) return response({ error: 'participant_session_required' }, 403);
-        changed = seatRelinquished || !member || (!observe && ((requestedRole !== member.role && (requestedRole !== 'seated' || canSeat)) || (name && name !== member.name) || (url.searchParams.get('creatorToken') === room.creatorToken && !room.creatorId)));
+        changed = seatsRepaired || !member || (!observe && ((requestedRole !== member.role && (requestedRole !== 'seated' || canSeat)) || (name && name !== member.name) || (url.searchParams.get('creatorToken') === room.creatorToken && !room.creatorId)));
         if (changed) {
           joined = engine.joinRoom(roomId, url, out);
           if (!joined) return new Response(out.body, { status: out.status, headers: out.headers });
@@ -195,9 +212,10 @@ export async function handleApi(request, env) {
         if (id && changed) {
           if (historyAction) history = recordDraftAction({ before: historyBefore, room: engine.rooms.get(id), roomId: id, actorId, action: historyAction, body, pools });
           const state = engine.serializeRoom(id);
-          // Presence expiry is not revocation. Keep offline identities and their
-          // permissions while snapshots/counts continue to use live participants.
-          state.participants = [...new Map([...(storedRoom?.state.participants || []), ...state.participants])];
+          // Seats and identity are durable; online state is derived from heartbeats.
+          state.participants = state.participants.map(([id, member]) => {
+            const { online, ...persistent } = member; return [id, persistent];
+          });
           state.poolObjectKey = selectedKey || `builtin:${builtinPool.id}`;
           const summary = { poolName: pools.getPool(state.draftSettings.poolId)?.name || 'Custom pool',
             methodId: state.draftSettings.methodId, status: state.draft?.status || 'not_started',
@@ -205,7 +223,7 @@ export async function handleApi(request, env) {
           room = { id, expected: storedRoom?.revision ?? null, state, summary };
         }
         const poolChanges = [...pools.changes].map(([id, pool]) => ({ id, pool, expected: poolRows.get(id)?.revision ?? null, previousKey: poolRows.get(id)?.object_key, summary: pool && pools.getPoolSummary(pool) }));
-        await store.commit({ room, poolChanges, session, history });
+        await store.commit({ room, poolChanges, session, sessions: seatResult?.sessions, history });
         if (joined) {
           // Presence changes can happen without a draft revision changing.
           joined.room.revision = `${(storedRoom.revision || 0) + (changed ? 1 : 0)}:${[...active].sort().join(',')}`;

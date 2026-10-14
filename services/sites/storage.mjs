@@ -126,7 +126,7 @@ export function createStorage(env) {
       ]);
       return (await statement("SELECT count(*) AS count FROM page_presence WHERE last_seen > ?", now - 60000).first()).count;
     },
-    async commit({ room, poolChanges = [], session, history }) {
+    async commit({ room, poolChanges = [], session: pendingSession, sessions = [], history }) {
       const checks = [];
       const values = [];
       const writes = [];
@@ -152,10 +152,10 @@ export function createStorage(env) {
           writes.push(statement("INSERT INTO rooms (id, revision, state, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET revision = excluded.revision, state = excluded.state, updated_at = excluded.updated_at", room.id, (room.expected || 0) + 1, state, Date.now()));
           writes.push(statement("INSERT INTO room_directory (room_id, listed, status, summary) VALUES (?, ?, ?, ?) ON CONFLICT(room_id) DO UPDATE SET listed = excluded.listed, status = excluded.status, summary = excluded.summary", room.id, room.state.listed === true ? 1 : 0, room.state.draft?.status || 'not_started', JSON.stringify(room.summary || {})));
         }
-        if (session) {
+        for (const session of [...sessions, ...(pendingSession ? [pendingSession] : [])]) {
           checks.push("(SELECT token_hash FROM room_sessions WHERE room_id = ? AND participant_id = ?) IS NOT ?");
           values.push(session.roomId, session.participantId, session.expected);
-          writes.push(statement("INSERT INTO room_sessions (room_id, participant_id, token_hash, last_seen) VALUES (?, ?, ?, ?) ON CONFLICT(room_id, participant_id) DO UPDATE SET last_seen = excluded.last_seen", session.roomId, session.participantId, session.hash, Date.now()));
+          writes.push(statement("INSERT INTO room_sessions (room_id, participant_id, token_hash, last_seen) VALUES (?, ?, ?, ?) ON CONFLICT(room_id, participant_id) DO UPDATE SET token_hash = excluded.token_hash, last_seen = excluded.last_seen", session.roomId, session.participantId, session.hash, session.online === false ? 0 : Date.now()));
         }
         if (history) {
           const results = history.results ? await compress(history.results) : null;

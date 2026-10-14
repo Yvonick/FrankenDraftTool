@@ -84,6 +84,7 @@ export function recordDraftAction({ before, room, roomId, actorId, action, body,
   const previous = before?.nomination;
   const current = draft?.auction?.currentNomination;
   const data = {};
+  if (action.startsWith('seat_') || action === 'restart') data.note = body.note;
   let kind = action.replace('auction/', '');
   if (action === 'pick') {
     if (body.automatic === true) data.automatic = true;

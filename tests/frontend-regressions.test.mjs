@@ -561,7 +561,7 @@ test('attached-component previews show cards inside decks and bags without dupli
 
 test('table roster groups player identity, status and admin controls in compact rows', () => {
   const roundTable = new Element(), tableRoster = new Element(), tablePanel = new Element();
-  const context = load(['renderTable'], {
+  const context = load(['renderTable', 'participantStatus'], {
     window: { frankenIcon: name => ({ icon: name }) },
     document: { createElement() { const element = new Element(); element.style = { setProperty() {} }; return element; } },
     roundTable, tableRoster, tablePanel, hasHostRights: () => true,
