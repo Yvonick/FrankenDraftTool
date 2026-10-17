@@ -6,6 +6,37 @@ const tile = Nickname => ({Name: 'Custom_Tile', Nickname, CustomImage: {ImageURL
 const bag = (Nickname, ContainedObjects, color) => ({Name: 'Bag', Nickname, ContainedObjects, ...(color ? {ColorDiffuse: color} : {})});
 const raw = (name, types) => ({ObjectStates: [bag(name, types.map(type => bag(type, [tile(`${type} old`)])))]});
 
+test('public pools sort by latest upload or saved update and retain dates after serialization', t => {
+  let now = 1000;
+  t.mock.method(Date, 'now', () => now);
+  const registry = registryModule.createPoolRegistry();
+  const upload = (name, options = {public: true}) => registry.registerUploadedTtsPool(raw(name, ['Units']), name, options);
+  const first = upload('First');
+  now = 2000;
+  const second = upload('Second');
+  const ids = () => registry.listPublicPools().map(pool => pool.id);
+  assert.deepEqual(ids(), [second.id, first.id]);
+  now = 3000;
+  registry.updatePublicPool(first.id, {name: 'Renamed first'});
+  assert.deepEqual(ids(), [first.id, second.id]);
+  assert.equal(registry.getPoolSummary(registry.getPool(first.id)).updatedAt, 3000);
+  now = 4000;
+  registry.replacePublicTtsPool(second.id, raw('Replacement', ['Units']));
+  assert.deepEqual(ids(), [second.id, first.id]);
+  assert.equal(registry.replacePublicTtsPool(first.id, {}), null);
+  assert.deepEqual(ids(), [second.id, first.id], 'failed imports do not change the order');
+  const privatePool = upload('Private', {});
+  assert.deepEqual(ids(), [second.id, first.id]);
+  now = 5000;
+  registry.savePool(privatePool.id);
+  assert.deepEqual(ids(), [privatePool.id, second.id, first.id]);
+  const initialPools = [...registry.draftPools.values()].map(pool => registry.serializePool(pool));
+  initialPools.push({...initialPools[0], id: 'legacy', updatedAt: undefined});
+  const restored = registryModule.createPoolRegistry({initialPools});
+  assert.deepEqual(restored.listPublicPools().map(pool => pool.id), [...ids(), 'legacy']);
+  assert.equal(restored.getPool(privatePool.id).updatedAt, 5000);
+});
+
 test('replacement keeps pool identity and settings, removes missing types and appends new ones in import order', () => {
   const registry = registryModule.createPoolRegistry();
   const old = registry.registerUploadedTtsPool(raw('Original', ['Units', 'Abilities', 'Removed']), 'test', {

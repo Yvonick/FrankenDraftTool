@@ -2420,6 +2420,7 @@
           button.className = "secondary item-tool";
           button.dataset.itemView = mode;
           setIconButton(button, icon, `${label}: ${item.name}`);
+          if (mode === "description") button.title = String(item.content || "").trim();
           button.setAttribute("aria-haspopup", "dialog");
           button.addEventListener("pointerdown", event => event.stopPropagation());
           button.addEventListener("keydown", event => event.stopPropagation());
@@ -3535,6 +3536,17 @@
           if (existing) existing.replaceWith(card);
           else publicPoolsList.append(card);
           card.dataset.savedSettings = JSON.stringify(collectManagedPoolSettings(card));
+        }
+        const orderedCards = new Map([...publicPoolsList.querySelectorAll(".pool-admin-card")]
+          .map((card) => [card.dataset.poolId, card]));
+        for (const [index, pool] of pools.entries()) {
+          const card = orderedCards.get(pool.id);
+          const next = publicPoolsList.children[index] || null;
+          if (card === next) continue;
+          const focused = card.contains(document.activeElement) ? document.activeElement : null;
+          if (publicPoolsList.moveBefore) publicPoolsList.moveBefore(card, next);
+          else publicPoolsList.insertBefore(card, next);
+          if (focused && document.activeElement !== focused) focused.focus({ preventScroll: true });
         }
       }
 

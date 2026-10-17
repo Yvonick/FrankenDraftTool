@@ -94,10 +94,11 @@ test('saved pool base-unit repair preserves IDs, explicit parts and settings, is
   assert.deepEqual(repaired.defaultParameters, saved.defaultParameters);
   assert.equal(repaired.name, 'Renamed');
   assert.deepEqual(saved, before, 'an already-pinned pool is immutable');
-  assert.deepEqual(pools.updatePublicPool(saved.id, {baseUnitSource: raw}), repaired);
+  const repeated = pools.updatePublicPool(saved.id, {baseUnitSource: raw});
+  assert.deepEqual({...repeated, updatedAt: repaired.updatedAt}, repaired);
   raw.ObjectStates[0].ContainedObjects[0].ContainedObjects[0].Nickname = 'Different II';
   assert.equal(pools.updatePublicPool(saved.id, {baseUnitSource: raw}), null);
-  assert.deepEqual(pools.getPool(saved.id), repaired);
+  assert.deepEqual(pools.getPool(saved.id), repeated);
   const restored = registryModule.createPoolRegistry({initialPools: [pools.serializePool(repaired)]}).getPool(saved.id);
   assert.deepEqual(restored.items[0].linkedItems, repaired.items[0].linkedItems);
 });

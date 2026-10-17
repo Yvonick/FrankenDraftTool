@@ -23,8 +23,28 @@ export function createStorage(env) {
         statement("INSERT OR IGNORE INTO pools (id, revision, object_key, summary, deleted) VALUES (?, 1, ?, ?, 0)", builtin.id, `builtin:${builtin.id}`, JSON.stringify(summary))
       ]);
     },
-    async catalog() {
-      return (await statement("SELECT * FROM pools ORDER BY rowid").all()).results;
+    async catalog({ recoverDates = false } = {}) {
+      const rows = (await statement("SELECT * FROM pools ORDER BY rowid").all()).results;
+      if (recoverDates) {
+        // Older pools have no timestamp. Recover it from immutable object metadata
+        // once, without loading pool contents or changing their revision.
+        for (const row of rows) {
+          const summary = JSON.parse(row.summary);
+          if (row.deleted || summary.updatedAt > 0 || row.object_key.startsWith("builtin:")) continue;
+          try {
+            const object = await env.BUCKET.head(row.object_key);
+            const updatedAt = object?.uploaded?.getTime();
+            if (!Number.isFinite(updatedAt) || updatedAt <= 0) continue;
+            const recovered = JSON.stringify({ ...summary, updatedAt });
+            await statement("UPDATE pools SET summary = ? WHERE id = ? AND revision = ? AND object_key = ? AND summary = ?",
+              recovered, row.id, row.revision, row.object_key, row.summary).run();
+            row.summary = recovered;
+          } catch {
+            // Metadata recovery must not block access to an otherwise usable pool.
+          }
+        }
+      }
+      return rows.sort((a, b) => (JSON.parse(b.summary).updatedAt || 0) - (JSON.parse(a.summary).updatedAt || 0));
     },
     async room(id) {
       const row = await statement("SELECT revision, state FROM rooms WHERE id = ?", id).first();
@@ -106,7 +126,8 @@ export function createStorage(env) {
     async pool(key) {
       const object = await env.BUCKET.get(key);
       if (!object) throw new Error("Pool object is unavailable");
-      return object.json();
+      const pool = await object.json();
+      return { ...pool, updatedAt: pool.updatedAt || object.uploaded?.getTime() || 0 };
     },
     session(roomId, participantId) {
       return statement("SELECT token_hash, last_seen FROM room_sessions WHERE room_id = ? AND participant_id = ?", roomId, participantId).first();

@@ -194,6 +194,38 @@ test('pool refresh retains existing editor nodes and their unsaved values', () =
   context.renderPublicPools();
 });
 
+test('pool cards follow newest-first data without rebuilding dirty editors or losing focus', () => {
+  const document = { activeElement: null };
+  const input = { value: 'Unsaved name', focus(options) { assert.equal(options.preventScroll, true); document.activeElement = this; } };
+  const cards = ['a', 'b', 'c'].map(id => ({ dataset: { poolId: id, dirty: 'true' },
+    contains: node => id === 'c' && node === input, remove() { throw Error('Existing editor removed'); } }));
+  const original = [...cards];
+  document.activeElement = input;
+  const list = { children: cards, querySelectorAll: () => cards,
+    insertBefore(card, next) {
+      cards.splice(cards.indexOf(card), 1);
+      cards.splice(next ? cards.indexOf(next) : cards.length, 0, card);
+      document.activeElement = null;
+    }
+  };
+  const context = load(['renderPublicPools'], { document, publicPoolsList: list, pools: [{id: 'c'}, {id: 'a'}, {id: 'b'}] });
+  context.renderPublicPools();
+  assert.deepEqual(cards, [original[2], original[0], original[1]]);
+  assert.equal(document.activeElement, input);
+  assert.equal(input.value, 'Unsaved name');
+  context.renderPublicPools();
+  assert.equal(document.activeElement, input);
+});
+
+test('room pool options follow server ordering and keep the chosen pool selected', () => {
+  const poolSelect = new Element();
+  const context = load(['renderPoolOptions'], { poolSelect, document: {createElement: () => new Element()},
+    pools: [{id: 'new', name: 'Newest'}, {id: 'old', name: 'Oldest'}] });
+  context.renderPoolOptions('old');
+  assert.deepEqual(poolSelect.children.map(option => option.value), ['new', 'old']);
+  assert.equal(poolSelect.value, 'old');
+});
+
 test('saving a pool preserves edits made while its save is in flight', async () => {
   const gate = deferred();
   const button = { disabled: false };
@@ -456,7 +488,8 @@ test('descriptions are only available through the item toolbar, without changing
   const card = context.renderItemCard(item, {checkable: true});
   assert.equal(card.querySelectorAll('p').length, 0);
   const button = card.querySelectorAll('button').find(button => button.dataset.itemView === 'description');
-  assert.ok(button.title.includes('Show description'));
+  assert.equal(button.title, content);
+  assert.equal(button.attributes['aria-label'], 'Show description: Unit II');
   let prevented = false, stopped = false;
   button.listeners.click({preventDefault() { prevented = true; }, stopPropagation() { stopped = true; }});
   assert.ok(prevented && stopped);

@@ -114,7 +114,7 @@ export async function handleApi(request, env) {
     }
 
     for (let attempt = 0; attempt < 8; attempt++) {
-      const [catalog, storedRoom] = await Promise.all([store.catalog(), roomId ? store.room(roomId) : null]);
+      const [catalog, storedRoom] = await Promise.all([store.catalog({ recoverDates: url.pathname === '/api/pools' }), roomId ? store.room(roomId) : null]);
       if (roomId && !storedRoom) return response({ error: 'room_not_found' }, 404);
       const poolRows = new Map(catalog.map(row => [row.id, row]));
       const poolPathId = url.pathname.match(/^\/api\/pools\/([^/]+)(?:\/(?:delete|replace))?$/)?.[1];

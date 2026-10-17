@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { localStorageBindings } from '../scripts/local-storage.mjs';
 import { createWorker } from '../services/sites/worker.mjs';
 import { createStorage } from '../services/sites/storage.mjs';
+import registryModule from '../services/backend/poolRegistry.js';
 
 export const tinyPool = { ObjectStates: [{ Name: 'Bag', Nickname: 'Persistence Test', ContainedObjects: ['Units', 'Abilities'].map(type => ({ Name: 'Bag', Nickname: type, ContainedObjects: Array.from({ length: 12 }, (_, index) => ({ Name: 'Custom_Tile', Nickname: `${type} ${index}`, GUID: `${type === 'Units' ? 'a' : 'b'}${String(index).padStart(5, '0')}`, CustomImage: { ImageURL: `https://example.test/${type}/${index}.png` } })) })) }] };
 
@@ -339,6 +340,74 @@ test('concurrent joins and picks preserve every player; private bags reject impe
   assert.ok((await exported.json()).ObjectStates.length > 0);
 });
 
+test('pool API lists latest uploads and edits first, including after restart', async t => {
+  const f = await fixture(t);
+  const first = (await f.api('/api/pools/upload', {poolJson: tinyPool, savePool: true, poolName: 'First'})).pool;
+  const second = (await f.api('/api/pools/upload', {poolJson: tinyPool, savePool: true, poolName: 'Second'})).pool;
+  assert.equal((await f.api('/api/pools')).pools[0].id, second.id);
+  const edited = await f.api(`/api/pools/${first.id}`, {name: 'Updated first'});
+  assert.equal(edited.pools[0].id, first.id);
+  assert.ok(edited.pools[0].updatedAt >= second.updatedAt);
+  await f.restart();
+  const listed = (await f.api('/api/pools')).pools;
+  assert.equal(listed[0].id, first.id);
+  assert.equal(listed[0].updatedAt, edited.pools[0].updatedAt);
+  const created = await f.api('/api/rooms', {});
+  assert.equal((await f.api(`/api/rooms/${created.roomNumber}`)).draft.settings.poolId, first.id);
+});
+
+test('legacy pool dates recover once from object metadata without loading all pools or rewriting versions', async t => {
+  const f = await fixture(t), registry = registryModule.createPoolRegistry();
+  const keys = new Map();
+  for (const [name, date] of [['Old legacy', 1000], ['New legacy', 2000]]) {
+    const pool = registry.registerUploadedTtsPool(tinyPool, name, {public: true, name});
+    delete pool.updatedAt;
+    const summary = registry.getPoolSummary(pool);
+    delete summary.updatedAt;
+    const key = `pools/legacy-${crypto.randomUUID()}.json`;
+    keys.set(key, date);
+    await f.env.BUCKET.put(key, JSON.stringify(pool));
+    await f.env.DB.prepare('INSERT INTO pools (id, revision, object_key, summary, deleted) VALUES (?, 7, ?, ?, 0)')
+      .bind(pool.id, key, JSON.stringify(summary)).run();
+  }
+  let heads = 0, gets = 0;
+  const get = f.env.BUCKET.get;
+  f.env.BUCKET.head = async key => { heads++; return {uploaded: new Date(keys.get(key))}; };
+  f.env.BUCKET.get = async key => { gets++; return {...await get(key), uploaded: new Date(keys.get(key))}; };
+  const listed = (await f.api('/api/pools')).pools.filter(pool => pool.name.includes('legacy'));
+  assert.deepEqual(listed.map(pool => pool.name), ['New legacy', 'Old legacy']);
+  assert.deepEqual(listed.map(pool => pool.updatedAt), [2000, 1000]);
+  assert.equal(heads, 2);
+  assert.equal(gets, 1, 'only the normally selected pool is loaded');
+  await f.api('/api/pools');
+  assert.equal(heads, 2, 'recovered dates are persisted');
+  for (const row of await createStorage(f.env).catalog()) {
+    if (keys.has(row.object_key)) {
+      assert.equal(row.revision, 7);
+      assert.equal(JSON.parse(row.summary).updatedAt, keys.get(row.object_key));
+    }
+  }
+});
+
+test('legacy date recovery tolerates missing objects and cannot overwrite a concurrent edit', async t => {
+  const f = await fixture(t), store = createStorage(f.env);
+  const insert = (id, key) => f.env.DB.prepare('INSERT INTO pools (id, revision, object_key, summary, deleted) VALUES (?, 1, ?, ?, 0)')
+    .bind(id, key, JSON.stringify({id, name: id, public: true})).run();
+  await insert('missing', 'missing.json');
+  await insert('racing', 'old.json');
+  f.env.BUCKET.head = async key => {
+    if (key === 'missing.json') throw Error('Unavailable');
+    await f.env.DB.prepare('UPDATE pools SET revision = 2, object_key = ?, summary = ? WHERE id = ?')
+      .bind('new.json', JSON.stringify({id: 'racing', name: 'Edited', updatedAt: 3000}), 'racing').run();
+    return {uploaded: new Date(1000)};
+  };
+  await store.catalog({recoverDates: true});
+  const rows = await store.catalog();
+  assert.equal(JSON.parse(rows.find(row => row.id === 'racing').summary).name, 'Edited');
+  assert.equal(JSON.parse(rows.find(row => row.id === 'racing').summary).updatedAt, 3000);
+  assert.equal(JSON.parse(rows.find(row => row.id === 'missing').summary).updatedAt, undefined);
+});
+
 test('pool uploads, edits, deletion and active draft pool versions survive restart', async t => {
   const f = await fixture(t);
   const uploaded = await f.api('/api/pools/upload', { poolJson: tinyPool, savePool: true });
@@ -590,7 +659,8 @@ test('base-unit source repair updates the saved pool durably without replacing d
   const path = `/api/pools/${pool.id}`;
   const repaired = await f.api(path, {sourceJson: raw});
   assert.equal(repaired.baseUnitLinksAdded, 1);
-  assert.deepEqual(repaired.pool, pool, 'catalog defaults and metadata are preserved');
+  assert.ok(repaired.pool.updatedAt >= pool.updatedAt);
+  assert.deepEqual({...repaired.pool, updatedAt: pool.updatedAt}, pool, 'catalog defaults and metadata are preserved apart from the update date');
   assert.equal((await f.api(path, {baseUnitSource: raw})).baseUnitLinksAdded, 0);
   await f.restart();
   const store = createStorage(f.env);

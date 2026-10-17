@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -55,8 +55,12 @@ export async function localStorageBindings(directory) {
       }
     },
     BUCKET: {
+      async head(key) {
+        try { return { uploaded: (await stat(filename(key))).mtime }; }
+        catch (error) { if (error.code === "ENOENT") return null; throw error; }
+      },
       async get(key) {
-        try { const text = await readFile(filename(key), "utf8"); return { json: async () => JSON.parse(text), text: async () => text }; }
+        try { const text = await readFile(filename(key), "utf8"); return { uploaded: (await stat(filename(key))).mtime, json: async () => JSON.parse(text), text: async () => text }; }
         catch (error) { if (error.code === "ENOENT") return null; throw error; }
       },
       async put(key, value) {

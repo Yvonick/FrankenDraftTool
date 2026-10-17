@@ -478,6 +478,7 @@ function serializePool(pool) {
     id: normalizedPool.id,
     name: normalizedPool.name,
     source: normalizedPool.source,
+    updatedAt: normalizedPool.updatedAt || 0,
     public: Boolean(pool.public),
     types: normalizedPool.types,
     items: normalizedPool.items,
@@ -499,7 +500,8 @@ function getPool(poolId) {
 }
 
 function listPublicPools() {
-  return [...draftPools.values()].filter((pool) => pool.public);
+  return [...draftPools.values()].filter((pool) => pool.public)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
 function getDefaultPublicPool() {
@@ -536,6 +538,7 @@ function registerUploadedTtsPool(rawJson, fallbackName, options = {}) {
       defaultParameters: options.defaultParameters
     }),
     source: options.public ? "tts-saved" : "tts-upload",
+    updatedAt: Date.now(),
     public: Boolean(options.public)
   };
 
@@ -560,7 +563,8 @@ function replacePublicTtsPool(poolId, rawJson) {
       public: true,
       defaultParameters: previous.defaultParameters
     }),
-    source: "tts-saved"
+    source: "tts-saved",
+    updatedAt: Date.now()
   };
   draftPools.set(poolId, replacement);
   changes.set(poolId, replacement);
@@ -585,6 +589,7 @@ function savePool(poolId, options = {}) {
       public: true
     }),
     source: pool.source === "tts-upload" ? "tts-saved" : pool.source,
+    updatedAt: Date.now(),
     public: true
   };
 
@@ -630,6 +635,7 @@ function getPoolSummary(pool) {
     id: pool.id,
     name: pool.name,
     source: pool.source || "generated",
+    updatedAt: pool.updatedAt || 0,
     public: Boolean(pool.public),
     unmatchedLinkedBags: pool.unmatchedLinkedBags || [],
     itemTypes: defaultParameters.typeOrder.map((type) => ({
