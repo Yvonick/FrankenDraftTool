@@ -700,6 +700,92 @@ test('a private upload saved from its room pins the new defaults across reloads'
   assert.ok((await exported.json()).ObjectStates.length > 0);
 });
 
+test('No-Ban resets on new draws by default, while a locked preset persists across reloads', async t => {
+  const f = await fixture(t), room = await f.room('nomination-auction');
+  const { pool } = await f.api('/api/pools/upload', { poolJson: tinyPool, savePool: true });
+  await f.api(`${room.base}/settings`, { ...room.auth, poolId: pool.id, auctionSpeakerMode: 'none', itemsPerType: { Units: 2, Abilities: 0 } }, room.host.token);
+  let state = await room.start();
+  const players = state.draft.auction.players;
+  const speaker = room.players.find(p => p.id === state.draft.auction.speakerId);
+  const other = room.players.find(p => p.id !== speaker.id);
+  const act = (p, action, data = {}) => f.api(`${room.base}/draft/auction/${action}`, { playerId: p.id, ...data }, p.token);
+  assert.ok(players.every(p => p.noBanPresetLocked === false));
+  await act(speaker, 'no-ban-preset', { noBanPreset: true });
+  await act(other, 'no-ban-preset', { noBanPreset: true, noBanPresetLocked: true });
+  state = await act(speaker, 'nominate', { type: 'Units' });
+  assert.equal(state.draft.auction.player.noBanPreset, false);
+  assert.equal(state.draft.auction.players.find(p => p.playerId === other.id).noBanPreset, true);
+  await act(speaker, 'no-ban-preset', { noBanPreset: true });
+  state = await act(speaker, 'mulligan', { mulligan: true });
+  assert.equal(state.draft.auction.player.noBanPreset, false, 'mulligans introduce new items');
+  await f.restart();
+  const restored = (await room.connect(other)).room.draft.auction.player;
+  assert.equal(restored.noBanPresetLocked, true);
+  assert.equal(restored.noBanPreset, true);
+  state = await act(speaker, 'mulligan', { mulligan: false });
+  assert.equal(state.draft.auction.currentNomination.banPlayerId, speaker.id);
+  await act(other, 'no-ban-preset', { noBanPresetLocked: false });
+  state = await act(speaker, 'ban', { itemId: state.draft.auction.currentNomination.items[0].id });
+  assert.equal(state.draft.auction.players.find(p => p.playerId === other.id).noBanPreset, false, 'ban replacements also reset unlocked presets');
+});
+
+test('bids can be unlocked and changed before resolution in both speaker and item auctions', async t => {
+  for (const speakerMode of ['autopick', 'none']) {
+    const f = await fixture(t), room = await f.room('nomination-auction');
+    const { pool } = await f.api('/api/pools/upload', { poolJson: tinyPool, savePool: true });
+    await f.api(`${room.base}/settings`, { ...room.auth, poolId: pool.id, auctionSpeakerMode: speakerMode, itemsPerType: { Units: 1, Abilities: 0 } }, room.host.token);
+    let state = await room.start();
+    const act = (p, action, data = {}) => f.api(`${room.base}/draft/auction/${action}`, { playerId: p.id, ...data }, p.token);
+    if (speakerMode === 'none') {
+      await Promise.all(room.players.map(p => act(p, 'no-ban-preset', { noBanPreset: true, noBanPresetLocked: true })));
+      const speaker = room.players.find(p => p.id === state.draft.auction.speakerId);
+      await act(speaker, 'nominate', { type: 'Units' });
+      state = await act(speaker, 'mulligan', { mulligan: false });
+    }
+    const [first, second] = room.players;
+    await act(first, 'bid', { first: 5, second: 0, tie: 1 });
+    const forged = await f.raw(`${room.base}/draft/auction/unlock-bid`, { playerId: first.id }, second.token);
+    assert.equal(forged.status, 403);
+    state = await act(first, 'unlock-bid');
+    assert.equal(state.draft.auction.player.auctionBidLocked, false);
+    assert.equal(state.draft.auction.player.currentBids.first, 5);
+    assert.equal(state.draft.auction.player.credits, 40);
+    await f.restart();
+    assert.equal((await room.connect(first)).room.draft.auction.player.auctionBidLocked, false);
+    const opponent = (await room.connect(second)).room.draft.auction.players.find(p => p.playerId === first.id);
+    assert.equal(opponent.currentBids, null, 'unlocked bid values remain private');
+    await act(first, 'bid', { first: 12, second: 0, tie: 1 });
+    state = await act(second, 'bid', { first: 2, second: 0, tie: 0 });
+    assert.equal(state.draft.auction.players.find(p => p.playerId === first.id).credits, 28);
+    const tooLate = await f.raw(`${room.base}/draft/auction/unlock-bid`, { playerId: first.id }, first.token);
+    assert.equal(tooLate.status, 409);
+    const events = (await f.api(`${room.base}/logs?actorId=${first.id}`, undefined, first.token)).events;
+    assert.ok(events.some(event => event.kind === 'bids_unlocked'));
+    assert.ok(events.some(event => event.bidRecap?.bids.some(bid => bid.playerId === first.id && bid.first === 12)));
+  }
+});
+
+test('a final bid racing an unlock either waits for relocking or resolves once without refunding', async t => {
+  const f = await fixture(t), room = await f.room('nomination-auction');
+  await room.start();
+  const [first, second] = room.players;
+  const bid = (p, amount) => f.api(`${room.base}/draft/auction/bid`, { playerId: p.id, first: amount, tie: 0 }, p.token);
+  await bid(first, 6);
+  const [unlock] = await Promise.all([
+    f.raw(`${room.base}/draft/auction/unlock-bid`, { playerId: first.id }, first.token),
+    bid(second, 1)
+  ]);
+  assert.ok([200, 409].includes(unlock.status));
+  let state = (await room.connect(first)).room;
+  if (unlock.status === 200) {
+    assert.equal(state.draft.auction.player.auctionBidLocked, false);
+    assert.equal(state.draft.auction.player.credits, 40);
+    state = await bid(first, 9);
+    assert.equal(state.draft.auction.player.credits, 31);
+  } else assert.equal(state.draft.auction.player.credits, 34);
+  assert.ok(!['speaker_order_bidding', 'bidding'].includes(state.draft.auction.stage));
+});
+
 test('auction bids and undo persist without a Node server', async t => {
   const f = await fixture(t);
   const room = await f.room('nomination-auction');
@@ -980,7 +1066,7 @@ test('auction undo reopens the same history, preserves reversed actions, and sav
   await f.api(`${room.base}/settings`, {...room.auth, poolId: pool.id, auctionSpeakerMode: 'none', itemsPerType: {Units: 1, Abilities: 0}}, room.host.token);
   await room.start();
   const run = (action, data = {}) => f.api(`${room.base}/draft/auction/${action}`, {playerId: room.host.id, ...data}, room.host.token);
-  await run('no-ban-preset', {noBanPreset: true});
+  await run('no-ban-preset', {noBanPreset: true, noBanPresetLocked: true});
   await run('nominate', {type: 'Units'});
   await run('mulligan', {mulligan: false});
   let state = await run('bid', {first: 4, second: 0, tie: 0});

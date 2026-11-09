@@ -1,10 +1,10 @@
-# Development Status - 23 October 2026
+# Development Status - 9 November 2026
 
 ## Current Baseline
 
 - Live app: [FrankenDraft](https://franken-draft-tool.yvonichou.chatgpt.site).
-- Latest published version: **Sites v26**, source commit `a7834afca7240b4b6fb3ef2b27f6a958347190d6`.
-- This GitHub synchronization includes the 26 source commits since the original GitHub baseline, plus current documentation and repository workflow guidance. It does not change the running Site.
+- Previous published baseline: **Sites v26**, source commit `a7834afca7240b4b6fb3ef2b27f6a958347190d6`.
+- The November auction update adds searchable wildcard replacements with hover previews, an optional lock for the No-Ban preset, bid unlocking before resolution, and explicit Undo/Shuffle text buttons. The No-Ban preset defaults to unlocked and resets whenever a new draw or replacement changes the items. These actions continue to be recorded in live and archived logs.
 - Frontend and backend are fully hosted on Sites. D1 stores rooms, identities, pool metadata, presence and draft history; R2 stores immutable pool files. No Render dependency or ChatGPT login is required.
 
 ## Implemented Product
@@ -37,7 +37,7 @@ Only Bag Passing and Nomination Auction have playable engines. Other description
 
 ## Validation
 
-The current suite has **126 passing tests**, covering:
+The current suite has **132 passing tests**, covering:
 
 - Complete Bag Passing and Nomination Auction drafts, solo picks, type limits, automation, bidding and undo.
 - Concurrent joins/actions, permissions, secret-bid filtering, seat recovery, handoffs and credential invalidation.
@@ -46,8 +46,9 @@ The current suite has **126 passing tests**, covering:
 - Archive access, complete results, opening/per-pick bag reconstruction and filtered live logs.
 - Frontend selection, form-state preservation, ordering, packing, splitters, dialogs and update stability.
 - Bounded streams, slow readers, disconnect cleanup and cross-worker delivery.
+- Wildcard search, hover/keyboard selection, empty-result handling, preset resets and persistent locks, private bid editing, and a final bid racing an unlock.
 
-The v26 release also passed desktop/mobile browser checks for pool ordering, selected-pool preservation, description tooltips and dialogs. The standalone build succeeds. Docker packaging has not been independently run in this environment.
+The auction update passed focused browser checks for live wildcard filtering, hover previews without accidental selection, the preset lock icon, visible Undo/Shuffle labels, and unlocking/editing/relocking a bid. The v26 baseline also passed desktop/mobile browser checks for pool ordering, selected-pool preservation, description tooltips and dialogs. The standalone build succeeds. Docker packaging has not been independently run in this environment.
 
 On 23 October, `npm ci`, `npm test` and `npm run build` succeeded for the GitHub synchronization. `npm audit --omit=dev` reported no findings. The full audit reported four moderate findings in the existing development-only `drizzle-kit` / `@esbuild-kit` / nested `esbuild` chain ([advisory](https://github.com/advisories/GHSA-67mh-4wv8-2f99)); these remain a separate dependency-maintenance task. No forced dependency changes were made.
 

@@ -1596,6 +1596,7 @@ function getAuctionPlayerSnapshot(player, draft, viewerId, room = null) {
     mulliganTokens: player.mulliganTokens,
     banTokens: player.banTokens,
     noBanPreset: Boolean(player.noBanPreset),
+    noBanPresetLocked: Boolean(player.noBanPresetLocked),
     isSpeaker: getAuctionSpeaker(draft)?.id === player.id,
     draftedItems: player.draftedItems.map(getItemSnapshot),
     draftedGroups: player.draftedGroups.map(getDraftGroupSnapshot),
@@ -1687,6 +1688,7 @@ function getAuctionSnapshot(draft, viewerId, room = null) {
       mulliganTokens: viewerPlayer.mulliganTokens,
       banTokens: viewerPlayer.banTokens,
       noBanPreset: Boolean(viewerPlayer.noBanPreset),
+      noBanPresetLocked: Boolean(viewerPlayer.noBanPresetLocked),
       currentBids: viewerPlayer.currentBids,
       auctionBidLocked: Boolean(viewerPlayer.auctionBidLocked)
     } : null
@@ -1908,6 +1910,7 @@ function createAuctionPlayers(seated) {
     mulliganTokens: nominationAuctionMulligans,
     banTokens: nominationAuctionBans,
     noBanPreset: false,
+    noBanPresetLocked: false,
     currentBids: null,
     auctionBidLocked: false
   }));
@@ -2218,6 +2221,12 @@ function moveAuctionToPostDrawStage(draft) {
   const speaker = getAuctionSpeaker(draft);
   const nomination = draft.auction.currentNomination;
   const drawCount = draft.players.length + 1;
+
+  // A fresh nomination, mulligan, ban replacement or wildcard changes the draw.
+  // Only players who explicitly locked their preset carry it over to new items.
+  for (const player of draft.players) {
+    if (!player.noBanPresetLocked) player.noBanPreset = false;
+  }
 
   if (getAuctionWildcardItem(nomination)) {
     draft.auction.stage = "wildcard";
@@ -3022,7 +3031,8 @@ async function handleAuctionNoBanPreset(roomNumber, request, response) {
     return;
   }
 
-  player.noBanPreset = Boolean(body.noBanPreset);
+  if (body.noBanPreset !== undefined) player.noBanPreset = Boolean(body.noBanPreset);
+  if (body.noBanPresetLocked !== undefined) player.noBanPresetLocked = Boolean(body.noBanPresetLocked);
 
   if (player.noBanPreset && draft.auction.stage === "ban" && draft.auction.currentNomination?.banPlayerId === player.id) {
     const nomination = draft.auction.currentNomination;
@@ -3113,6 +3123,33 @@ async function handleAuctionShufflePool(roomNumber, request, response) {
   pushAuctionUndo(draft);
   shuffleAuctionItemSources(draft);
   sendAuctionSnapshot(roomNumber, room, response, body.viewerId || body.actorId || body.participantId);
+}
+
+async function handleAuctionUnlockBid(roomNumber, request, response) {
+  const active = getActiveAuctionDraft(roomNumber, response);
+  if (!active) return;
+  const body = await readAuctionBody(request, response);
+  if (!body) return;
+  const { room, draft } = active;
+  const player = getAuctionPlayer(draft, body.playerId);
+  if (!player) {
+    sendJson(response, 403, { error: "player_not_in_draft" });
+    return;
+  }
+  if (!["speaker_order_bidding", "bidding"].includes(draft.auction.stage)
+    || !draft.auction.currentNomination || draft.players.every(candidate => candidate.auctionBidLocked)) {
+    sendJson(response, 409, { error: "bids_already_resolved" });
+    return;
+  }
+  if (!player.auctionBidLocked || player.credits <= 0) {
+    sendJson(response, 409, { error: "bid_cannot_unlock" });
+    return;
+  }
+  pushAuctionUndo(draft);
+  player.auctionBidLocked = false;
+  delete draft.auction.currentNomination.bids[player.id];
+  // Keep the private values so the player can edit rather than re-enter them.
+  sendAuctionSnapshot(roomNumber, room, response, player.id);
 }
 
 async function handleAuctionBid(roomNumber, request, response) {
@@ -3367,6 +3404,11 @@ async function handleRequest(request, response) {
 
     if (action === "shuffle-pool") {
       await handleAuctionShufflePool(roomNumber, request, response);
+      return;
+    }
+
+    if (action === "unlock-bid") {
+      await handleAuctionUnlockBid(roomNumber, request, response);
       return;
     }
 

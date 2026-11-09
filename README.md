@@ -21,6 +21,7 @@ The complete frontend and backend run on **Sites**, with durable D1 database sto
 
 - **Bag Passing:** randomized seating, queued bags passed clockwise, private picks, per-type limits, and no duplicate type within a pick during the first rotation. Optional automatic picks handle bags with no remaining choice. Default picks per bag: **3**.
 - **Nomination Auction:** 40 credits, two mulligan tokens and one ban token per player; configurable speaker-order bidding; rotating nominations; sealed bids with revealed recaps; random tie resolution; and ordered picks. Hosts/admins can undo actions and shuffle the remaining pool.
+- Wildcard replacements have a live name search, hover previews and keyboard selection. No-Ban starts unlocked and resets when a new nomination, mulligan or replacement changes the items; its lock icon keeps the preset across new draws. Players can unlock and edit their own bids while others are still bidding, including speaker-order bids. Once the final bid locks and resolves the auction, bids cannot be unlocked. Undo and Shuffle Pool use text labels.
 - Both methods show type-progress checklists and final results. Item previews support zoom, distinct backs, linked components, and descriptions; hovering the description icon shows its text.
 - Players can hide drafted items from their personal view without changing their draft or export, resize their picks area, and mute bag-arrival chimes.
 

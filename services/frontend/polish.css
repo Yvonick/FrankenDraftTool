@@ -183,6 +183,26 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 #auction-stage { align-items: flex-start; text-align: left; gap: .5rem; }
 .auction-control-form { grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr)); }
 .auction-control-form .credit-balance { grid-column: 1 / -1; color: var(--accent-2); font-size: .875rem; }
+.auction-control-form.wildcard-form { width: min(100%, 46rem); grid-template-columns: minmax(0, 1fr); }
+.wildcard-picker { display: grid; grid-template-columns: minmax(0, 1fr) minmax(9rem, 15rem); gap: 1rem; align-items: start; min-width: 0; }
+.wildcard-options { max-height: 18rem; overflow: auto; border: 1px solid var(--line-strong); border-radius: .5rem; padding: .35rem; display: grid; align-content: start; gap: .25rem; }
+.wildcard-options .wildcard-option { width: 100%; text-align: left; white-space: normal; border-color: transparent; }
+.wildcard-options .wildcard-option[aria-selected="true"] { border-color: var(--accent); background: rgb(16 58 75 / .94); }
+.wildcard-options p { padding: .5rem; }
+.wildcard-preview { display: grid; gap: .6rem; min-width: 0; }
+.wildcard-preview .item-image-frame { width: 100%; max-height: 24rem; }
+.wildcard-preview .item-preview { display: none; }
+.wildcard-preview .item-tools { position: static; }
+.wildcard-count { margin: 0; color: var(--muted); font-size: .85rem; }
+.auction-no-ban-control { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.auction-no-ban-control .auction-no-ban-preset { margin: 0; }
+.auction-no-ban-control .no-ban-lock { flex: 0 0 auto; }
+.no-ban-lock[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.no-ban-hint { color: var(--muted); font-size: .8rem; }
+@media (max-width: 480px) {
+  .wildcard-picker { grid-template-columns: minmax(0, 1fr) minmax(7rem, 35%); gap: .5rem; }
+  .wildcard-options { max-height: 15rem; }
+}
 .auction-player-card { min-height: 0; background: var(--space-1); border-radius: 6px; padding: 1rem; box-shadow: none; }
 .auction-player-card.personal { min-height: 0; }
 .auction-player-card.waiting { border-color: var(--gold); box-shadow: inset 3px 0 var(--gold); }

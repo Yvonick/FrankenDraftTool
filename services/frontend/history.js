@@ -145,7 +145,7 @@
   }
   const titles = { draft_started: 'Started the draft', recording_started: 'History recording began', bag_pick: 'Picked from a bag', bag_pass: 'Passed a bag without picking',
     nominate: 'Nominated', mulligan: 'Mulliganed the draw', keep_draw: 'Kept the draw', ban: 'Banned an item', decline_ban: 'Declined to ban',
-    wildcard: 'Chose a wildcard replacement', bid_locked: 'Locked bids', speaker_pick: 'Picked speaker order', auction_pick: 'Picked an item',
+    wildcard: 'Chose a wildcard replacement', bid_locked: 'Locked bids', bids_unlocked: 'Unlocked bids', speaker_pick: 'Picked speaker order', auction_pick: 'Picked an item',
     no_ban_preset: 'Changed no-ban preset', undo: 'Undid an action', 'shuffle-pool': 'Shuffled all item types', draft_restarted: 'Restarted the room',
     seat_remove: 'Removed a participant', seat_leave: 'Left a seat', seat_claim: 'Joined a replacement seat', seat_link: 'Created a replacement link' };
   function markUndone() {
@@ -175,6 +175,7 @@
     if (event.bids) content.append(node('p', `First: ${event.bids.first} / Second: ${event.bids.second} / Tie: ${event.bids.tie}`));
     if (event.cost !== undefined) content.append(node('p', `Cost: ${event.cost} credits`));
     if (event.enabled !== undefined) content.append(node('p', event.enabled ? 'No-ban preset on' : 'No-ban preset off'));
+    if (event.locked !== undefined) content.append(node('p', event.locked ? 'Preset locked across new items' : 'Preset resets on new items'));
     if (event.targetSequence) { undone.set(event.targetSequence, event.sequence); content.append(node('p', `Reversed action #${event.targetSequence} and its automatic outcomes.`)); }
     if (event.speakerOrder) content.append(node('p', `Speaker order: ${event.speakerOrder.join(', ')}`));
     if (event.bidRecap) {

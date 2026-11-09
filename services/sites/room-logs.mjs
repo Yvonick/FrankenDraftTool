@@ -3,7 +3,7 @@ import { RequestError } from './storage.mjs';
 // Live logs are a permission-filtered projection, never the archive payload.
 export function publicRoomEvent(event, revealPicks) {
   const result = { sequence: event.sequence, at: event.at, kind: event.kind, actor: event.actor };
-  for (const key of ['type', 'passedTo', 'cost', 'enabled', 'targetSequence', 'speakerOrder', 'bidRecap', 'note', 'completed']) {
+  for (const key of ['type', 'passedTo', 'cost', 'enabled', 'locked', 'targetSequence', 'speakerOrder', 'bidRecap', 'note', 'completed']) {
     if (event[key] !== undefined) result[key] = event[key];
   }
   if (revealPicks || !['bag_pick', 'bag_pass'].includes(event.kind)) {

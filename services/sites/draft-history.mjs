@@ -115,6 +115,7 @@ export function recordDraftAction({ before, room, roomId, actorId, action, body,
       kind = 'bid_locked';
       data.bids = { ...draft.players.find(player => player.id === actorId).currentBids };
     }
+    if (kind === 'unlock-bid') kind = 'bids_unlocked';
     if (kind === 'pick') {
       kind = previous.isSpeakerOrder ? 'speaker_pick' : 'auction_pick';
       data.items = previous.items.filter(value => value.id === body.itemId);
@@ -122,7 +123,9 @@ export function recordDraftAction({ before, room, roomId, actorId, action, body,
     }
     if (kind === 'no-ban-preset') {
       kind = 'no_ban_preset';
-      data.enabled = Boolean(body.noBanPreset);
+      const player = draft.players.find(player => player.id === actorId);
+      data.enabled = Boolean(player.noBanPreset);
+      data.locked = Boolean(player.noBanPresetLocked);
     }
     if (kind === 'undo') data.targetSequence = history.undoSequences.pop() ?? null;
   } else if (action === 'restart') kind = 'draft_restarted';

@@ -1705,8 +1705,8 @@
           <button id="spectate-room" class="secondary" type="button" hidden>Become Spectator</button>
           <button id="leave-room" class="secondary" type="button" hidden>Leave Table</button>
           <button id="new-player-session" class="secondary" type="button" hidden>Join as Another Player</button>
-          <button id="auction-undo-top" class="secondary icon-button" type="button" aria-label="Undo Last Action" title="Undo Last Action" data-icon="undo-2" hidden></button>
-          <button id="auction-shuffle-top" class="secondary icon-button" type="button" aria-label="Shuffle Pool" title="Shuffle Pool" data-icon="shuffle" hidden></button>
+          <button id="auction-undo-top" class="secondary" type="button" hidden>Undo Last Action</button>
+          <button id="auction-shuffle-top" class="secondary" type="button" hidden>Shuffle Pool</button>
           <button id="restart-draft" class="secondary" type="button" hidden>Restart Draft</button>
           <button id="spectator-visibility-toggle" class="secondary" type="button" aria-pressed="false" hidden>Super visibility: Off</button>
           <button id="export-draft" class="secondary" type="button" hidden>Export TTS JSON</button>
@@ -2249,6 +2249,7 @@
       let auctionSelectedItemId = null;
       let auctionBidKey = "";
       let auctionPendingBids = null;
+      let auctionWildcardState = null;
       let expandedAuctionPlayerIds = new Set();
       let otherAuctionAreasExpanded = false;
       let currentBagId = null;
@@ -4420,6 +4421,8 @@
               wrong_auction_stage: "The turn has changed. Wait for the current room state before trying again.",
               invalid_bid: "Each bid must be a whole number between zero and your available credits.",
               bid_already_locked: "Your bids are already locked.",
+              bids_already_resolved: "All bids were locked and the auction has resolved. Bids can no longer be changed.",
+              bid_cannot_unlock: "These bids cannot be unlocked. Refresh the room state and try again.",
               item_already_picked: "That item has already been picked. Select another item.",
               item_not_in_nomination: "That item is no longer available in this nomination.",
               no_mulligan_tokens: "You have no mulligan tokens left.",
@@ -4838,8 +4841,11 @@
           player.credits ?? "",
           player.banTokens ?? "",
           player.noBanPreset ? "no-ban" : "",
+          player.noBanPresetLocked ? "preset-locked" : "preset-unlocked",
           player.auctionBidLocked ? "locked" : "open",
           `${player.currentBids?.first || 0}:${player.currentBids?.second || 0}:${player.currentBids?.tie || 0}`,
+          nomination?.wildcardItem?.id || "",
+          auction.stage === "wildcard" ? (nomination?.wildcardChoiceItems || []).map(item => item.id).join(",") : "",
           auctionBidRecapKey(recap)
         ].join("::");
       }
@@ -5064,26 +5070,102 @@
         const choices = nomination.wildcardChoiceItems || [];
         const form = document.createElement("form");
         form.className = "auction-control-form";
+        form.classList.add("wildcard-form");
+        const key = [nomination.wildcardItem.id, ...nomination.items.map(item => item.id)].join(":");
+        if (auctionWildcardState?.key !== key) auctionWildcardState = { key, query: "", selectedId: choices[0]?.id || null };
         const label = document.createElement("label");
-        const select = document.createElement("select");
-
-        for (const item of choices) {
-          const option = document.createElement("option");
-          option.value = item.id;
-          option.textContent = item.name;
-          select.append(option);
-        }
-
+        label.className = "wildcard-search-label";
+        label.textContent = `${nomination.wildcardItem.name}: choose replacement`;
+        const search = document.createElement("input");
+        search.type = "search";
+        search.placeholder = "Search replacements…";
+        search.value = auctionWildcardState.query;
+        search.autocomplete = "off";
+        search.setAttribute("role", "combobox");
+        search.setAttribute("aria-label", "Search wildcard replacements");
+        search.setAttribute("aria-autocomplete", "list");
+        search.setAttribute("aria-expanded", "true");
+        search.setAttribute("aria-controls", "wildcard-options");
+        label.append(search);
+        const layout = document.createElement("div");
+        layout.className = "wildcard-picker";
+        const options = document.createElement("div");
+        options.className = "wildcard-options";
+        options.id = "wildcard-options";
+        options.setAttribute("role", "listbox");
+        options.setAttribute("aria-label", "Wildcard replacements");
+        const preview = document.createElement("div");
+        preview.className = "wildcard-preview";
+        const count = document.createElement("p");
+        count.className = "wildcard-count";
+        count.setAttribute("role", "status");
         const button = document.createElement("button");
         button.type = "submit";
         button.textContent = "Replace Wild Card";
-        button.disabled = choices.length === 0;
-        label.append(`${nomination.wildcardItem.name}: choose replacement`, select);
-        form.append(label, button);
+        let filtered = [];
+        const normalize = text => text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+        const showPreview = item => {
+          preview.replaceChildren();
+          if (!item) return;
+          const name = document.createElement("strong");
+          name.textContent = item.name;
+          preview.append(name, renderItemImage(item), renderItemTools(item));
+        };
+        const selectItem = item => {
+          auctionWildcardState.selectedId = item?.id || null;
+          for (const option of options.children) option.setAttribute("aria-selected", String(option.dataset.itemId === item?.id));
+          if (item) search.setAttribute("aria-activedescendant", `wildcard-option-${item.id}`);
+          else search.removeAttribute("aria-activedescendant");
+          button.disabled = !item;
+          button.textContent = item ? `Replace with ${item.name}` : "Replace Wild Card";
+          showPreview(item);
+        };
+        const filter = () => {
+          auctionWildcardState.query = search.value;
+          const terms = normalize(search.value).trim().split(/\s+/).filter(Boolean);
+          filtered = choices.filter(item => terms.every(term => normalize(item.name).includes(term)));
+          options.replaceChildren();
+          for (const item of filtered) {
+            const option = document.createElement("button");
+            option.type = "button";
+            option.className = "wildcard-option secondary";
+            option.id = `wildcard-option-${item.id}`;
+            option.dataset.itemId = item.id;
+            option.textContent = item.name;
+            option.tabIndex = -1;
+            option.setAttribute("role", "option");
+            option.addEventListener("pointerenter", () => showPreview(item));
+            option.addEventListener("focus", () => showPreview(item));
+            option.addEventListener("click", () => { selectItem(item); search.focus(); });
+            options.append(option);
+          }
+          if (!filtered.length) {
+            const empty = document.createElement("p");
+            empty.textContent = "No matching replacements. Try another search.";
+            options.append(empty);
+          }
+          count.textContent = `${filtered.length} of ${choices.length} replacements`;
+          selectItem(filtered.find(item => item.id === auctionWildcardState.selectedId) || filtered[0]);
+        };
+        search.addEventListener("input", filter);
+        search.addEventListener("keydown", event => {
+          if (!["ArrowDown", "ArrowUp"].includes(event.key) || !filtered.length) return;
+          event.preventDefault();
+          const index = filtered.findIndex(item => item.id === auctionWildcardState.selectedId);
+          const next = (index + (event.key === "ArrowDown" ? 1 : -1) + filtered.length) % filtered.length;
+          selectItem(filtered[next]);
+          options.children[next].scrollIntoView({ block: "nearest" });
+        });
+        options.addEventListener("pointerleave", () => showPreview(filtered.find(item => item.id === auctionWildcardState.selectedId)));
+        layout.append(options, preview);
+        form.append(label, layout, count, button);
         form.addEventListener("submit", (event) => {
           event.preventDefault();
-          postAuctionAction("wildcard", { itemId: select.value });
+          if (!button.disabled && filtered.some(item => item.id === auctionWildcardState.selectedId)) {
+            postAuctionAction("wildcard", { itemId: auctionWildcardState.selectedId });
+          }
         });
+        filter();
         auctionControls.append(form);
       }
 
@@ -5102,12 +5184,32 @@
         ].filter(Boolean).join(" ");
         const preset = document.createElement("input");
         preset.type = "checkbox";
+        preset.setAttribute("aria-label", "Preset No-Ban");
         preset.checked = player.noBanPreset;
-        preset.addEventListener("change", () => {
-          postAuctionAction("no-ban-preset", { noBanPreset: preset.checked });
-        });
+        const lock = document.createElement("button");
+        lock.type = "button";
+        lock.className = "secondary no-ban-lock";
+        setIconButton(lock, player.noBanPresetLocked ? "lock" : "lock-open",
+          player.noBanPresetLocked ? "Unlock No-Ban preset: reset when new items appear" : "Lock No-Ban preset: keep across new items");
+        lock.setAttribute("aria-pressed", String(Boolean(player.noBanPresetLocked)));
+        const save = async body => {
+          preset.disabled = true; lock.disabled = true;
+          await postAuctionAction("no-ban-preset", body);
+          if (preset.isConnected) {
+            preset.disabled = false; lock.disabled = false;
+            preset.checked = Boolean(latestRoom?.draft.auction?.player?.noBanPreset);
+          }
+        };
+        preset.addEventListener("change", () => save({ noBanPreset: preset.checked }));
+        lock.addEventListener("click", () => save({ noBanPresetLocked: !player.noBanPresetLocked }));
         presetLabel.append(preset, "Preset No-Ban");
-        auctionControls.append(presetLabel);
+        const control = document.createElement("div");
+        control.className = "auction-no-ban-control";
+        const hint = document.createElement("span");
+        hint.className = "no-ban-hint";
+        hint.textContent = player.noBanPresetLocked ? "Keeps across new items" : "Resets on new items";
+        control.append(presetLabel, lock, hint);
+        auctionControls.append(control);
       }
 
       function renderAuctionBanControls(auction) {
@@ -5166,14 +5268,19 @@
         }
 
         const button = document.createElement("button");
-        button.type = "submit";
+        button.type = player.auctionBidLocked ? "button" : "submit";
         button.textContent = player.auctionBidLocked
-          ? "Bids Locked"
+          ? (player.credits > 0 ? "Unlock Bids" : "Bids Locked at 0")
           : (auction.stage === "speaker_order_bidding" ? "Lock Speaker Order Bids" : "Lock Bids");
-        button.disabled = player.auctionBidLocked;
+        button.disabled = player.auctionBidLocked && player.credits <= 0;
+        if (player.auctionBidLocked) {
+          button.className = "secondary";
+          button.addEventListener("click", () => postAuctionAction("unlock-bid"));
+        }
         form.append(button);
         form.addEventListener("submit", (event) => {
           event.preventDefault();
+          if (player.auctionBidLocked) return;
           updateAuctionPendingBid("first", first.value);
           updateAuctionPendingBid("second", second.value || 0);
           updateAuctionPendingBid("tie", tie.value);
