@@ -16,6 +16,57 @@ function load(names, globals = {}) {
   return context;
 }
 
+test('auction action logs appear for seated players and ordinary spectators without hiding the auction', () => {
+  const elements = new Map(['#room-logs-panel', '#room-logs-title', '#room-logs-description'].map(id => [id, { classList: { toggle() {} } }]));
+  const updates = [];
+  const context = load(['renderRoomLogs'], {
+    document: { querySelector: id => elements.get(id) },
+    window: { frankenRoomLogs: { update: value => updates.push(value) } },
+    currentRole: 'seated', currentViewerId: 'player', currentRoomNumber: '123456',
+    spectatorView: { value: 'all' }, latestRoom: { revision: 7, viewer: { superSpectator: false } },
+    participantsFooter: { hidden: false }, auctionPanel: { hidden: false }, revealPanel: { hidden: true }
+  });
+  context.renderRoomLogs({ engine: 'auction', status: 'active' });
+  assert.equal(elements.get('#room-logs-panel').hidden, false);
+  assert.equal(elements.get('#room-logs-title').textContent, 'Player action log');
+  assert.equal(context.auctionPanel.hidden, false);
+  assert.equal(context.participantsFooter.hidden, false);
+  assert.equal(updates.at(-1).followLive, true);
+  assert.equal(updates.at(-1).revealPicks, false);
+  context.currentRole = 'spectator';
+  context.renderRoomLogs({ engine: 'auction', status: 'active' });
+  assert.equal(updates.at(-1).visible, true);
+  assert.equal(context.auctionPanel.hidden, false);
+  context.renderRoomLogs({ engine: 'auction', status: 'complete' });
+  assert.equal(updates.at(-1).visible, true);
+  assert.equal(updates.at(-1).revealPicks, true);
+});
+
+test('room log visibility preserves the spectator Logs view and excludes lobbies and unjoined players', () => {
+  const elements = new Map(['#room-logs-panel', '#room-logs-title', '#room-logs-description'].map(id => [id, { classList: { toggle() {} } }]));
+  let update;
+  const context = load(['renderRoomLogs'], {
+    document: { querySelector: id => elements.get(id) }, window: { frankenRoomLogs: { update: value => { update = value; } } },
+    currentRole: 'spectator', currentViewerId: 'observer', currentRoomNumber: '123456',
+    spectatorView: { value: 'logs' }, latestRoom: { revision: 1 },
+    participantsFooter: {}, auctionPanel: {}, revealPanel: {}
+  });
+  context.renderRoomLogs({ engine: 'bag-pass', status: 'active' });
+  assert.equal(update.visible, true);
+  assert.equal(update.followLive, false);
+  assert.equal(context.participantsFooter.hidden, true);
+  assert.equal(context.auctionPanel.hidden, true);
+  assert.equal(elements.get('#room-logs-title').textContent, 'Draft logs');
+  context.currentRole = 'seated';
+  context.renderRoomLogs({ engine: 'bag-pass', status: 'active' });
+  assert.equal(update.visible, false);
+  context.renderRoomLogs({ engine: 'auction', status: 'not_started' });
+  assert.equal(update.visible, false);
+  context.currentViewerId = null;
+  context.renderRoomLogs({ engine: 'auction', status: 'active' });
+  assert.equal(update.visible, false);
+});
+
 test('category sizing retains all items so wrapped types occupy the full available row', () => {
   const context = load(['setGroupBasis']);
   const values = new Map();

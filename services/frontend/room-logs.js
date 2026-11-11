@@ -69,7 +69,9 @@
       if (data.revealPicks !== state.revealPicks) { clear(); return; }
       if (draftId && draftId !== data.draftId) { clear(); load(); return; }
       draftId = data.draftId;
+      const followEnd = requestState.followLive && (!rows.size || list.scrollTop + list.clientHeight >= list.scrollHeight - 24);
       for (const event of data.events) appendEvent(event);
+      if (followEnd) list.scrollTop = list.scrollHeight;
       after = data.events.at(-1)?.sequence ?? after;
       hasMore = data.nextAfter !== null;
       loadedRevision = requestState.revision;
@@ -83,7 +85,7 @@
     } finally {
       if (controller === requestController) {
         controller = null; more.disabled = false;
-        if (succeeded && !hasMore && state?.visible && loadedRevision !== state.revision) load();
+        if (succeeded && state?.visible && ((hasMore && state.followLive) || (!hasMore && loadedRevision !== state.revision))) load();
       }
     }
   }
@@ -93,7 +95,7 @@
       if (key !== contextKey) { clear(); contextKey = key; }
       state = next;
       if (!next.visible) { controller?.abort(); controller = null; more.disabled = false; return; }
-      if (!hasMore && (loadedRevision !== next.revision || !rows.size)) load();
+      if ((!hasMore || next.followLive) && (loadedRevision !== next.revision || !rows.size)) load();
     }
   };
   more.addEventListener('click', load);

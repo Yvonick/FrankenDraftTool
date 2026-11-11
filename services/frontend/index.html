@@ -1795,12 +1795,6 @@
             <span id="spectator-visibility-status"></span>
             <div class="draft-section-tools" id="spectator-tools"></div>
           </div>
-          <section id="room-logs-panel" hidden>
-            <h3>Draft logs</h3>
-            <p id="room-logs-status" role="status"></p>
-            <ol id="room-log-events" class="room-log-events"></ol>
-            <button id="room-logs-more" class="secondary" type="button" hidden>Load more actions</button>
-          </section>
           <section class="panel draft-toolbar" id="draft-display-panel" hidden>
             <button id="hidden-items-toggle" class="secondary" type="button" aria-pressed="false" hidden>Show Hidden (0)</button>
             <h3>Draft Controls</h3>
@@ -1919,6 +1913,14 @@
           <div class="spectator-grid" id="named-spectators"></div>
         </section>
       </div>
+
+      <section class="panel" id="room-logs-panel" aria-labelledby="room-logs-title" hidden>
+        <h3 id="room-logs-title">Player action log</h3>
+        <p id="room-logs-description" class="secondary-copy" hidden>Updates live. Sealed bid amounts appear after bidding closes.</p>
+        <p id="room-logs-status" role="status"></p>
+        <ol id="room-log-events" class="room-log-events" tabindex="0" aria-label="Recorded player actions"></ol>
+        <button id="room-logs-more" class="secondary" type="button" hidden>Load more actions</button>
+      </section>
 
     </main>
 
@@ -5643,6 +5645,24 @@
         draftDisplayPanel.hidden = true;
       }
 
+      function renderRoomLogs(draft) {
+        const started = ["active", "complete"].includes(draft.status);
+        const logsOnly = currentRole === "spectator" && started && spectatorView.value === "logs";
+        const auctionLog = draft.engine === "auction" && started
+          && Boolean(currentViewerId) && ["seated", "spectator"].includes(currentRole);
+        const logsVisible = logsOnly || auctionLog;
+        const panel = document.querySelector("#room-logs-panel");
+        panel.hidden = !logsVisible;
+        panel.classList.toggle("auction-action-log", auctionLog);
+        document.querySelector("#room-logs-title").textContent = auctionLog ? "Player action log" : "Draft logs";
+        document.querySelector("#room-logs-description").hidden = !auctionLog;
+        participantsFooter.hidden = logsOnly;
+        if (logsOnly) { auctionPanel.hidden = true; revealPanel.hidden = true; }
+        window.frankenRoomLogs?.update({ visible: logsVisible, followLive: auctionLog,
+          roomNumber: currentRoomNumber, viewerId: currentViewerId, revision: latestRoom.revision,
+          status: draft.status, revealPicks: draft.status === "complete" || Boolean(latestRoom.viewer?.superSpectator) });
+      }
+
       function renderDraft(draft, priorDraftStatus = null) {
         updateDraftedVisibility(draft);
         renderSpectatorToolbar(draft);
@@ -5659,12 +5679,7 @@
         renderAuctionDraft(draft);
         renderSuperSpectatorDraft(draft);
         renderReveal(draft);
-        const logsVisible = currentRole === "spectator" && draft.status !== "not_started" && spectatorView.value === "logs";
-        document.querySelector("#room-logs-panel").hidden = !logsVisible;
-        participantsFooter.hidden = logsVisible;
-        if (logsVisible) { auctionPanel.hidden = true; revealPanel.hidden = true; }
-        window.frankenRoomLogs?.update({ visible: logsVisible, roomNumber: currentRoomNumber, viewerId: currentViewerId,
-          revision: latestRoom.revision, status: draft.status, revealPicks: draft.status === "complete" || Boolean(latestRoom.viewer?.superSpectator) });
+        renderRoomLogs(draft);
 
         if (draft.status === "active" && !draft.currentPlayer) {
           roomMessage.textContent = currentRole === "spectator" ? "Spectating draft." : roomMessage.textContent;

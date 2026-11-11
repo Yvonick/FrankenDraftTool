@@ -1,9 +1,10 @@
-# Development Status - 9 November 2026
+# Development Status - 11 November 2026
 
 ## Current Baseline
 
 - Live app: [FrankenDraft](https://franken-draft-tool.yvonichou.chatgpt.site).
-- Previous published baseline: **Sites v26**, source commit `a7834afca7240b4b6fb3ef2b27f6a958347190d6`.
+- Published baseline: **Sites v27**, source commit `53b8f88a9af778f60cd010234ace7662f09e1df8`.
+- The next update adds a live Player action log panel at the bottom of auction rooms for players and spectators. It follows new actions without moving someone who is reading older entries, loads history in bounded batches and keeps sealed bids private. **Live deployment is on hold at the owner's request.**
 - The November auction update adds searchable wildcard replacements with hover previews, an optional lock for the No-Ban preset, bid unlocking before resolution, and explicit Undo/Shuffle text buttons. The No-Ban preset defaults to unlocked and resets whenever a new draw or replacement changes the items. These actions continue to be recorded in live and archived logs.
 - Frontend and backend are fully hosted on Sites. D1 stores rooms, identities, pool metadata, presence and draft history; R2 stores immutable pool files. No Render dependency or ChatGPT login is required.
 
@@ -37,7 +38,7 @@ Only Bag Passing and Nomination Auction have playable engines. Other description
 
 ## Validation
 
-The current suite has **132 passing tests**, covering:
+The current suite has **135 passing tests**, covering:
 
 - Complete Bag Passing and Nomination Auction drafts, solo picks, type limits, automation, bidding and undo.
 - Concurrent joins/actions, permissions, secret-bid filtering, seat recovery, handoffs and credential invalidation.
@@ -47,6 +48,9 @@ The current suite has **132 passing tests**, covering:
 - Frontend selection, form-state preservation, ordering, packing, splitters, dialogs and update stability.
 - Bounded streams, slow readers, disconnect cleanup and cross-worker delivery.
 - Wildcard search, hover/keyboard selection, empty-result handling, preset resets and persistent locks, private bid editing, and a final bid racing an unlock.
+- Auction log visibility for players and spectators, automatic pagination, following new events without interrupting older-history reading, and sealed-bid filtering for player log views.
+
+The pending auction-log panel passed local browser checks for bottom-of-page placement, live lock/unlock events, revealed bid recaps and readable scrollable rows. Its production build succeeds; live deployment remains on hold.
 
 The auction update passed focused browser checks for live wildcard filtering, hover previews without accidental selection, the preset lock icon, visible Undo/Shuffle labels, and unlocking/editing/relocking a bid. The v26 baseline also passed desktop/mobile browser checks for pool ordering, selected-pool preservation, description tooltips and dialogs. The standalone build succeeds. Docker packaging has not been independently run in this environment.
 

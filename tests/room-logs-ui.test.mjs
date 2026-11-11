@@ -5,7 +5,10 @@ import vm from 'node:vm';
 
 const source = await readFile(new URL('../services/frontend/room-logs.js', import.meta.url), 'utf8');
 class Element {
-  constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.textContent = ''; this.className = ''; }
+  constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.textContent = ''; this.className = ''; this.clientHeight = 40; this._scrollTop = 0; }
+  get scrollHeight() { return this.children.length * 30; }
+  get scrollTop() { return this._scrollTop; }
+  set scrollTop(value) { this._scrollTop = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight)); }
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.children = children; }
   addEventListener(name, handler) { this.listeners[name] = handler; }
@@ -26,6 +29,28 @@ function fixture() {
 }
 const page = (events, extra={}) => ({draftId:'draft-1',events,nextAfter:null,revealPicks:true,...extra});
 const text = node => [node.textContent,...node.children.map(text)].join(' ');
+
+test('auction logs catch up through bounded pages and follow new actions only while reading the end', async()=>{
+  const ui=fixture(), live={...state,followLive:true};
+  ui.update(live);
+  ui.requests[0].finish(page([event(1),event(2),event(3)],{nextAfter:3})); await tick();
+  assert.equal(ui.requests.length,2, 'auction logs automatically load the next batch');
+  assert.match(ui.requests[1].path,/after=3/);
+  ui.requests[1].finish(page([event(4),event(5),event(6)])); await tick();
+  assert.equal(ui.list.children.length,6);
+  assert.equal(ui.list.scrollTop,ui.list.scrollHeight-ui.list.clientHeight);
+  const first=ui.list.children[0];
+  ui.list.scrollTop=0;
+  ui.update({...live,revision:2});
+  assert.match(ui.requests[2].path,/after=6/);
+  ui.requests[2].finish(page([event(7,{kind:'bids_unlocked'})])); await tick();
+  assert.equal(ui.list.scrollTop,0, 'reading older actions must not jump to the bottom');
+  assert.equal(ui.list.children[0],first);
+  ui.list.scrollTop=ui.list.scrollHeight;
+  ui.update({...live,revision:3}); ui.requests[3].finish(page([event(8)])); await tick();
+  assert.equal(ui.list.scrollTop,ui.list.scrollHeight-ui.list.clientHeight);
+  assert.match(text(ui.list),/Unlocked bids/);
+});
 
 test('room logs load only on demand and append updates without replacing the read position', async()=>{
   const ui=fixture();

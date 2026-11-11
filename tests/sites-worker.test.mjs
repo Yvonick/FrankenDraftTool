@@ -222,11 +222,19 @@ test('super spectators live auction logs never expose sealed bids but include re
   assert.equal(secret.events.at(-1).kind, 'bid_locked');
   assert.equal(secret.events.at(-1).bids, undefined);
   assert.equal(secret.events.at(-1).bidRecap, undefined);
+  for (const player of room.players) {
+    const playerLog = await f.api(`${room.base}/logs?viewerId=${player.id}`, undefined, player.token);
+    assert.equal(playerLog.events.at(-1).kind, 'bid_locked');
+    assert.equal(playerLog.events.at(-1).bids, undefined, 'player action panels must also keep sealed bids private');
+    assert.equal(playerLog.events.at(-1).bidRecap, undefined);
+  }
   const view = (await room.connect(observer, {role: 'spectator'})).room;
   assert.ok(view.draft.superSpectator.players.every(player => player.currentBids === null));
   await f.api(`${room.base}/draft/auction/bid`, {playerId: room.players[1].id, first: 3, second: 0, tie: 1}, room.players[1].token);
   const revealed = await f.api(logs + '&after=2', undefined, observer.token);
   assert.equal(revealed.events[0].bidRecap.bids.find(bid => bid.playerId === room.host.id).first, 13);
+  const playerLog = await f.api(`${room.base}/logs?viewerId=${room.host.id}&after=2`, undefined, room.host.token);
+  assert.equal(playerLog.events[0].bidRecap.bids.find(bid => bid.playerId === room.host.id).first, 13);
   await f.api(`${room.base}/draft/auction/undo`, room.auth, room.host.token);
   const undo = await f.api(logs, undefined, observer.token);
   assert.equal(undo.events.at(-1).targetSequence, 3);

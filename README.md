@@ -39,6 +39,8 @@ Only Bag Passing and Nomination Auction are playable engines. The Methods page d
 
 ## Draft Logs
 
+Auction rooms show a live **Player action log** in a scrollable panel at the bottom for players and spectators, including actions, revealed bid recaps and undo markers. The panel follows new entries when you are reading the end and preserves your position when you scroll back. Sealed bid amounts remain hidden until the auction reveals them.
+
 The unlinked `/draft-history` page lists completed drafts, action sequences and final results. Bag-draft logs can show each player's opening bag and the bag before each pick.
 
 Access requires the server-side `DRAFT_HISTORY_PASSKEY` secret. Set it through the Sites runtime environment; never commit its value or place it in frontend code. Without a non-empty value, the history API remains unavailable. This is a shared-password gate, not individual user accounts.
